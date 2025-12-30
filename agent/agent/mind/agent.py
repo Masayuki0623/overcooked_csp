@@ -16,6 +16,7 @@ from agent.TSP.Random_Agent import RandomAgent  # 追加
 from agent.TSP.TSPSolverAgent import TSPSolverAgent  # 追加
 from agent.myagent.GreedyAgent import GreedyAgent  # 追加
 from agent.myagent.CSPAgent import CSPAgent  # 追加
+from agent.myagent.TaskAgent import TaskAgent  # 追加
 def request_client(mode, llm, data):
     if mode in ['L1l']:
         return mix_L(mode, data)
@@ -1036,6 +1037,16 @@ def get_agent(sett: AgentSetting, replay: Replay):
         "TSPSolver": TSPSolverAgent,  # 追加
         "Greedy": GreedyAgent,  # 追加
         "CSP": CSPAgent,  # 追加
-
+        "Task": TaskAgent, # 追加
     }
-    return mapping[sett.mode](sett.speed) if sett.mode == "Random" else mapping[sett.mode](sett, replay)
+    if sett.mode == "Random":
+        return mapping[sett.mode](sett.speed)
+    elif sett.mode == "Task":
+        # TaskAgent needs task_name which is not in AgentSetting by default
+        # We handle TaskAgent instantiation in play_main.py directly, 
+        # but for completeness here we can return a default one or raise error
+        # However, play_main.py calls get_agent in else block, so this might not be reached for TaskAgent
+        # if play_main handles it. But let's support it if possible.
+        return mapping[sett.mode](sett.speed, replay)
+    else:
+        return mapping[sett.mode](sett, replay)

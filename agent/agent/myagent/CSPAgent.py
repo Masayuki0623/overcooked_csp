@@ -86,7 +86,8 @@ class CSPAgent:
         import heapq
         width = env.world_width
         height = env.world_height
-        grid = env.to_grid
+        # Use to_grid_a to avoid other agents
+        grid = env.to_grid_a
 
         def in_bounds(x, y):
             return 0 <= x < width and 0 <= y < height
@@ -141,7 +142,7 @@ class CSPAgent:
         res = task['res'] # e.g. ('cutboard', (x,y)) or ('pot', (x,y))
 
         self_pos = env.self_pos
-        holding = env.holding_obj(self_pos)
+        holding = env.hold
         # holding.full_name might be 'fresh onion' etc.
         holding_name = holding.full_name.lower() if holding else None
 
@@ -154,7 +155,8 @@ class CSPAgent:
             adjacents = []
             for dx, dy in [(0,1),(0,-1),(1,0),(-1,0)]:
                 nx, ny = target_pos[0]+dx, target_pos[1]+dy
-                if 0 <= nx < env.world_width and 0 <= ny < env.world_height and env.to_grid[nx][ny] == 1:
+                # Use to_grid_a
+                if 0 <= nx < env.world_width and 0 <= ny < env.world_height and env.to_grid_a[nx][ny] == 1:
                     adjacents.append((nx, ny))
             
             best_path = None
@@ -179,12 +181,12 @@ class CSPAgent:
             
             name_map = {'onion': 'FreshOnion', 'tomato': 'FreshTomato', 'lettuce': 'FreshLettuce'}
             target_cls = name_map.get(obj)
-            ing_positions = env.get_pos_by_obj_gs(target_cls)
+            ing_positions = env.get_pos_by_obj_gs(obj=target_cls)
             
             # Also check dispensers if no loose ingredients
             if not ing_positions:
                 dispenser_map = {'onion': 'FreshOnionTile', 'tomato': 'FreshTomatoTile', 'lettuce': 'FreshLettuceTile'}
-                ing_positions = env.get_pos_by_obj_gs(dispenser_map.get(obj))
+                ing_positions = env.get_pos_by_obj_gs(gs=dispenser_map.get(obj))
 
             on_cutboard = False
             for pos in ing_positions:
@@ -211,7 +213,7 @@ class CSPAgent:
             missing_ings = []
             for ing in ingredients:
                 cls_name = chopped_map.get(ing)
-                positions = env.get_pos_by_obj_gs(cls_name)
+                positions = env.get_pos_by_obj_gs(obj=cls_name)
                 if positions:
                     missing_ings.append((ing, positions[0]))
             
@@ -251,10 +253,10 @@ class CSPAgent:
                      self.current_task_idx += 1
                      return (0,0), "Task Done (Served)"
 
-                plate_positions = env.get_pos_by_obj_gs('Plate')
+                plate_positions = env.get_pos_by_obj_gs(obj='Plate')
                 if not plate_positions:
                     # Try PlateDispenser?
-                    plate_positions = env.get_pos_by_obj_gs('PlateDispenser') # Guessing name
+                    plate_positions = env.get_pos_by_obj_gs(gs='PlateTile') # Guessing name
                 
                 if not plate_positions:
                      # Fallback
@@ -589,6 +591,12 @@ class CSPAgent:
         tasks_vars = {}
         agent_intervals = []
         
+        # リソース割り当て変数の保存用
+        # task_id -> {loc: bool_var}
+        chop_res_vars = {} 
+        # order_idx -> {loc: bool_var}
+        pot_res_vars = {}
+
         resources = self._get_resources(env)
         cutboard_locs = resources['cutboards']
         pot_locs = resources['pots']
@@ -625,8 +633,11 @@ class CSPAgent:
                 tasks_vars[t['id']] = {'start': start_var, 'end': end_var, 'task': t}
                 
                 opts = []
+                chop_res_vars[t['id']] = {}
                 for c_loc in cutboard_locs:
                     is_present = model.NewBoolVar(f"pres_{t['id']}_{c_loc}")
+                    chop_res_vars[t['id']][c_loc] = is_present
+                    
                     opt_interval = model.NewOptionalIntervalVar(start_var, dur, end_var, is_present, f"opt_{t['id']}_{c_loc}")
                     cutboard_intervals[c_loc].append(opt_interval)
                     opts.append(is_present)
@@ -672,8 +683,10 @@ class CSPAgent:
             # --- Pot Allocation & Usage ---
             if cooks and serves:
                 pot_opts = []
+                pot_res_vars[o['order']] = {}
                 for p_loc in pot_locs:
                     is_present = model.NewBoolVar(f"pres_pot_{o['order']}_{p_loc}")
+                    pot_res_vars[o['order']][p_loc] = is_present
                     pot_opts.append(is_present)
                     
                     # Pot占有区間: Cook終了 〜 Serve開始
@@ -729,10 +742,32 @@ class CSPAgent:
                 
                 res = None
                 t = v['task']
-                if t['verb'] == 'chop':
-                    res = ('cutboard', '?') 
-                elif t['verb'] == 'cook':
-                    res = ('pot', '?')
+                verb = t['verb']
+                order_idx = t['order']
+                
+                if verb == 'chop':
+                    # 割り当てられたまな板を探す
+                    for loc, var in chop_res_vars.get(tid, {}).items():
+                        if solver.Value(var) == 1:
+                            res = ('cutboard', loc)
+                            break
+                    if res is None: res = ('cutboard', '?')
+                    
+                elif verb == 'cook':
+                    # 割り当てられた鍋を探す
+                    for loc, var in pot_res_vars.get(order_idx, {}).items():
+                        if solver.Value(var) == 1:
+                            res = ('pot', loc)
+                            break
+                    if res is None: res = ('pot', '?')
+                    
+                elif verb == 'serve':
+                    # 割り当てられた鍋を探す（cookと同じはず）
+                    for loc, var in pot_res_vars.get(order_idx, {}).items():
+                        if solver.Value(var) == 1:
+                            res = ('pot', loc)
+                            break
+                    if res is None: res = ('pot', '?')
                 
                 schedule.append({
                     'id': tid,

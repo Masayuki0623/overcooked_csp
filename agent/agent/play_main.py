@@ -28,13 +28,16 @@ def parse_arguments():
     )
     parser.add_argument(
         "--agent", type=str,
-        choices=['HLA', 'SMOA', 'FMOA', 'NEA','Random', 'TSPSolver', 'Greedy', 'CSP'], default='TSPSolver'  # CSPを追加
+        choices=['HLA', 'SMOA', 'FMOA', 'NEA','Random', 'TSPSolver', 'Greedy', 'CSP', 'Task'], default='TSPSolver'  # CSP, Taskを追加
+    )
+    parser.add_argument(
+        "--task", type=str, default=None, help="Task to execute for TaskAgent (e.g. chop_tomato)"
     )
 
     return parser.parse_args()
 
 
-def init_env_replay(map_name, agent_name):
+def init_env_replay(map_name, agent_name, task_name=None):
     map_set = MapSetting(**MAP_SETTINGS[map_name])
     agent_set = AgentSetting(agent_name, speed=2.5 if map_name != 'quick' else 3.5)
     replay = Replay()
@@ -66,6 +69,9 @@ def init_env_replay(map_name, agent_name):
     elif agent_name == "CSP":
         ai = CSPAgent(agent_set.speed, replay)
         # CSPエージェントの初期化（将来的に制約の構築などを行う）
+    elif agent_name == "Task":
+        from agent.myagent.TaskAgent import TaskAgent
+        ai = TaskAgent(agent_set.speed, replay, task_name=task_name)
     else:
         ai = get_agent(agent_set, replay)
     game = GamePlay(env, replay, agent_set)
@@ -81,7 +87,7 @@ if __name__ == '__main__':
     arglist = parse_arguments()
 
     # initialize replay
-    game, env, replay = init_env_replay(arglist.map, arglist.agent)
+    game, env, replay = init_env_replay(arglist.map, arglist.agent, arglist.task)
 
     # play
     ok = game.on_execute()
