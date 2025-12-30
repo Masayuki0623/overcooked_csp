@@ -114,12 +114,12 @@ class TSPSolverAgent:
         self.tasks = tasks_all  # 必要ならメンバ変数に保存
 
         # プリントデバッグ追加
-        print("=== 現在のレシピから生成されたタスク列 ===")
-        for i, tasks in enumerate(tasks_all):
-            print(f"レシピ{i+1}:")
-            for t in tasks:
-                print("  ", t)
-        print("=====================================")
+        # print("=== 現在のレシピから生成されたタスク列 ===")
+        # for i, tasks in enumerate(tasks_all):
+        #     print(f"レシピ{i+1}:")
+        #     for t in tasks:
+        #         print("  ", t)
+        # print("=====================================")
 
         return tasks_all
 
@@ -139,14 +139,14 @@ class TSPSolverAgent:
         }
         # 1. 食材タイルの座標リスト
         ingredient_tile_pos = env.get_pos_by_obj_gs(gs=tile_map[ingredient])
-        print(f"{ingredient} tile positions:", ingredient_tile_pos)
+        # print(f"{ingredient} tile positions:", ingredient_tile_pos)
         # 2. まな板の座標リスト
         cutboard_pos = env.get_pos_by_obj_gs(gs="Cutboard")
-        print(f"cutboard positions: {cutboard_pos}")
+        # print(f"cutboard positions: {cutboard_pos}")
         # 3. 特定の場所
         special_places = [(2,3), (2,4), (2,5)]
         target_place = special_places[order_idx]
-        print(f"target place for order {order_idx+1}: {target_place}")
+        # print(f"target place for order {order_idx+1}: {target_place}")
 
         # 4. それぞれの前後左右の空きマス
         def get_adjacent_free(pos_list, label):
@@ -156,7 +156,7 @@ class TSPSolverAgent:
                     nx, ny = x+dx, y+dy
                     if 0 <= nx < width and 0 <= ny < height and grid[nx][ny] == 1:
                         free.append((nx, ny))
-            print(f"adjacent free for {label}: {free}")
+            # print(f"adjacent free for {label}: {free}")
             return list(set(free))
 
         ing_adj = get_adjacent_free(ingredient_tile_pos, f"{ingredient}_tile")
@@ -175,17 +175,17 @@ class TSPSolverAgent:
                     move1 = self.dist_matrix[idx_start][idx_mid] if self.dist_matrix[idx_start][idx_mid] is not None else float('inf')
                     move2 = self.dist_matrix[idx_mid][idx_end] if self.dist_matrix[idx_mid][idx_end] is not None else float('inf')
                     total = move1 + move2
-                    print(f"  path: {start}->{mid}->{end} | move1: {move1}, move2: {move2}, total_move: {total}")
+                    # print(f"  path: {start}->{mid}->{end} | move1: {move1}, move2: {move2}, total_move: {total}")
                     if total < min_cost:
                         min_cost = total
                         best_path = (start, mid, end)
 
         # 6. コスト合計
         if min_cost == float('inf'):
-            print(f"経路が見つかりません: {ingredient}, 注文{order_idx+1}")
+            # print(f"経路が見つかりません: {ingredient}, 注文{order_idx+1}")
             return None
         cost = min_cost + config.CHOPPING_NUM_STEPS + 1 + 1  # +chop +置く +食材取得
-        print(f"[DEBUG] chop {ingredient} (注文{order_idx+1}) 最短経路: {best_path}, 最短移動コスト: {min_cost}, chopping: {config.CHOPPING_NUM_STEPS}, 置く:1, 取得:1, 合計コスト: {cost}")
+        # print(f"[DEBUG] chop {ingredient} (注文{order_idx+1}) 最短経路: {best_path}, 最短移動コスト: {min_cost}, chopping: {config.CHOPPING_NUM_STEPS}, 置く:1, 取得:1, 合計コスト: {cost}")
         return cost
 
     def get_chop_task_positions(self, env, ingredient, order_idx):
@@ -274,12 +274,12 @@ class TSPSolverAgent:
         idx_from = self.get_index(*from_pos, width)
         idx_to = self.get_index(*to_pos, width)
         move = self.dist_matrix[idx_from][idx_to]
-        print(f"[DEBUG] cook order{order_idx+1}: 特定の場所{from_pos}→コンロ{to_pos}, 移動コスト:{move}")
+        # print(f"[DEBUG] cook order{order_idx+1}: 特定の場所{from_pos}→コンロ{to_pos}, 移動コスト:{move}")
         if move is None:
-            print(f"経路が見つかりません: cook, 注文{order_idx+1}")
+            # print(f"経路が見つかりません: cook, 注文{order_idx+1}")
             return None
         cost = move + 1 + 1  # インタラクト2回
-        print(f"[DEBUG] cook order{order_idx+1}: 合計コスト: 移動{move} + インタラクト2 = {cost}")
+        # print(f"[DEBUG] cook order{order_idx+1}: 合計コスト: 移動{move} + インタラクト2 = {cost}")
         return cost
 
     def calc_serve_task_cost(self, env, order_idx):
@@ -296,13 +296,13 @@ class TSPSolverAgent:
         idx_delivery = self.get_index(*delivery_pos, width)
         move1 = self.dist_matrix[idx_plate][idx_pot]
         move2 = self.dist_matrix[idx_pot][idx_delivery]
-        print(f"[DEBUG] serve order{order_idx+1}: 皿{plate_pos}→鍋{pot_places[order_idx]} 移動コスト:{move1}")
-        print(f"[DEBUG] serve order{order_idx+1}: 鍋{pot_places[order_idx]}→配膳{delivery_pos} 移動コスト:{move2}")
+        # print(f"[DEBUG] serve order{order_idx+1}: 皿{plate_pos}→鍋{pot_places[order_idx]} 移動コスト:{move1}")
+        # print(f"[DEBUG] serve order{order_idx+1}: 鍋{pot_places[order_idx]}→配膳{delivery_pos} 移動コスト:{move2}")
         if move1 is None or move2 is None:
-            print(f"経路が見つかりません: serve, 注文{order_idx+1}")
+            # print(f"経路が見つかりません: serve, 注文{order_idx+1}")
             return None
         cost = move1 + 1 + move2 + 1 + 1  # 皿取得+料理取得+配膳
-        print(f"[DEBUG] serve order{order_idx+1}: 合計コスト: 皿→鍋{move1} + 皿取得1 + 鍋→配膳{move2} + 料理取得1 + 配膳1 = {cost}")
+        # print(f"[DEBUG] serve order{order_idx+1}: 合計コスト: 皿→鍋{move1} + 皿取得1 + 鍋→配膳{move2} + 料理取得1 + 配膳1 = {cost}")
         return cost
 
     def generate_task_graph(self, env):
@@ -322,7 +322,7 @@ class TSPSolverAgent:
                 elif verb == "serve":
                     cost = self.calc_serve_task_cost(env, order_idx)
                     graph.append(((verb, obj, order_idx), cost))
-        print("[DEBUG] タスクグラフ:", graph)
+        # print("[DEBUG] タスクグラフ:", graph)
         return graph
 
 # 使用例

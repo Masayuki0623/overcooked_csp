@@ -5,6 +5,7 @@ from gym_cooking.utils.gui import popup_text
 from gym_cooking.utils.replay import Replay
 from agent.executor.low import EnvState
 from agent.mind.agent import get_agent, AgentSetting
+from agent.myagent.HumanPredictor import HumanPredictor
 
 # helpers
 import pygame
@@ -43,6 +44,7 @@ class GamePlay(Game):
 
         self.idx_human = 1
         self.ai = get_agent(self.agent_set, self.replay)
+        self.predictor = HumanPredictor(env)
 
         # concurrent control variables
         self._q_control = queue.Queue()  # receive
@@ -134,6 +136,17 @@ class GamePlay(Game):
                              event_history=info['event_history'],
                              time=info['current_time'],
                              chg_grid=info['chg_grid'])
+                
+                # Human Prediction
+                task_name, cost, all_costs = self.predictor.predict(e, self.idx_human)
+                print(f"[Human Prediction] Task: {task_name}, Remaining Cost: {cost}")
+                if all_costs:
+                    # Sort by cost
+                    all_costs.sort(key=lambda x: x[1])
+                    # Print top 5 or all
+                    costs_str = ", ".join([f"{t}: {c}" for t, c in all_costs])
+                    print(f"   All costs: {costs_str}")
+
                 if action_dict[self.sim_agents[0].name] is not None:
                     self._q_ai.put(('Env', {"EnvState": dcopy(e)}))
                 action_dict = {agent.name: None for agent in self.sim_agents}
