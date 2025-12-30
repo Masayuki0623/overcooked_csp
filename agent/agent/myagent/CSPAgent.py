@@ -34,6 +34,10 @@ class CSPAgent:
         self.w_cook = 2
         self.w_serve = 5
         
+        # 実行状態管理
+        self.current_task_idx = 0
+        self.holding_state = None # 以前の持ち物状態（変化検知用）
+        
         print("[CSPAgent] 初期化完了 - 現在はランダム行動")
 
     def act(self, observation):
@@ -73,6 +77,193 @@ class CSPAgent:
                 best_len = length
                 best_dir = (dx, dy)
         return best_dir
+
+    def astar_path(self, env, start, goal):
+        """
+        A*探索で経路を求める。
+        戻り値: [(x,y), ...] のリスト（startを含まず、goalを含む）。到達不能ならNone。
+        """
+        import heapq
+        width = env.world_width
+        height = env.world_height
+        grid = env.to_grid
+
+        def in_bounds(x, y):
+            return 0 <= x < width and 0 <= y < height
+
+        def walkable(x, y):
+            return in_bounds(x, y) and grid[x][y] == 1
+
+        def heuristic(a, b):
+            return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+        open_set = []
+        heapq.heappush(open_set, (0, start))
+        came_from = {}
+        g_score = {start: 0}
+        f_score = {start: heuristic(start, goal)}
+
+        while open_set:
+            _, current = heapq.heappop(open_set)
+            if current == goal:
+                path = []
+                while current in came_from:
+                    path.append(current)
+                    current = came_from[current]
+                path.reverse()
+                return path
+
+            cx, cy = current
+            for dx, dy in [(0,1),(0,-1),(1,0),(-1,0)]:
+                nx, ny = cx+dx, cy+dy
+                if not walkable(nx, ny):
+                    continue
+                neighbor = (nx, ny)
+                tentative_g = g_score[current] + 1
+                if neighbor not in g_score or tentative_g < g_score[neighbor]:
+                    came_from[neighbor] = current
+                    g_score[neighbor] = tentative_g
+                    f_score[neighbor] = tentative_g + heuristic(neighbor, goal)
+                    heapq.heappush(open_set, (f_score[neighbor], neighbor))
+        return None
+
+    def execute_step(self, env):
+        """
+        スケジュールに従って行動を決定する。
+        戻り値: (dx, dy), chat_message
+        """
+        if not hasattr(self, 'schedule') or not self.schedule or self.current_task_idx >= len(self.schedule):
+            return (0, 0), "No Task"
+
+        task = self.schedule[self.current_task_idx]
+        tid = task['id']
+        verb, obj, order_idx = tid
+        res = task['res'] # e.g. ('cutboard', (x,y)) or ('pot', (x,y))
+
+        self_pos = env.self_pos
+        holding = env.holding_obj(self_pos)
+        # holding.full_name might be 'fresh onion' etc.
+        holding_name = holding.full_name.lower() if holding else None
+
+        # Helper to move to target
+        def move_to(target_pos):
+            dist = abs(self_pos[0] - target_pos[0]) + abs(self_pos[1] - target_pos[1])
+            if dist == 1:
+                return (target_pos[0] - self_pos[0], target_pos[1] - self_pos[1])
+            
+            adjacents = []
+            for dx, dy in [(0,1),(0,-1),(1,0),(-1,0)]:
+                nx, ny = target_pos[0]+dx, target_pos[1]+dy
+                if 0 <= nx < env.world_width and 0 <= ny < env.world_height and env.to_grid[nx][ny] == 1:
+                    adjacents.append((nx, ny))
+            
+            best_path = None
+            min_len = float('inf')
+            
+            for adj in adjacents:
+                path = self.astar_path(env, self_pos, adj)
+                if path and len(path) < min_len:
+                    min_len = len(path)
+                    best_path = path
+            
+            if best_path:
+                next_step = best_path[0]
+                return (next_step[0] - self_pos[0], next_step[1] - self_pos[1])
+            return (0, 0)
+
+        if verb == 'chop':
+            cutboard_pos = res[1]
+            # obj e.g. 'onion'
+            if holding_name and obj in holding_name:
+                return move_to(cutboard_pos), f"Putting {obj} on cutboard"
+            
+            name_map = {'onion': 'FreshOnion', 'tomato': 'FreshTomato', 'lettuce': 'FreshLettuce'}
+            target_cls = name_map.get(obj)
+            ing_positions = env.get_pos_by_obj_gs(target_cls)
+            
+            # Also check dispensers if no loose ingredients
+            if not ing_positions:
+                dispenser_map = {'onion': 'FreshOnionTile', 'tomato': 'FreshTomatoTile', 'lettuce': 'FreshLettuceTile'}
+                ing_positions = env.get_pos_by_obj_gs(dispenser_map.get(obj))
+
+            on_cutboard = False
+            for pos in ing_positions:
+                if pos == cutboard_pos:
+                    on_cutboard = True
+                    break
+            
+            if on_cutboard:
+                return move_to(cutboard_pos), f"Chopping {obj}"
+            else:
+                if not ing_positions:
+                    self.current_task_idx += 1
+                    return (0,0), "Task Done (Chopped)"
+                
+                target_ing = min(ing_positions, key=lambda p: abs(p[0]-self_pos[0]) + abs(p[1]-self_pos[1]))
+                return move_to(target_ing), f"Fetching {obj}"
+
+        elif verb == 'cook':
+            pot_pos = res[1]
+            ingredients = obj.replace(' soup', '').split('-')
+            
+            chopped_map = {'onion': 'ChoppedOnion', 'tomato': 'ChoppedTomato', 'lettuce': 'ChoppedLettuce'}
+            
+            missing_ings = []
+            for ing in ingredients:
+                cls_name = chopped_map.get(ing)
+                positions = env.get_pos_by_obj_gs(cls_name)
+                if positions:
+                    missing_ings.append((ing, positions[0]))
+            
+            if not missing_ings and not holding_name:
+                self.current_task_idx += 1
+                return (0,0), "Task Done (Cook)"
+            
+            if holding_name and 'chopped' in holding_name:
+                return move_to(pot_pos), f"Putting {holding_name} in pot"
+            
+            if missing_ings:
+                target_ing_name, target_pos = missing_ings[0]
+                return move_to(target_pos), f"Fetching {target_ing_name}"
+
+        elif verb == 'serve':
+            pot_pos = res[1]
+            if holding_name == 'plate':
+                return move_to(pot_pos), "Scooping soup"
+            elif holding_name and 'soup' in holding_name:
+                # Delivery pos (6,3) or find Star
+                delivery_pos = (6,3)
+                # Check if delivered (holding nothing)
+                # But we are holding soup now.
+                # If we interact with delivery, we lose soup.
+                return move_to(delivery_pos), "Delivering"
+            else:
+                # Check if we just delivered (holding nothing)
+                # If we were serving and now holding nothing, task done?
+                # But we might be at start of task (holding nothing).
+                # We need to distinguish start vs end.
+                # If we are at delivery pos and holding nothing, maybe done?
+                # Or just check if we need plate.
+                
+                # If we are near delivery and holding nothing, assume done.
+                dist_delivery = abs(self_pos[0]-6) + abs(self_pos[1]-3)
+                if dist_delivery <= 1:
+                     self.current_task_idx += 1
+                     return (0,0), "Task Done (Served)"
+
+                plate_positions = env.get_pos_by_obj_gs('Plate')
+                if not plate_positions:
+                    # Try PlateDispenser?
+                    plate_positions = env.get_pos_by_obj_gs('PlateDispenser') # Guessing name
+                
+                if not plate_positions:
+                     # Fallback
+                     plate_positions = [(6,6)]
+
+                target_plate = min(plate_positions, key=lambda p: abs(p[0]-self_pos[0]) + abs(p[1]-self_pos[1]))
+                return move_to(target_plate), "Fetching plate"
+
+        return (0,0), "Idle"
 
     def __call__(self, env):
         """
@@ -126,29 +317,8 @@ class CSPAgent:
             self.prev_task_ids = current_task_ids
             self.initialized = True
 
-        # 直進ランナーの行動決定
-        # 単一エージェントを想定（最初のsim_agent）。複数対応は拡張可能。
-        # EnvState 仕様に合わせて現在エージェント位置を取得
-        current_loc = env.self_pos
-
-        # 直前の方向が塞がれる/Noneなら再計算
-        if self.run_direction is None:
-            self.run_direction = self._longest_walkable_direction(env, current_loc)
-        else:
-            width = env.world_width
-            height = env.world_height
-            grid = env.to_grid
-            nx = current_loc[0] + self.run_direction[0]
-            ny = current_loc[1] + self.run_direction[1]
-            if not (0 <= nx < width and 0 <= ny < height and grid[nx][ny] == 1):
-                self.run_direction = self._longest_walkable_direction(env, current_loc)
-
-        action_vec = self.run_direction
-        
-        # 行動をタプル形式に変換
-        move = action_vec
-        chat = ""
-        
+        # スケジュール実行
+        move, chat = self.execute_step(env)
         return move, chat
 
     # ============ OR-Tools: 0-1選択問題（予算内で重み最大化） ============
