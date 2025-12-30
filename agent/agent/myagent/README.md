@@ -65,3 +65,45 @@
 
 *   **結合オブジェクトの扱い**: カウンター上で複数の食材が重なっている場合（Merged Object）、その中身 (`contents`) を走査して、特定の食材（例: `ChoppedOnion`）が含まれているかを正しく判定します。
 *   **Plateのエラー回避**: `contents` 内に `Plate` オブジェクトが含まれている場合、`get_state()` メソッドを持たないため、属性チェックを行ってエラーを回避しています。
+
+---
+
+# CSP Solver Implementation
+
+`agent/agent/myagent/csp/` および `CSPAgent.py` に実装されている制約充足問題（CSP）ソルバーについての説明です。Google OR-Tools を使用して実装されています。
+
+## ファイル構成
+
+*   `agent/agent/myagent/csp/model.py`: `CSPModel` クラス。OR-Tools の `cp_model` のラッパーで、変数や制約の追加を簡易化します。
+*   `agent/agent/myagent/csp/solver.py`: `solve` 関数。`CSPModel` を受け取り、`cp_model.CpSolver` を実行して結果を返します。
+*   `agent/agent/myagent/CSPAgent.py`: `CSPAgent` クラス。環境情報からタスクを生成し、CSPモデルを構築して解くロジックを含みます。
+
+## 現在の実装: 0-1 選択問題 (Knapsack with Precedence)
+
+`CSPAgent.solve_csp_knapsack_with_ortools` メソッドにて、タスク選択の最適化問題が実装されています。
+
+### 問題設定
+限られた時間（予算）内で、タスク間の依存関係を守りつつ、重要度の高いタスクをできるだけ多く実行する計画を立てます。
+
+### 変数
+*   `x_{verb}_{obj}_{order}_{idx}` (Bool): 各タスクを実行するかどうか（1: 実行, 0: しない）。
+
+### 制約
+1.  **予算制約 (Budget Constraint)**:
+    *   選択されたタスクの所要時間の合計が、設定された予算 (`budget_frames`) 以下であること。
+    *   $\sum (duration_t \times x_t) \le Budget$
+
+2.  **前後関係制約 (Precedence Constraint)**:
+    *   **Cookタスクの条件**: Cookタスクを実行するには、その料理に必要な全てのChopタスクが実行されている必要がある。
+        *   $x_{cook} \le x_{chop\_i}$ (全ての $i$ について)
+    *   **Serveタスクの条件**: Serveタスクを実行するには、対応するCookタスクが実行されている必要がある。
+        *   $x_{serve} \le x_{cook}$
+
+### 目的関数
+*   **重み付き利益の最大化**:
+    *   各タスクの「重み (`weight`) $\times$ 所要時間 (`duration`)」の合計を最大化します。
+    *   Maximize $\sum (weight_t \times duration_t \times x_t)$
+    *   重み設定（デフォルト）: Serve(5) > Cook(2) > Chop(1)
+
+## 今後の拡張予定
+現在は「どのタスクを行うか」の選択のみを行っていますが、今後は「いつ、誰が、どの順番で行うか」というスケジューリング問題（RCPSPなど）へと拡張していく基盤となります。

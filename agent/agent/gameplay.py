@@ -145,7 +145,7 @@ class GamePlay(Game):
                     all_costs.sort(key=lambda x: x[1])
                     # Print top 5 or all
                     costs_str = ", ".join([f"{t}: {c}" for t, c in all_costs])
-                    print(f"   All costs: {costs_str}")
+                    #print(f"   All costs: {costs_str}")
 
                 if action_dict[self.sim_agents[0].name] is not None:
                     self._q_ai.put(('Env', {"EnvState": dcopy(e)}))

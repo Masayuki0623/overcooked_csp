@@ -78,26 +78,46 @@ class CSPAgent:
         """
         環境から呼ばれるメイン関数
         """
-        if not self.initialized:
-            print("[CSPAgent] 初回起動 - CSP問題の構築準備")
-            # 初回にタスクコストを出力
-            try:
-                self.print_task_costs(env)
-            except Exception as e:
-                print(f"[CSPAgent] タスクコスト出力中に例外: {e}")
+        # 常にタスクリストを構築して変化をチェック
+        current_orders = self._build_order_tasks(env)
+        current_task_ids = set()
+        for o in current_orders:
+            for t in o['tasks']:
+                current_task_ids.add(t['id'])
+
+        if not hasattr(self, 'prev_task_ids'):
+            self.prev_task_ids = set()
+
+        added = current_task_ids - self.prev_task_ids
+        removed = self.prev_task_ids - current_task_ids
+
+        # 変化があった場合、または初回の場合
+        if added or removed or not self.initialized:
+            if self.initialized: # 初回以外なら差分を表示
+                print(f"\n[Task Update] Time: {env.time}")
+                if added:
+                    print(f"  (+) Added: {added}")
+                if removed:
+                    print(f"  (-) Removed: {removed}")
+                print("  -> Re-calculating Schedule...")
+
             # 簡易CSPスケジューリング（選択問題：A解釈）
             try:
-                self.schedule = self.solve_csp_selection(env)
+                # solve_csp_selection内でタスクリスト全体も表示される
+                self.schedule = self.solve_csp_selection(env, orders=current_orders)
                 self._print_schedule(self.schedule)
             except Exception as e:
                 print(f"[CSPAgent] CSPスケジュール中に例外: {e}")
+            
             # OR-Tools による制約最適化（0-1選択の例）
-            try:
-                selected = self.solve_csp_knapsack_with_ortools(env)
-                self._print_selection(selected)
-            except Exception as e:
-                print(f"[CSPAgent] OR-Tools選択最適化中に例外: {e}")
-            # 将来ここでCSP問題を構築
+            # こちらは重いかもしれないので、必要に応じてコメントアウト
+            # try:
+            #     selected = self.solve_csp_knapsack_with_ortools(env)
+            #     self._print_selection(selected)
+            # except Exception as e:
+            #     print(f"[CSPAgent] OR-Tools選択最適化中に例外: {e}")
+            
+            self.prev_task_ids = current_task_ids
             self.initialized = True
 
         # 直進ランナーの行動決定
@@ -272,38 +292,102 @@ class CSPAgent:
     def _build_order_tasks(self, env):
         """
         注文ごとにタスク列を作成（chop群→cook→serve）。各タスクにID、所要時間、資源候補を付与。
+        環境の状態（Chopped食材の有無、Potの中身）を考慮し、不要なタスクは生成しない。
         """
+        # 1. 環境内のChopped食材をカウント
+        available_chopped = {} # {'Tomato': count, ...}
+        
+        # 2. Potの中身を確認
+        pot_states = [] # [{'names': ['Tomato', 'Lettuce'], 'obj': obj, 'used': False}, ...]
+
+        # env.world.get_object_list() を使用 -> env.world_all (EnvState) or env.world.get_object_list() (Environment)
+        if hasattr(env, 'world_all'):
+            all_objects = env.world_all
+        elif hasattr(env, 'world'):
+            all_objects = env.world.get_object_list()
+        else:
+            all_objects = []
+
+        # Potの場所を取得 (PotはGridSquare)
+        pot_locs = []
+        for o in all_objects:
+             if getattr(o, 'name', '') == 'Pot':
+                 pot_locs.append(o.location)
+
+        for obj in all_objects:
+            # Objectクラスのインスタンスかどうかを判定（簡易的）
+            if type(obj).__name__ == 'Object':
+                # Chopped check: is_chopped() がTrue かつ 単一の食材
+                if hasattr(obj, 'is_chopped') and obj.is_chopped() and len(obj.contents) == 1 and not obj.is_held:
+                    food_name = obj.contents[0].name
+                    available_chopped[food_name] = available_chopped.get(food_name, 0) + 1
+                
+                # Pot check: Potの場所にあるObject
+                if obj.location in pot_locs:
+                    # Potの中身
+                    c_names = sorted([c.name for c in obj.contents])
+                    pot_states.append({'names': c_names, 'obj': obj, 'used': False})
+
         resources = self._get_resources(env)
         orders = []
         order_idx = 0
-        for order_tuple in env.order.current_orders:
+        
+        current_orders = env.order.current_orders if hasattr(env, 'order') and hasattr(env.order, 'current_orders') else []
+
+        for order_tuple in current_orders:
             goal = order_tuple[0]
             name = getattr(goal, 'full_name', '').lower()
-            ings = [ing for ing in ['lettuce','onion','tomato'] if ing in name]
-            if not ings:
+            ings_lower = [ing for ing in ['lettuce','onion','tomato'] if ing in name]
+            if not ings_lower:
                 order_idx += 1
                 continue
-            soup_name = '-'.join(ings) + ' soup'
+            
+            # 照合用にCapitalize
+            ings_cap = [ing.capitalize() for ing in ings_lower]
+            
+            soup_name = '-'.join(ings_lower) + ' soup'
             tasks=[]
+            
+            # Cookタスクが必要か判定
+            sorted_ings = sorted(ings_cap)
+            cook_needed = True
+            
+            # Potの状態と照合
+            for ps in pot_states:
+                if not ps['used'] and ps['names'] == sorted_ings:
+                    ps['used'] = True
+                    cook_needed = False
+                    break
+
             # chops
-            for ing in ings:
-                dur = self._task_duration_frames(env, 'chop', ing, order_idx)
+            for ing in ings_cap:
+                # 既にPotに入っているならChopも不要
+                if not cook_needed:
+                    continue
+
+                # 環境にChopped食材があるか確認
+                if available_chopped.get(ing, 0) > 0:
+                    available_chopped[ing] -= 1
+                    continue # Skip chop task
+
+                dur = self._task_duration_frames(env, 'chop', ing.lower(), order_idx)
                 if dur is None: continue
                 tasks.append({
-                    'id': ('chop', ing, order_idx),
-                    'verb':'chop','obj':ing,'order':order_idx,
+                    'id': ('chop', ing.lower(), order_idx),
+                    'verb':'chop','obj':ing.lower(),'order':order_idx,
                     'dur':dur,'weight':self._task_weight('chop'),
                     'res_candidates': [('cutboard', r) for r in resources['cutboards']],
                 })
             # cook
-            dur = self._task_duration_frames(env, 'cook', soup_name, order_idx)
-            if dur is not None:
-                tasks.append({
-                    'id': ('cook', soup_name, order_idx),
-                    'verb':'cook','obj':soup_name,'order':order_idx,
-                    'dur':dur,'weight':self._task_weight('cook'),
-                    'res_candidates': [('pot', r) for r in resources['pots']],
-                })
+            if cook_needed:
+                dur = self._task_duration_frames(env, 'cook', soup_name, order_idx)
+                if dur is not None:
+                    tasks.append({
+                        'id': ('cook', soup_name, order_idx),
+                        'verb':'cook','obj':soup_name,'order':order_idx,
+                        'dur':dur,'weight':self._task_weight('cook'),
+                        'res_candidates': [('pot', r) for r in resources['pots']],
+                    })
             # serve
             dur = self._task_duration_frames(env, 'serve', soup_name, order_idx)
             if dur is not None:
@@ -313,17 +397,29 @@ class CSPAgent:
                     'dur':dur,'weight':self._task_weight('serve'),
                     'res_candidates': [],
                 })
-            orders.append({'order':order_idx,'ingredients':ings,'tasks':tasks})
+            orders.append({'order':order_idx,'ingredients':ings_lower,'tasks':tasks})
             order_idx += 1
         return orders
 
-    def solve_csp_selection(self, env):
+    def solve_csp_selection(self, env, orders=None):
         """
         選択問題（A解釈）：予算300フレーム内でスケジュール可能なタスク集合を選び、未選択コスト（重み*dur）の合計を最小化。
         近似解法：順序制約と資源占有を守りつつ、serveを優先し、予算まで積み上げる。
         戻り値：スケジュールリスト [{id, start, end, res}]
         """
-        orders = self._build_order_tasks(env)
+        if orders is None:
+            orders = self._build_order_tasks(env)
+        
+        # タスク列の表示
+        print("\n--- Generated Tasks (Filtered by Environment State) ---")
+        for o in orders:
+            print(f"Order {o['order']} (Ings: {o['ingredients']}):")
+            if not o['tasks']:
+                print("  (No tasks needed)")
+            for t in o['tasks']:
+                print(f"  - {t['id']}: dur={t['dur']}, res={t['res_candidates']}")
+        print("-------------------------------------------------------\n")
+
         budget = self.budget_frames
         # 資源タイムライン（各IDごとに終了時刻）
         res_timeline = {'cutboard':{}, 'pot':{}}
