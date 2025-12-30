@@ -1,11 +1,11 @@
 import random
+from ortools.sat.python import cp_model
 from .csp.model import CSPModel
 from .csp.solver import solve as solve_csp
 
 class CSPAgent:
     """
     CSP(制約充足問題)ベースのエージェント
-    現在は簡易的にランダムな行動を行う
     """
     def __init__(self, speed=2.5, replay=None):
         self.speed = speed
@@ -104,10 +104,16 @@ class CSPAgent:
             # 簡易CSPスケジューリング（選択問題：A解釈）
             try:
                 # solve_csp_selection内でタスクリスト全体も表示される
-                self.schedule = self.solve_csp_selection(env, orders=current_orders)
+                # self.schedule = self.solve_csp_selection(env, orders=current_orders)
+                
+                # 新しいスケジューリングメソッドを使用
+                self.schedule = self.solve_csp_scheduling(env, orders=current_orders)
+                
                 self._print_schedule(self.schedule)
             except Exception as e:
                 print(f"[CSPAgent] CSPスケジュール中に例外: {e}")
+                import traceback
+                traceback.print_exc()
             
             # OR-Tools による制約最適化（0-1選択の例）
             # こちらは重いかもしれないので、必要に応じてコメントアウト
@@ -270,13 +276,14 @@ class CSPAgent:
                 return None
             return int(min_total + 8 + 1 + 1)
         elif verb == 'cook':
-            # 特定場所→鍋 距離 + 調理時間（秒→フレーム） + インタラクト2（~2フレーム）
+            # 特定場所→鍋 距離 + インタラクト2（~2フレーム）
+            # 150フレームの調理時間はタスク実行時間には含めず、スケジューリングの制約として扱う
             special_places=[(3,2),(4,2),(5,2)]
             pot_places=[(3,5),(4,5),(5,5)]
             d=self.astar_distance(env,special_places[order_idx%3], pot_places[order_idx%3])
             if d is None: return None
-            cook_frames = 15 * self.fps
-            return int(d + cook_frames + 2)
+            # cook_frames = 15 * self.fps # Removed
+            return int(d + 2)
         elif verb == 'serve':
             plate=(6,6); pot_places=[(3,5),(4,5),(5,5)]; delivery=(6,3)
             d1=self.astar_distance(env, plate, pot_places[order_idx%3])
@@ -400,6 +407,174 @@ class CSPAgent:
             orders.append({'order':order_idx,'ingredients':ings_lower,'tasks':tasks})
             order_idx += 1
         return orders
+
+    def solve_csp_scheduling(self, env, orders):
+        """
+        OR-Tools CP-SAT を用いたスケジューリング（Makespan最小化）。
+        """
+        print(f"[CSPAgent] Solving CSP Scheduling for {len(orders)} orders...")
+        model = cp_model.CpModel()
+        
+        # 1. 変数定義
+        tasks_vars = {}
+        agent_intervals = []
+        
+        resources = self._get_resources(env)
+        cutboard_locs = resources['cutboards']
+        pot_locs = resources['pots']
+        
+        cutboard_intervals = {loc: [] for loc in cutboard_locs}
+        pot_intervals = {loc: [] for loc in pot_locs}
+        
+        all_end_vars = []
+        # Horizon (十分大きな値)
+        # 150フレームの待機時間があるため、タスク数が多いと時間は伸びる。
+        # 予算制約ではなく物理的な限界として大きめに設定する。
+        horizon = 10000 
+        
+        total_tasks_count = 0
+
+        for o in orders:
+            chops = [t for t in o['tasks'] if t['verb'] == 'chop']
+            cooks = [t for t in o['tasks'] if t['verb'] == 'cook']
+            serves = [t for t in o['tasks'] if t['verb'] == 'serve']
+            
+            total_tasks_count += len(chops) + len(cooks) + len(serves)
+
+            # --- Chop Tasks ---
+            chop_ends = []
+            for t in chops:
+                dur = int(t['dur'])
+                start_var = model.NewIntVar(0, horizon, f"start_{t['id']}")
+                end_var = model.NewIntVar(0, horizon, f"end_{t['id']}")
+                agent_interval = model.NewIntervalVar(start_var, dur, end_var, f"interval_{t['id']}")
+                agent_intervals.append(agent_interval)
+                all_end_vars.append(end_var)
+                chop_ends.append(end_var)
+                
+                tasks_vars[t['id']] = {'start': start_var, 'end': end_var, 'task': t}
+                
+                opts = []
+                for c_loc in cutboard_locs:
+                    is_present = model.NewBoolVar(f"pres_{t['id']}_{c_loc}")
+                    opt_interval = model.NewOptionalIntervalVar(start_var, dur, end_var, is_present, f"opt_{t['id']}_{c_loc}")
+                    cutboard_intervals[c_loc].append(opt_interval)
+                    opts.append(is_present)
+                model.Add(sum(opts) == 1)
+
+            # --- Cook Task ---
+            cook_end = None
+            cook_start = None
+            if cooks:
+                t = cooks[0]
+                dur = int(t['dur'])
+                start_var = model.NewIntVar(0, horizon, f"start_{t['id']}")
+                end_var = model.NewIntVar(0, horizon, f"end_{t['id']}")
+                agent_interval = model.NewIntervalVar(start_var, dur, end_var, f"interval_{t['id']}")
+                agent_intervals.append(agent_interval)
+                all_end_vars.append(end_var)
+                
+                cook_start = start_var
+                cook_end = end_var
+                tasks_vars[t['id']] = {'start': start_var, 'end': end_var, 'task': t}
+                
+                for ce in chop_ends:
+                    model.Add(ce <= start_var)
+
+            # --- Serve Task ---
+            serve_start = None
+            if serves:
+                t = serves[0]
+                dur = int(t['dur'])
+                start_var = model.NewIntVar(0, horizon, f"start_{t['id']}")
+                end_var = model.NewIntVar(0, horizon, f"end_{t['id']}")
+                agent_interval = model.NewIntervalVar(start_var, dur, end_var, f"interval_{t['id']}")
+                agent_intervals.append(agent_interval)
+                all_end_vars.append(end_var)
+                
+                serve_start = start_var
+                tasks_vars[t['id']] = {'start': start_var, 'end': end_var, 'task': t}
+                
+                if cook_end is not None:
+                    model.Add(cook_end <= start_var)
+                    model.Add(start_var >= cook_end + 150)
+
+            # --- Pot Allocation & Usage ---
+            if cooks and serves:
+                pot_opts = []
+                for p_loc in pot_locs:
+                    is_present = model.NewBoolVar(f"pres_pot_{o['order']}_{p_loc}")
+                    pot_opts.append(is_present)
+                    
+                    # Pot占有区間: Cook終了 〜 Serve開始
+                    # Cookタスク自体は「鍋に入れる」だけなので、その終了時刻から占有が始まる
+                    # Serve開始時に鍋から取り出すので、Serve開始まで占有
+                    
+                    # duration = serve_start - cook_end
+                    duration_var = model.NewIntVar(0, horizon, f"dur_pot_{o['order']}_{p_loc}")
+                    model.Add(duration_var == serve_start - cook_end)
+                    
+                    # OptionalInterval
+                    # start=cook_end, size=duration_var, end=serve_start
+                    pot_interval = model.NewOptionalIntervalVar(
+                        cook_end, duration_var, serve_start, 
+                        is_present, 
+                        f"opt_pot_{o['order']}_{p_loc}"
+                    )
+                    pot_intervals[p_loc].append(pot_interval)
+                
+                model.Add(sum(pot_opts) == 1)
+
+        print(f"[CSPAgent] Total tasks to schedule: {total_tasks_count}")
+        if total_tasks_count == 0:
+            print("[CSPAgent] No tasks to schedule.")
+            return []
+
+        # 2. 資源制約 (NoOverlap)
+        model.AddNoOverlap(agent_intervals)
+        
+        for loc, intervals in cutboard_intervals.items():
+            model.AddNoOverlap(intervals)
+            
+        for loc, intervals in pot_intervals.items():
+            model.AddNoOverlap(intervals)
+
+        # 3. 目的関数: Makespan最小化
+        makespan = model.NewIntVar(0, horizon, 'makespan')
+        if all_end_vars:
+            model.AddMaxEquality(makespan, all_end_vars)
+        model.Minimize(makespan)
+
+        # 4. 解く
+        solver = cp_model.CpSolver()
+        status = solver.Solve(model)
+        print(f"[CSPAgent] Solver Status: {solver.StatusName(status)}")
+
+        schedule = []
+        if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+            print(f"[CSPAgent] Optimal Makespan: {solver.ObjectiveValue()}")
+            for tid, v in tasks_vars.items():
+                start_val = solver.Value(v['start'])
+                end_val = solver.Value(v['end'])
+                
+                res = None
+                t = v['task']
+                if t['verb'] == 'chop':
+                    res = ('cutboard', '?') 
+                elif t['verb'] == 'cook':
+                    res = ('pot', '?')
+                
+                schedule.append({
+                    'id': tid,
+                    'start': start_val,
+                    'end': end_val,
+                    'res': res
+                })
+            schedule.sort(key=lambda x: x['start'])
+        else:
+            print(f"[CSPAgent] No solution found. Status: {solver.StatusName(status)}")
+            
+        return schedule
 
     def solve_csp_selection(self, env, orders=None):
         """
