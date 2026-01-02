@@ -322,20 +322,26 @@ class TaskAgent:
                 return (0,0), "No suitable table found"
 
         # 1. Check Cutboards
+        # Relaxed: Check ALL cutboards for the finished product (ChoppedX) to ensure pickup
+        all_cutboards = env.get_pos_by_obj_gs(gs='Cutboard')
+        for loc in all_cutboards:
+            obj = env.pos_obj[loc]
+            if obj and chopped_ing_name in obj.full_name:
+                # Chopped ingredient on cutboard -> Pick it up
+                print(f"  [Check Cutboard] Found {chopped_ing_name} at {loc}")
+                if not holding:
+                    return self.move_to(env, loc), f"Picking up {chopped_ing_name}"
+
+        # For Chopping/Placing Fresh, respect assignment
         if assigned_cutboard:
             cutboard_locs = [assigned_cutboard]
         else:
-            cutboard_locs = env.get_pos_by_obj_gs(gs='Cutboard')
+            cutboard_locs = all_cutboards
         
         for loc in cutboard_locs:
             obj = env.pos_obj[loc]
             if obj:
-                if chopped_ing_name in obj.full_name:
-                    # Chopped ingredient on cutboard -> Pick it up
-                    print(f"  [Check Cutboard] Found {chopped_ing_name} at {loc}")
-                    if not holding:
-                        return self.move_to(env, loc), f"Picking up {chopped_ing_name}"
-                elif target_ing_name in obj.full_name or chopping_ing_name in obj.full_name:
+                if target_ing_name in obj.full_name or chopping_ing_name in obj.full_name:
                     # Fresh or Chopping ingredient on cutboard -> Chop it
                     print(f"  [Check Cutboard] Found {obj.full_name} at {loc}")
                     return self.move_to(env, loc), f"Chopping {ing_name}"

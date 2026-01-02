@@ -21,9 +21,6 @@ class CSPAgent:
         # 環境側でフレームスキップがある場合にコストへ反映するための係数
         self.frames_per_action = 1  # デフォルト: 毎フレーム入力可能
 
-        # ランナー方向（直進用）: None なら再計算
-        self.run_direction = None  # (dx, dy)
-
         # FPS（フレーム→秒換算用）。環境側は10fps
         self.fps = 10
         # 期限（MAX_ORDER_LENGTH_SECONDS）をフレームへ
@@ -41,236 +38,6 @@ class CSPAgent:
         
         self.task_agent = TaskAgent()
         print("[CSPAgent] 初期化完了 - 現在はランダム行動")
-
-    def act(self, observation):
-        """
-        ランダムな行動を返す（簡易実装）
-        """
-        actions = ['up', 'down', 'left', 'right', 'stay']
-        return random.choice(actions)
-
-    # 直進ランナー: 現在位置から最も長く進める方向を選ぶ
-    def _longest_walkable_direction(self, env, loc):
-        """
-        locから上下左右へ、壁に当たるまでの連続歩数を数え、最大の方向を返す。
-        同値なら優先順: up, right, down, left。
-        戻り値: (dx, dy)
-        """
-        width = env.world_width
-        height = env.world_height
-        grid = env.to_grid
-
-        def walkable(x, y):
-            return 0 <= x < width and 0 <= y < height and grid[x][y] == 1
-
-        directions = [(0,1), (1,0), (0,-1), (-1,0)]
-        best_dir = (0,0)
-        best_len = -1
-        for dx, dy in directions:
-            x, y = loc
-            length = 0
-            while True:
-                nx, ny = x + dx, y + dy
-                if not walkable(nx, ny):
-                    break
-                length += 1
-                x, y = nx, ny
-            if length > best_len:
-                best_len = length
-                best_dir = (dx, dy)
-        return best_dir
-
-    def astar_path(self, env, start, goal):
-        """
-        A*探索で経路を求める。
-        戻り値: [(x,y), ...] のリスト（startを含まず、goalを含む）。到達不能ならNone。
-        """
-        import heapq
-        width = env.world_width
-        height = env.world_height
-        # Use to_grid_a to avoid other agents
-        grid = env.to_grid_a
-
-        def in_bounds(x, y):
-            return 0 <= x < width and 0 <= y < height
-
-        def walkable(x, y):
-            return in_bounds(x, y) and grid[x][y] == 1
-
-        def heuristic(a, b):
-            return abs(a[0] - b[0]) + abs(a[1] - b[1])
-
-        open_set = []
-        heapq.heappush(open_set, (0, start))
-        came_from = {}
-        g_score = {start: 0}
-        f_score = {start: heuristic(start, goal)}
-
-        while open_set:
-            _, current = heapq.heappop(open_set)
-            if current == goal:
-                path = []
-                while current in came_from:
-                    path.append(current)
-                    current = came_from[current]
-                path.reverse()
-                return path
-
-            cx, cy = current
-            for dx, dy in [(0,1),(0,-1),(1,0),(-1,0)]:
-                nx, ny = cx+dx, cy+dy
-                if not walkable(nx, ny):
-                    continue
-                neighbor = (nx, ny)
-                tentative_g = g_score[current] + 1
-                if neighbor not in g_score or tentative_g < g_score[neighbor]:
-                    came_from[neighbor] = current
-                    g_score[neighbor] = tentative_g
-                    f_score[neighbor] = tentative_g + heuristic(neighbor, goal)
-                    heapq.heappush(open_set, (f_score[neighbor], neighbor))
-        return None
-
-    def _move_to(self, env, target_pos):
-        self_pos = env.self_pos
-        dist = abs(self_pos[0] - target_pos[0]) + abs(self_pos[1] - target_pos[1])
-        if dist == 1:
-            return (target_pos[0] - self_pos[0], target_pos[1] - self_pos[1])
-        
-        adjacents = []
-        for dx, dy in [(0,1),(0,-1),(1,0),(-1,0)]:
-            nx, ny = target_pos[0]+dx, target_pos[1]+dy
-            # Use to_grid_a
-            if 0 <= nx < env.world_width and 0 <= ny < env.world_height and env.to_grid_a[nx][ny] == 1:
-                adjacents.append((nx, ny))
-        
-        best_path = None
-        min_len = float('inf')
-        
-        for adj in adjacents:
-            path = self.astar_path(env, self_pos, adj)
-            if path and len(path) < min_len:
-                min_len = len(path)
-                best_path = path
-        
-        if best_path:
-            next_step = best_path[0]
-            return (next_step[0] - self_pos[0], next_step[1] - self_pos[1])
-        return (0, 0)
-
-    def _process_chop(self, env, ing_name, cutboard_pos):
-        # Check completion
-        chopped_ing_name = f"Chopped{ing_name.capitalize()}"
-        chopped_positions = env.get_pos_by_obj_gs(obj=chopped_ing_name)
-        cutboards = env.get_pos_by_obj_gs(gs='Cutboard')
-        
-        # If we are not holding it, and it exists somewhere not on a cutboard, assume done.
-        if not env.hold and chopped_positions:
-            for pos in chopped_positions:
-                if pos not in cutboards:
-                    # Found chopped ingredient on a table (or floor/counter)
-                    self.current_task_idx += 1
-                    return (0,0), f"Task {ing_name} already done (Found on table)"
-
-        # Delegate to TaskAgent
-        return self.task_agent.process_chop_task(env, ing_name.capitalize(), assigned_cutboard=cutboard_pos)
-
-    def _process_cook(self, env, soup_name, pot_pos):
-        parts = soup_name.replace(' soup', '').split('-')
-        ingredients = [p.capitalize() for p in parts]
-        
-        # Check if pot is already cooking/cooked
-        pot_obj = env.pos_obj[pot_pos]
-        if pot_obj:
-            holding = env.hold
-            holding_name = holding.full_name if holding else None
-            
-            # Construct target name to check holding
-            ingredients.sort()
-            target_name = "-".join([f"Chopped{i}" for i in ingredients])
-            
-            is_holding_target = holding_name == target_name
-            
-            if not is_holding_target:
-                self.current_task_idx += 1
-                return (0,0), "Task cook already done (Pot occupied)"
-
-        action, reason = self.task_agent.process_cook_task(env, ingredients, assigned_pot=pot_pos)
-        
-        if "Putting ingredients in Pot" in reason:
-             dist = abs(env.self_pos[0]-pot_pos[0]) + abs(env.self_pos[1]-pot_pos[1])
-             if dist == 1:
-                 self.current_task_idx += 1
-                 return action, reason + " (Done)"
-                 
-        return action, reason
-
-    def _process_serve(self, env, soup_name, pot_pos):
-        parts = soup_name.replace(' soup', '').split('-')
-        ingredients = [p.capitalize() for p in parts]
-        
-        # Delegate to TaskAgent
-        action, reason = self.task_agent.process_serve_task(env, ingredients, assigned_pot=pot_pos)
-        
-        if "Delivering" in reason:
-             # Check if adjacent to ANY delivery
-             deliveries = env.get_pos_by_obj_gs(gs='Delivery')
-             for d_pos in deliveries:
-                 dist = abs(env.self_pos[0]-d_pos[0]) + abs(env.self_pos[1]-d_pos[1])
-                 if dist == 1:
-                     self.current_task_idx += 1
-                     return action, reason + " (Done)"
-        
-        return action, reason
-
-    def execute_step(self, env):
-        """
-        スケジュールに従って行動を決定する。
-        戻り値: (dx, dy), chat_message
-        """
-        if not hasattr(self, 'schedule') or not self.schedule or self.current_task_idx >= len(self.schedule):
-            return (0, 0), "No Task"
-
-        task = self.schedule[self.current_task_idx]
-        tid = task['id']
-        verb, obj, order_idx = tid
-        res = task['res'] # e.g. ('cutboard', (x,y)) or ('pot', (x,y))
-
-        # Construct Task Name
-        task_name = None
-        if verb == 'chop':
-            task_name = f"chop_{obj}"
-            self.task_agent.assigned_cutboard = res[1]
-            self.task_agent.assigned_pot = None
-        elif verb == 'cook':
-            # obj is soup name e.g. "tomato-onion soup"
-            parts = obj.replace(' soup', '').split('-')
-            task_name = f"cook_{'_'.join(parts)}"
-            self.task_agent.assigned_pot = res[1]
-            self.task_agent.assigned_cutboard = None
-        elif verb == 'serve':
-            parts = obj.replace(' soup', '').split('-')
-            task_name = f"serve_{'_'.join(parts)}"
-            self.task_agent.assigned_pot = res[1]
-            self.task_agent.assigned_cutboard = None
-            # serve needs plate and delivery? CSP schedule might not have them all in 'res'.
-            # Assuming default plate/delivery logic in TaskAgent unless specified.
-        
-        if task_name:
-            self.task_agent.task_name = task_name
-            action, reason = self.task_agent(env)
-            
-            # Check completion
-            if "Done" in reason or "done" in reason:
-                self.current_task_idx += 1
-                # Reset assignments
-                self.task_agent.assigned_cutboard = None
-                self.task_agent.assigned_pot = None
-                self.task_agent.assigned_plate = None
-                self.task_agent.assigned_serve_loc = None
-            
-            return action, reason
-
-        return (0,0), "Idle"
 
     def __call__(self, env):
         """
@@ -313,23 +80,65 @@ class CSPAgent:
                 import traceback
                 traceback.print_exc()
             
-            # OR-Tools による制約最適化（0-1選択の例）
-            # こちらは重いかもしれないので、必要に応じてコメントアウト
-            # try:
-            #     selected = self.solve_csp_knapsack_with_ortools(env)
-            #     self._print_selection(selected)
-            # except Exception as e:
-            #     print(f"[CSPAgent] OR-Tools選択最適化中に例外: {e}")
-            
             self.prev_task_ids = current_task_ids
             self.initialized = True
 
         # スケジュール実行
-        move, chat = self.execute_step(env)
-        return move, chat
+        if not hasattr(self, 'schedule') or not self.schedule or self.current_task_idx >= len(self.schedule):
+            return (0, 0), "No Task"
+
+        task = self.schedule[self.current_task_idx]
+        tid = task['id']
+        verb, obj, order_idx = tid
+        res = task['res'] # e.g. ('cutboard', (x,y)) or ('pot', (x,y))
+
+        # Construct Task Name
+        task_name = None
+        if verb == 'chop':
+            task_name = f"chop_{obj}"
+            # self.task_agent.assigned_cutboard = res[1]
+            # self.task_agent.assigned_pot = None
+        elif verb == 'cook':
+            # obj is soup name e.g. "tomato-onion soup"
+            parts = obj.replace(' soup', '').split('-')
+            task_name = f"cook_{'_'.join(parts)}"
+            # self.task_agent.assigned_pot = res[1]
+            # self.task_agent.assigned_cutboard = None
+        elif verb == 'serve':
+            parts = obj.replace(' soup', '').split('-')
+            task_name = f"serve_{'_'.join(parts)}"
+            # self.task_agent.assigned_pot = res[1]
+            # self.task_agent.assigned_cutboard = None
+            # serve needs plate and delivery? CSP schedule might not have them all in 'res'.
+            # Assuming default plate/delivery logic in TaskAgent unless specified.
+        
+        if task_name:
+            self.task_agent.task_name = task_name
+            # Debug: Print what we are delegating
+            # print(f"[CSPAgent] Delegating {task_name} to TaskAgent. Res: {res}")
+            
+            action, reason = self.task_agent(env)
+            
+            # Debug: Print result
+            # print(f"  -> TaskAgent returned: {reason}")
+
+            # Check completion
+            if "Done" in reason or "done" in reason:
+                print(f"[CSPAgent] Task {task_name} DONE. Moving to next.")
+                self.current_task_idx += 1
+                # Reset assignments
+                self.task_agent.assigned_cutboard = None
+                self.task_agent.assigned_pot = None
+                self.task_agent.assigned_plate = None
+                self.task_agent.assigned_serve_loc = None
+            
+            return action, reason
+
+        return (0,0), "Idle"
 
     # ============ OR-Tools: 0-1選択問題（予算内で重み最大化） ============
     def solve_csp_knapsack_with_ortools(self, env):
+
         """
         0-1選択問題（Knapsack with precedence）：
         - 各タスクに Bool 変数 x_t を割当
@@ -411,26 +220,50 @@ class CSPAgent:
         Cutboard複数、Pot複数に対応。戻り値は辞書。
         """
         cutboards = env.get_pos_by_obj_gs(gs="Cutboard")
-        pots = [(3,5), (4,5), (5,5)]  # 現行レベルの鍋座標（必要なら環境から取得へ）
+        pots = env.get_pos_by_obj_gs(gs="Pot")
+        deliveries = env.get_pos_by_obj_gs(gs="Delivery")
+        plates = env.get_pos_by_obj_gs(gs="Plate") # Plate object
+        if not plates:
+            plates = env.get_pos_by_obj_gs(gs="PlateTile") # Dispenser
+
         return {
             'cutboards': cutboards,
             'pots': pots,
-            'delivery': (6,3),
-            'plate': (6,6),
+            'delivery': deliveries[0] if deliveries else (0,0),
+            'plate': plates[0] if plates else (0,0),
         }
 
     def _task_duration_frames(self, env, verb, obj, order_idx):
         """
         タスク所要フレーム数（移動含む）を返す。serveは重めの重みで扱うためベースは同じでも目的関数で重み付け。
         """
+        resources = self._get_resources(env)
+        
+        def get_nearest(start_pos, candidates):
+            if not candidates: return None
+            if not start_pos: return candidates[0]
+            # Simple Manhattan distance for heuristic
+            return min(candidates, key=lambda p: abs(p[0]-start_pos[0]) + abs(p[1]-start_pos[1]))
+
         if verb == 'chop':
             # 距離 + CHOP 8 + 置く1 + 取得1 + 置く1
             # 距離は食材→まな板→特定場所の最短合計
             tile_map = {"lettuce": "FreshLettuceTile", "onion": "FreshOnionTile", "tomato": "FreshTomatoTile"}
-            ing_pos = env.get_pos_by_obj_gs(gs=tile_map[obj])
-            cutboard_pos = env.get_pos_by_obj_gs(gs="Cutboard")
-            special_places = [(2,3), (2,4), (2,5)]
-            target = special_places[order_idx % len(special_places)]
+            ing_pos_list = env.get_pos_by_obj_gs(gs=tile_map.get(obj, ""))
+            if not ing_pos_list: return None
+            ing_pos = ing_pos_list[0] # Assume first dispenser
+
+            cutboard_pos_list = resources['cutboards']
+            if not cutboard_pos_list: return None
+            
+            # Find nearest cutboard to ingredient
+            cutboard_pos = get_nearest(ing_pos, cutboard_pos_list)
+            
+            # Find nearest counter to cutboard (to place chopped item)
+            counters = env.get_pos_by_obj_gs(gs="Counter")
+            if not counters: return None
+            target = get_nearest(cutboard_pos, counters)
+
             def adj(pos_list):
                 width = env.world_width; height = env.world_height; grid = env.to_grid
                 out=[]
@@ -440,31 +273,62 @@ class CSPAgent:
                         if 0<=nx<width and 0<=ny<height and grid[nx][ny]==1:
                             out.append((nx,ny))
                 return list(set(out))
-            ing_adj=adj(ing_pos); cut_adj=adj(cutboard_pos); tgt_adj=adj([target])
+            
+            # Calculate path: Ing -> Cutboard -> Counter
+            # Note: astar_distance takes (start, goal). We need adjacent cells.
+            # Simplified: just use center-to-center astar for estimation, or use existing adj logic
+            
+            ing_adj=adj([ing_pos]); cut_adj=adj([cutboard_pos]); tgt_adj=adj([target])
+            
             min_total=None
+            # Try to find valid path
             for s in ing_adj:
                 for m in cut_adj:
+                    d1 = self.astar_distance(env, s, m)
+                    if d1 is None: continue
+                    
                     for e in tgt_adj:
-                        d1=self.astar_distance(env,s,m); d2=self.astar_distance(env,m,e)
-                        if d1 is None or d2 is None: continue
-                        tot=d1+d2
-                        if min_total is None or tot<min_total: min_total=tot
+                        d2 = self.astar_distance(env, m, e)
+                        if d2 is None: continue
+                        
+                        tot = d1 + d2
+                        if min_total is None or tot < min_total:
+                            min_total = tot
+            
             if min_total is None:
                 return None
             return int(min_total + 8 + 1 + 1 + 1)
+
         elif verb == 'cook':
-            # 特定場所→鍋 距離 + インタラクト2（~2フレーム）
-            # 150フレームの調理時間はタスク実行時間には含めず、スケジューリングの制約として扱う
-            special_places=[(3,2),(4,2),(5,2)]
-            pot_places=[(3,5),(4,5),(5,5)]
-            d=self.astar_distance(env,special_places[order_idx%3], pot_places[order_idx%3])
+            # Counter (Chopped) -> Pot
+            # We don't know exactly which counter, so assume nearest counter to Pot
+            pot_pos_list = resources['pots']
+            if not pot_pos_list: return None
+            
+            # Use order_idx to distribute pots if multiple available? 
+            # For duration estimation, just pick one (e.g. first or nearest to center)
+            pot_pos = pot_pos_list[order_idx % len(pot_pos_list)]
+            
+            counters = env.get_pos_by_obj_gs(gs="Counter")
+            if not counters: return None
+            start_pos = get_nearest(pot_pos, counters)
+            
+            d = self.astar_distance(env, start_pos, pot_pos)
             if d is None: return None
-            # cook_frames = 15 * self.fps # Removed
             return int(d + 2)
+
         elif verb == 'serve':
-            plate=(6,6); pot_places=[(3,5),(4,5),(5,5)]; delivery=(6,3)
-            d1=self.astar_distance(env, plate, pot_places[order_idx%3])
-            d2=self.astar_distance(env, pot_places[order_idx%3], delivery)
+            # Plate -> Pot -> Delivery
+            plate_pos = resources['plate']
+            pot_pos_list = resources['pots']
+            delivery_pos = resources['delivery']
+            
+            if not pot_pos_list: return None
+            pot_pos = pot_pos_list[order_idx % len(pot_pos_list)]
+            
+            d1 = self.astar_distance(env, plate_pos, pot_pos)
+            d2 = self.astar_distance(env, pot_pos, delivery_pos)
+            
             if d1 is None or d2 is None: return None
             return int(d1 + d2 + 3)
         else:
@@ -497,14 +361,19 @@ class CSPAgent:
         for o in all_objects:
              if getattr(o, 'name', '') == 'Pot':
                  pot_locs.append(o.location)
+        
+        # Cutboardの場所を取得
+        cutboard_locs = env.get_pos_by_obj_gs(gs="Cutboard")
 
         for obj in all_objects:
             # Objectクラスのインスタンスかどうかを判定（簡易的）
             if type(obj).__name__ == 'Object':
                 # Chopped check: is_chopped() がTrue かつ 単一の食材
+                # 【修正】まな板の上にあるChopped食材は「完了」とみなさない（タスクを継続させてテーブルへ移動させるため）
                 if hasattr(obj, 'is_chopped') and obj.is_chopped() and len(obj.contents) == 1 and not obj.is_held:
-                    food_name = obj.contents[0].name
-                    available_chopped[food_name] = available_chopped.get(food_name, 0) + 1
+                    if obj.location not in cutboard_locs:
+                        food_name = obj.contents[0].name
+                        available_chopped[food_name] = available_chopped.get(food_name, 0) + 1
                 
                 # Pot check: Potの場所にあるObject
                 if obj.location in pot_locs:
@@ -899,7 +768,28 @@ class CSPAgent:
             return 0 <= x < width and 0 <= y < height
 
         def walkable(x, y):
+            # Relaxed walkable check: allow goal to be non-walkable (e.g. interaction target)
+            # But A* usually finds path to adjacent.
+            # Here we assume start/goal are walkable OR we want path to adjacent?
+            # If goal is a counter/pot (grid=0), we can't step ON it.
+            # So we should find path to adjacent of goal.
             return in_bounds(x, y) and grid[x][y] == 1
+
+        # If goal is not walkable (e.g. object), we need to find path to adjacent
+        original_goal = goal
+        if not walkable(goal[0], goal[1]):
+            # Find nearest walkable adjacent
+            adjacents = []
+            for dx, dy in [(0,1),(0,-1),(1,0),(-1,0)]:
+                nx, ny = goal[0]+dx, goal[1]+dy
+                if walkable(nx, ny):
+                    adjacents.append((nx, ny))
+            
+            if not adjacents:
+                return None
+            
+            # Pick closest adjacent to start
+            goal = min(adjacents, key=lambda p: abs(p[0]-start[0]) + abs(p[1]-start[1]))
 
         def heuristic(a, b):
             return abs(a[0] - b[0]) + abs(a[1] - b[1])
