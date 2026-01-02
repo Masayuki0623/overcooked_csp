@@ -93,69 +93,113 @@ class TaskAgent:
 
     def __call__(self, env):
         if self.task_name == 'chop_tomato':
-            return self.chop_tomato(env)
+            return self.process_chop_task(env, 'Tomato')
+        elif self.task_name == 'chop_onion':
+            return self.process_chop_task(env, 'Onion')
         return (0,0), f"Unknown Task: {self.task_name}"
 
-    def chop_tomato(self, env):
+    def process_chop_task(self, env, ing_name):
         self_pos = env.self_pos
         holding = env.hold
-        holding_name = holding.full_name.lower() if holding else None
+        holding_name = holding.full_name if holding else None
         
-        print(f"[TaskAgent] Pos: {self_pos}, Holding: {holding_name}")
+        target_ing_name = f"Fresh{ing_name}"
+        chopping_ing_name = f"Chopping{ing_name}"
+        chopped_ing_name = f"Chopped{ing_name}"
+        
+        # 0. If holding Chopped Ingredient -> Place on Table
+        if holding_name and chopped_ing_name in holding_name:
+            # Find target table
+            # Look for other chopped ingredient
+            other_ing = 'Onion' if ing_name == 'Tomato' else 'Tomato'
+            other_chopped = f"Chopped{other_ing}"
+            
+            target_table = None
+            
+            # First priority: Table with other ingredient
+            for pos, obj in env.pos_obj.items():
+                if obj and other_chopped in obj.full_name:
+                    print(f"  [Place] Found {other_chopped} at {pos}")
+                    target_table = pos
+                    break
+            
+            # Second priority: Empty Counter
+            if not target_table:
+                counters = env.get_pos_by_obj_gs(gs='Counter')
+                best_dist = float('inf')
+                for c_pos in counters:
+                    if env.pos_obj[c_pos] is None:
+                        dist = abs(self_pos[0]-c_pos[0]) + abs(self_pos[1]-c_pos[1])
+                        if dist < best_dist:
+                            best_dist = dist
+                            target_table = c_pos
+            
+            if target_table:
+                print(f"  -> Placing {chopped_ing_name} at {target_table}")
+                return self.move_to(env, target_table), f"Placing {chopped_ing_name}"
+            else:
+                return (0,0), "No suitable table found"
 
-        # 1. Check for Tomato on Cutboard
-        # Cutboard is a GridSquare, so use gs='Cutboard'
+        # 1. Check Cutboards
         cutboard_locs = env.get_pos_by_obj_gs(gs='Cutboard')
-        target_cutboard = None
         
         for loc in cutboard_locs:
-            # Check object at this location
             obj = env.pos_obj[loc]
             if obj:
-                print(f"  [Check Cutboard] {loc}: Found {obj.full_name}")
-                if 'tomato' in obj.full_name.lower():
-                    # Found tomato on cutboard
-                    if 'chopped' in obj.full_name.lower():
-                        continue # Already chopped
-                    target_cutboard = loc
-                    break
+                if chopped_ing_name in obj.full_name:
+                    # Chopped ingredient on cutboard -> Pick it up
+                    print(f"  [Check Cutboard] Found {chopped_ing_name} at {loc}")
+                    if not holding:
+                        return self.move_to(env, loc), f"Picking up {chopped_ing_name}"
+                elif target_ing_name in obj.full_name or chopping_ing_name in obj.full_name:
+                    # Fresh or Chopping ingredient on cutboard -> Chop it
+                    print(f"  [Check Cutboard] Found {obj.full_name} at {loc}")
+                    return self.move_to(env, loc), f"Chopping {ing_name}"
         
-        if target_cutboard:
-            print(f"  -> Chopping at {target_cutboard}")
-            # Go chop it
-            return self.move_to(env, target_cutboard), "Chopping Tomato"
-
-        # 2. If no tomato on cutboard, do we have one?
-        if holding_name and 'tomato' in holding_name:
+        # 2. If holding Fresh Ingredient -> Place on Cutboard
+        if holding_name and target_ing_name in holding_name:
             # Find empty cutboard
             best_cb = None
             min_dist = float('inf')
             for loc in cutboard_locs:
-                if env.pos_obj[loc] is None: # Empty
+                if env.pos_obj[loc] is None:
                     dist = abs(self_pos[0]-loc[0]) + abs(self_pos[1]-loc[1])
                     if dist < min_dist:
                         min_dist = dist
                         best_cb = loc
             
             if best_cb:
-                print(f"  -> Placing at {best_cb}")
-                return self.move_to(env, best_cb), "Placing Tomato"
+                print(f"  -> Placing {target_ing_name} on Cutboard {best_cb}")
+                return self.move_to(env, best_cb), f"Placing {target_ing_name}"
             else:
-                print("  -> No Empty Cutboard")
                 return (0,0), "No Empty Cutboard"
 
-        # 3. Fetch Tomato
-        # FreshTomato is an Object, so use obj='FreshTomato' (default positional)
-        tomato_locs = env.get_pos_by_obj_gs(obj='FreshTomato')
-        # Also check dispensers if no loose tomatoes
-        if not tomato_locs:
-            # FreshTomatoTile is a GridSquare, so use gs='FreshTomatoTile'
-            tomato_locs = env.get_pos_by_obj_gs(gs='FreshTomatoTile')
-            
-        if tomato_locs:
-            target = min(tomato_locs, key=lambda p: abs(p[0]-self_pos[0]) + abs(p[1]-self_pos[1]))
-            print(f"  -> Fetching Tomato from {target}")
-            return self.move_to(env, target), "Fetching Tomato"
-            
-        print("  -> No Tomato Found")
-        return (0,0), "No Tomato Found"
+        # 3. Fetch Fresh Ingredient
+        target_loc = None
+        min_dist = float('inf')
+        
+        # Check all objects for Fresh Ingredient
+        for pos, obj in env.pos_obj.items():
+            if obj and target_ing_name in obj.full_name:
+                dist = abs(self_pos[0]-pos[0]) + abs(self_pos[1]-pos[1])
+                if dist < min_dist:
+                    min_dist = dist
+                    target_loc = pos
+        
+        if not target_loc:
+            # Check dispensers
+            dispenser_name = f"{target_ing_name}Tile" # e.g. FreshTomatoTile
+            dispensers = env.get_pos_by_obj_gs(gs=dispenser_name)
+            if dispensers:
+                # Pick closest
+                for d_pos in dispensers:
+                    dist = abs(self_pos[0]-d_pos[0]) + abs(self_pos[1]-d_pos[1])
+                    if dist < min_dist:
+                        min_dist = dist
+                        target_loc = d_pos
+
+        if target_loc:
+            print(f"  -> Fetching {target_ing_name} from {target_loc}")
+            return self.move_to(env, target_loc), f"Fetching {target_ing_name}"
+
+        return (0,0), f"No {target_ing_name} found"

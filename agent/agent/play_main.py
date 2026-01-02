@@ -39,7 +39,8 @@ def parse_arguments():
 
 def init_env_replay(map_name, agent_name, task_name=None):
     map_set = MapSetting(**MAP_SETTINGS[map_name])
-    agent_set = AgentSetting(agent_name, speed=2.5 if map_name != 'quick' else 3.5)
+    # agent_set = AgentSetting(agent_name, speed=2.5 if map_name != 'quick' else 3.5)
+    agent_set = AgentSetting(agent_name, speed=10)
     replay = Replay()
 
     env = OvercookedEnvironment(map_set)
