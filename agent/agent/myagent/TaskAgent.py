@@ -1,4 +1,5 @@
 import heapq
+from gym_cooking.utils.core import mergeable
 
 class TaskAgent:
     def __init__(self, speed=2.5, replay=None, task_name=None):
@@ -291,8 +292,44 @@ class TaskAgent:
             target_table = None
             
             if assigned_counter:
-                target_table = assigned_counter
-                print(f"  [Place] Using assigned counter: {target_table}")
+                # Check if assigned counter is empty OR mergeable
+                counter_obj = env.pos_obj.get(assigned_counter)
+                can_place = False
+                
+                if counter_obj is None:
+                    can_place = True
+                elif mergeable(holding, counter_obj):
+                    can_place = True
+                    print(f"  [Place] Assigned counter {assigned_counter} has {counter_obj.full_name}, but is mergeable.")
+                
+                if can_place:
+                    target_table = assigned_counter
+                    print(f"  [Place] Using assigned counter: {target_table}")
+                else:
+                    print(f"  [Place] Assigned counter {assigned_counter} is occupied/not mergeable. Searching nearby...")
+                    # Search for nearest empty counter to assigned_counter
+                    counters = env.get_pos_by_obj_gs(gs='Counter')
+                    best_dist = float('inf')
+                    best_c = None
+                    for c_pos in counters:
+                        # Check if empty OR mergeable
+                        c_obj = env.pos_obj.get(c_pos)
+                        is_valid = False
+                        if c_obj is None:
+                            is_valid = True
+                        elif mergeable(holding, c_obj):
+                            is_valid = True
+                        
+                        if is_valid:
+                            # Distance from assigned_counter
+                            dist = abs(assigned_counter[0]-c_pos[0]) + abs(assigned_counter[1]-c_pos[1])
+                            if dist < best_dist:
+                                best_dist = dist
+                                best_c = c_pos
+                    
+                    if best_c:
+                        target_table = best_c
+                        print(f"  [Place] Found nearby valid counter at {target_table} (dist {best_dist})")
             
             # Second priority: Empty Counter (if no assignment or assignment invalid/occupied?)
             # For now, if assigned, stick to it.

@@ -669,7 +669,8 @@ class CSPAgent:
                     'id': tid,
                     'start': start_val,
                     'end': end_val,
-                    'res': res
+                    'res': res,
+                    'assigned_counter': t.get('assigned_counter')
                 })
             schedule.sort(key=lambda x: x['start'])
         else:
