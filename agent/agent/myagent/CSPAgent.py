@@ -585,18 +585,18 @@ class CSPAgent:
                     pot_res_vars[o['order']][p_loc] = is_present
                     pot_opts.append(is_present)
                     
-                    # Pot占有区間: Cook終了 〜 Serve開始
-                    # Cookタスク自体は「鍋に入れる」だけなので、その終了時刻から占有が始まる
-                    # Serve開始時に鍋から取り出すので、Serve開始まで占有
+                    # Pot占有区間: Cook開始 〜 Serve開始
+                    # Cookタスクは「鍋に入れる」作業。この時点で鍋は占有される。
+                    # Serve開始時に鍋から取り出すので、Serve開始まで占有。
                     
-                    # duration = serve_start - cook_end
+                    # duration = serve_start - cook_start
                     duration_var = model.NewIntVar(0, horizon, f"dur_pot_{o['order']}_{p_loc}")
-                    model.Add(duration_var == serve_start - cook_end)
+                    model.Add(duration_var == serve_start - cook_start)
                     
                     # OptionalInterval
-                    # start=cook_end, size=duration_var, end=serve_start
+                    # start=cook_start, size=duration_var, end=serve_start
                     pot_interval = model.NewOptionalIntervalVar(
-                        cook_end, duration_var, serve_start, 
+                        cook_start, duration_var, serve_start, 
                         is_present, 
                         f"opt_pot_{o['order']}_{p_loc}"
                     )
