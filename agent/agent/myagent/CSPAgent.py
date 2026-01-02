@@ -1,4 +1,5 @@
 import random
+import time
 from ortools.sat.python import cp_model
 from .csp.model import CSPModel
 from .csp.solver import solve as solve_csp
@@ -77,9 +78,15 @@ class CSPAgent:
                     # self.schedule = self.solve_csp_selection(env, orders=current_orders)
                     
                     # 新しいスケジューリングメソッドを使用
+                    start_time = time.time()
                     self.schedule = self.solve_csp_scheduling(env, orders=current_orders)
+                    elapsed_time = time.time() - start_time
+                    print(f"[CSPAgent] Scheduling Time: {elapsed_time:.4f} seconds")
                     
                     self._print_schedule(self.schedule)
+                    
+                    # スケジュールが再生成されたのでインデックスをリセット
+                    self.current_task_idx = 0
                 except Exception as e:
                     print(f"[CSPAgent] CSPスケジュール中に例外: {e}")
                     import traceback
