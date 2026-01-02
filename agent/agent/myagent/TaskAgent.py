@@ -96,7 +96,80 @@ class TaskAgent:
             return self.process_chop_task(env, 'Tomato')
         elif self.task_name == 'chop_onion':
             return self.process_chop_task(env, 'Onion')
+        elif self.task_name.startswith('cook'):
+            parts = self.task_name.split('_')
+            ingredients = []
+            if len(parts) > 1:
+                # e.g. cook_tomato_onion -> ['Tomato', 'Onion']
+                ingredients = [p.capitalize() for p in parts[1:]]
+            return self.process_cook_task(env, ingredients)
         return (0,0), f"Unknown Task: {self.task_name}"
+
+    def process_cook_task(self, env, ingredients=None):
+        self_pos = env.self_pos
+        holding = env.hold
+        holding_name = holding.full_name if holding else None
+        
+        target_name = None
+        if ingredients:
+            ingredients.sort()
+            target_name = "-".join([f"Chopped{i}" for i in ingredients])
+            print(f"[TaskAgent] Cooking Target: {target_name}")
+        
+        def is_target(name):
+            if not name: return False
+            if target_name:
+                return name == target_name
+            # Default: any merged chopped thing
+            return 'Chopped' in name and '-' in name
+
+        # 1. If holding target -> Go to Pot
+        if is_target(holding_name):
+            # Find empty or compatible Pot
+            pots = env.get_pos_by_obj_gs(gs='Pot')
+            best_pot = None
+            min_dist = float('inf')
+            
+            for p_loc in pots:
+                # Check if pot is empty or has same ingredients (cooking)
+                # For simplicity, look for empty pot first
+                # Pot is a GridSquare. Check if occupied.
+                # env.pos_obj[p_loc] is the object ON the pot (cooking food)
+                pot_obj = env.pos_obj[p_loc]
+                
+                if pot_obj is None:
+                    # Empty pot
+                    dist = abs(self_pos[0]-p_loc[0]) + abs(self_pos[1]-p_loc[1])
+                    if dist < min_dist:
+                        min_dist = dist
+                        best_pot = p_loc
+                # If pot is not empty, we might be able to add to it, but task says "chopped X and chopped Y combined"
+                # so we assume we have the full set.
+            
+            if best_pot:
+                print(f"  -> Moving to Pot at {best_pot}")
+                return self.move_to(env, best_pot), "Putting ingredients in Pot"
+            else:
+                return (0,0), "No empty Pot found"
+
+        # 2. Find target in environment
+        target_loc = None
+        min_dist = float('inf')
+        
+        for pos, obj in env.pos_obj.items():
+            if obj:
+                if is_target(obj.full_name):
+                    print(f"  [Search] Found target {obj.full_name} at {pos}")
+                    dist = abs(self_pos[0]-pos[0]) + abs(self_pos[1]-pos[1])
+                    if dist < min_dist:
+                        min_dist = dist
+                        target_loc = pos
+        
+        if target_loc:
+            print(f"  -> Fetching target from {target_loc}")
+            return self.move_to(env, target_loc), "Fetching ingredients"
+            
+        return (0,0), f"Target {target_name if target_name else 'merged ingredients'} not found"
 
     def process_chop_task(self, env, ing_name):
         self_pos = env.self_pos
