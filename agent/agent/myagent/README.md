@@ -73,3 +73,45 @@
 *   `csp/`: CSPソルバー関連のユーティリティ。
     *   `model.py`: OR-Tools `cp_model` のラッパー。
     *   `solver.py`: ソルバー実行関数。
+
+---
+
+## 4. TaskAgent
+
+`TaskAgent.py` は、特定の単一タスクを実行するためのデバッグ・テスト用エージェントです。「トマトを切る」「スープを作る」といった個別の動作検証に使用します。
+
+### 使用方法
+コマンドライン引数 `--task` で実行するタスクを指定します。
+
+```bash
+python agent/agent/play_main.py --map ring --agent Task --task <TASK_NAME>
+```
+
+### サポートされているタスク
+
+#### 1. Chop Task (`chop_<ingredient>`)
+新鮮な食材を取得し、まな板で切り、テーブルに置きます。
+*   **形式**: `chop_tomato`, `chop_onion`
+*   **動作**:
+    1.  `Fresh<Ingredient>` を取得。
+    2.  `Cutboard` に置く。
+    3.  切る（`CHOPPING_NUM_STEPS` 回インタラクト）。
+    4.  `Chopped<Ingredient>` を拾う。
+    5.  テーブルに置く（スープ作成のため、他の切った食材があるテーブルを優先）。
+
+#### 2. Cook Task (`cook_<ingredient1>_<ingredient2>_...`)
+切った食材を鍋に入れます。
+*   **形式**: `cook_tomato_onion`, `cook_onion`, `cook` (自動検出)
+*   **動作**:
+    1.  環境内にある合わさった切った食材（例: `ChoppedOnion-ChoppedTomato`）を探す。
+    2.  それを拾う。
+    3.  空いている `Pot` に入れる。
+
+#### 3. Serve Task (`serve_<ingredient1>_<ingredient2>_...`)
+調理された料理を皿に盛り付け、配膳します。
+*   **形式**: `serve_tomato_onion`, `serve_tomato`
+*   **動作**:
+    1.  `Plate` を取得。
+    2.  指定された料理（例: `CookedOnion-CookedTomato`）が入っている `Pot` へ移動。
+    3.  盛り付ける。
+    4.  `Delivery` へ運び、提供する。
