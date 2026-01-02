@@ -103,7 +103,84 @@ class TaskAgent:
                 # e.g. cook_tomato_onion -> ['Tomato', 'Onion']
                 ingredients = [p.capitalize() for p in parts[1:]]
             return self.process_cook_task(env, ingredients)
+        elif self.task_name.startswith('serve'):
+            parts = self.task_name.split('_')
+            ingredients = []
+            if len(parts) > 1:
+                ingredients = [p.capitalize() for p in parts[1:]]
+            return self.process_serve_task(env, ingredients)
         return (0,0), f"Unknown Task: {self.task_name}"
+
+    def process_serve_task(self, env, ingredients=None):
+        self_pos = env.self_pos
+        holding = env.hold
+        holding_name = holding.full_name if holding else None
+        
+        # Target food name (without Plate)
+        target_food_name = None
+        if ingredients:
+            ingredients.sort()
+            target_food_name = "-".join([f"Cooked{i}" for i in ingredients])
+            print(f"[TaskAgent] Serve Target: {target_food_name}")
+        
+        def is_target_food(name):
+            if not name: return False
+            if target_food_name:
+                return name == target_food_name
+            return 'Cooked' in name and '-' in name
+
+        def is_target_plate_food(name):
+            if not name: return False
+            if 'Plate' not in name: return False
+            if target_food_name:
+                parts = target_food_name.split('-')
+                return all(part in name for part in parts)
+            return 'Cooked' in name and '-' in name
+
+        # 1. If holding Plate + Food -> Go to Delivery
+        if is_target_plate_food(holding_name):
+            deliveries = env.get_pos_by_obj_gs(gs='Delivery')
+            if deliveries:
+                target = min(deliveries, key=lambda p: abs(p[0]-self_pos[0]) + abs(p[1]-self_pos[1]))
+                print(f"  -> Delivering to {target}")
+                return self.move_to(env, target), "Delivering"
+            return (0,0), "No Delivery found"
+
+        # 2. If holding Plate -> Go to Pot with Cooked Food
+        if holding_name == 'Plate':
+            pots = env.get_pos_by_obj_gs(gs='Pot')
+            target_pot = None
+            min_dist = float('inf')
+            
+            for p_loc in pots:
+                obj = env.pos_obj[p_loc]
+                if obj and is_target_food(obj.full_name):
+                    print(f"  [Search] Found cooked food {obj.full_name} in Pot at {p_loc}")
+                    dist = abs(self_pos[0]-p_loc[0]) + abs(self_pos[1]-p_loc[1])
+                    if dist < min_dist:
+                        min_dist = dist
+                        target_pot = p_loc
+            
+            if target_pot:
+                print(f"  -> Fetching cooked food from Pot at {target_pot}")
+                return self.move_to(env, target_pot), "Fetching cooked food"
+            
+            return (0,0), "No Pot with target cooked food found"
+
+        # 3. If holding nothing -> Get Plate
+        if not holding:
+            plate_locs = env.get_pos_by_obj_gs(obj='Plate')
+            if not plate_locs:
+                plate_locs = env.get_pos_by_obj_gs(gs='PlateTile')
+            
+            if plate_locs:
+                target = min(plate_locs, key=lambda p: abs(p[0]-self_pos[0]) + abs(p[1]-self_pos[1]))
+                print(f"  -> Fetching Plate from {target}")
+                return self.move_to(env, target), "Fetching Plate"
+            
+            return (0,0), "No Plate found"
+            
+        return (0,0), f"Holding {holding_name}, not sure what to do for serve"
 
     def process_cook_task(self, env, ingredients=None):
         self_pos = env.self_pos
