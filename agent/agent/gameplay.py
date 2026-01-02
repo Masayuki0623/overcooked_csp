@@ -139,7 +139,7 @@ class GamePlay(Game):
                 
                 # Human Prediction
                 task_name, cost, all_costs = self.predictor.predict(e, self.idx_human)
-                print(f"[Human Prediction] Task: {task_name}, Remaining Cost: {cost}")
+                #print(f"[Human Prediction] Task: {task_name}, Remaining Cost: {cost}")
                 if all_costs:
                     # Sort by cost
                     all_costs.sort(key=lambda x: x[1])

@@ -5,6 +5,13 @@ class TaskAgent:
         self.speed = speed
         self.replay = replay
         self.task_name = task_name
+        
+        # Assigned resources for CSP
+        self.assigned_cutboard = None
+        self.assigned_pot = None
+        self.assigned_plate = None
+        self.assigned_serve_loc = None
+        
         print(f"[TaskAgent] Initialized with task: {self.task_name}")
 
     def astar_path(self, env, start, goal):
@@ -92,26 +99,26 @@ class TaskAgent:
         return (0, 0)
 
     def __call__(self, env):
-        if self.task_name == 'chop_tomato':
-            return self.process_chop_task(env, 'Tomato')
-        elif self.task_name == 'chop_onion':
-            return self.process_chop_task(env, 'Onion')
+        if self.task_name.startswith('chop_'):
+            # Extract ingredient name from task_name (e.g. chop_tomato -> Tomato)
+            ing_name = self.task_name.split('_')[1].capitalize()
+            return self.process_chop_task(env, ing_name, assigned_cutboard=self.assigned_cutboard)
         elif self.task_name.startswith('cook'):
             parts = self.task_name.split('_')
             ingredients = []
             if len(parts) > 1:
                 # e.g. cook_tomato_onion -> ['Tomato', 'Onion']
                 ingredients = [p.capitalize() for p in parts[1:]]
-            return self.process_cook_task(env, ingredients)
+            return self.process_cook_task(env, ingredients, assigned_pot=self.assigned_pot)
         elif self.task_name.startswith('serve'):
             parts = self.task_name.split('_')
             ingredients = []
             if len(parts) > 1:
                 ingredients = [p.capitalize() for p in parts[1:]]
-            return self.process_serve_task(env, ingredients)
+            return self.process_serve_task(env, ingredients, assigned_plate=self.assigned_plate, assigned_serve_loc=self.assigned_serve_loc, assigned_pot=self.assigned_pot)
         return (0,0), f"Unknown Task: {self.task_name}"
 
-    def process_serve_task(self, env, ingredients=None):
+    def process_serve_task(self, env, ingredients=None, assigned_plate=None, assigned_serve_loc=None, assigned_pot=None):
         self_pos = env.self_pos
         holding = env.hold
         holding_name = holding.full_name if holding else None
@@ -139,16 +146,26 @@ class TaskAgent:
 
         # 1. If holding Plate + Food -> Go to Delivery
         if is_target_plate_food(holding_name):
-            deliveries = env.get_pos_by_obj_gs(gs='Delivery')
+            if assigned_serve_loc:
+                deliveries = [assigned_serve_loc]
+            else:
+                deliveries = env.get_pos_by_obj_gs(gs='Delivery')
+            
             if deliveries:
                 target = min(deliveries, key=lambda p: abs(p[0]-self_pos[0]) + abs(p[1]-self_pos[1]))
                 print(f"  -> Delivering to {target}")
+                dist = abs(self_pos[0]-target[0]) + abs(self_pos[1]-target[1])
+                if dist == 1:
+                    return self.move_to(env, target), "Delivering (Done)"
                 return self.move_to(env, target), "Delivering"
             return (0,0), "No Delivery found"
 
         # 2. If holding Plate -> Go to Pot with Cooked Food
         if holding_name == 'Plate':
-            pots = env.get_pos_by_obj_gs(gs='Pot')
+            if assigned_pot:
+                pots = [assigned_pot]
+            else:
+                pots = env.get_pos_by_obj_gs(gs='Pot')
             target_pot = None
             min_dist = float('inf')
             
@@ -169,9 +186,12 @@ class TaskAgent:
 
         # 3. If holding nothing -> Get Plate
         if not holding:
-            plate_locs = env.get_pos_by_obj_gs(obj='Plate')
-            if not plate_locs:
-                plate_locs = env.get_pos_by_obj_gs(gs='PlateTile')
+            if assigned_plate:
+                plate_locs = [assigned_plate]
+            else:
+                plate_locs = env.get_pos_by_obj_gs(obj='Plate')
+                if not plate_locs:
+                    plate_locs = env.get_pos_by_obj_gs(gs='PlateTile')
             
             if plate_locs:
                 target = min(plate_locs, key=lambda p: abs(p[0]-self_pos[0]) + abs(p[1]-self_pos[1]))
@@ -182,7 +202,7 @@ class TaskAgent:
             
         return (0,0), f"Holding {holding_name}, not sure what to do for serve"
 
-    def process_cook_task(self, env, ingredients=None):
+    def process_cook_task(self, env, ingredients=None, assigned_pot=None):
         self_pos = env.self_pos
         holding = env.hold
         holding_name = holding.full_name if holding else None
@@ -203,7 +223,11 @@ class TaskAgent:
         # 1. If holding target -> Go to Pot
         if is_target(holding_name):
             # Find empty or compatible Pot
-            pots = env.get_pos_by_obj_gs(gs='Pot')
+            if assigned_pot:
+                pots = [assigned_pot]
+            else:
+                pots = env.get_pos_by_obj_gs(gs='Pot')
+            
             best_pot = None
             min_dist = float('inf')
             
@@ -225,6 +249,9 @@ class TaskAgent:
             
             if best_pot:
                 print(f"  -> Moving to Pot at {best_pot}")
+                dist = abs(self_pos[0]-best_pot[0]) + abs(self_pos[1]-best_pot[1])
+                if dist == 1:
+                    return self.move_to(env, best_pot), "Putting ingredients in Pot (Done)"
                 return self.move_to(env, best_pot), "Putting ingredients in Pot"
             else:
                 return (0,0), "No empty Pot found"
@@ -248,7 +275,7 @@ class TaskAgent:
             
         return (0,0), f"Target {target_name if target_name else 'merged ingredients'} not found"
 
-    def process_chop_task(self, env, ing_name):
+    def process_chop_task(self, env, ing_name, assigned_cutboard=None):
         self_pos = env.self_pos
         holding = env.hold
         holding_name = holding.full_name if holding else None
@@ -261,17 +288,17 @@ class TaskAgent:
         if holding_name and chopped_ing_name in holding_name:
             # Find target table
             # Look for other chopped ingredient
-            other_ing = 'Onion' if ing_name == 'Tomato' else 'Tomato'
-            other_chopped = f"Chopped{other_ing}"
+            # other_ing = 'Onion' if ing_name == 'Tomato' else 'Tomato'
+            # other_chopped = f"Chopped{other_ing}"
             
             target_table = None
             
             # First priority: Table with other ingredient
-            for pos, obj in env.pos_obj.items():
-                if obj and other_chopped in obj.full_name:
-                    print(f"  [Place] Found {other_chopped} at {pos}")
-                    target_table = pos
-                    break
+            # for pos, obj in env.pos_obj.items():
+            #     if obj and other_chopped in obj.full_name:
+            #         print(f"  [Place] Found {other_chopped} at {pos}")
+            #         target_table = pos
+            #         break
             
             # Second priority: Empty Counter
             if not target_table:
@@ -286,12 +313,19 @@ class TaskAgent:
             
             if target_table:
                 print(f"  -> Placing {chopped_ing_name} at {target_table}")
+                # Check if adjacent (Done)
+                dist = abs(self_pos[0]-target_table[0]) + abs(self_pos[1]-target_table[1])
+                if dist == 1:
+                    return self.move_to(env, target_table), f"Placing {chopped_ing_name} (Done)"
                 return self.move_to(env, target_table), f"Placing {chopped_ing_name}"
             else:
                 return (0,0), "No suitable table found"
 
         # 1. Check Cutboards
-        cutboard_locs = env.get_pos_by_obj_gs(gs='Cutboard')
+        if assigned_cutboard:
+            cutboard_locs = [assigned_cutboard]
+        else:
+            cutboard_locs = env.get_pos_by_obj_gs(gs='Cutboard')
         
         for loc in cutboard_locs:
             obj = env.pos_obj[loc]

@@ -2,6 +2,7 @@ import random
 from ortools.sat.python import cp_model
 from .csp.model import CSPModel
 from .csp.solver import solve as solve_csp
+from .TaskAgent import TaskAgent
 
 class CSPAgent:
     """
@@ -38,6 +39,7 @@ class CSPAgent:
         self.current_task_idx = 0
         self.holding_state = None # 以前の持ち物状態（変化検知用）
         
+        self.task_agent = TaskAgent()
         print("[CSPAgent] 初期化完了 - 現在はランダム行動")
 
     def act(self, observation):
@@ -128,6 +130,98 @@ class CSPAgent:
                     heapq.heappush(open_set, (f_score[neighbor], neighbor))
         return None
 
+    def _move_to(self, env, target_pos):
+        self_pos = env.self_pos
+        dist = abs(self_pos[0] - target_pos[0]) + abs(self_pos[1] - target_pos[1])
+        if dist == 1:
+            return (target_pos[0] - self_pos[0], target_pos[1] - self_pos[1])
+        
+        adjacents = []
+        for dx, dy in [(0,1),(0,-1),(1,0),(-1,0)]:
+            nx, ny = target_pos[0]+dx, target_pos[1]+dy
+            # Use to_grid_a
+            if 0 <= nx < env.world_width and 0 <= ny < env.world_height and env.to_grid_a[nx][ny] == 1:
+                adjacents.append((nx, ny))
+        
+        best_path = None
+        min_len = float('inf')
+        
+        for adj in adjacents:
+            path = self.astar_path(env, self_pos, adj)
+            if path and len(path) < min_len:
+                min_len = len(path)
+                best_path = path
+        
+        if best_path:
+            next_step = best_path[0]
+            return (next_step[0] - self_pos[0], next_step[1] - self_pos[1])
+        return (0, 0)
+
+    def _process_chop(self, env, ing_name, cutboard_pos):
+        # Check completion
+        chopped_ing_name = f"Chopped{ing_name.capitalize()}"
+        chopped_positions = env.get_pos_by_obj_gs(obj=chopped_ing_name)
+        cutboards = env.get_pos_by_obj_gs(gs='Cutboard')
+        
+        # If we are not holding it, and it exists somewhere not on a cutboard, assume done.
+        if not env.hold and chopped_positions:
+            for pos in chopped_positions:
+                if pos not in cutboards:
+                    # Found chopped ingredient on a table (or floor/counter)
+                    self.current_task_idx += 1
+                    return (0,0), f"Task {ing_name} already done (Found on table)"
+
+        # Delegate to TaskAgent
+        return self.task_agent.process_chop_task(env, ing_name.capitalize(), assigned_cutboard=cutboard_pos)
+
+    def _process_cook(self, env, soup_name, pot_pos):
+        parts = soup_name.replace(' soup', '').split('-')
+        ingredients = [p.capitalize() for p in parts]
+        
+        # Check if pot is already cooking/cooked
+        pot_obj = env.pos_obj[pot_pos]
+        if pot_obj:
+            holding = env.hold
+            holding_name = holding.full_name if holding else None
+            
+            # Construct target name to check holding
+            ingredients.sort()
+            target_name = "-".join([f"Chopped{i}" for i in ingredients])
+            
+            is_holding_target = holding_name == target_name
+            
+            if not is_holding_target:
+                self.current_task_idx += 1
+                return (0,0), "Task cook already done (Pot occupied)"
+
+        action, reason = self.task_agent.process_cook_task(env, ingredients, assigned_pot=pot_pos)
+        
+        if "Putting ingredients in Pot" in reason:
+             dist = abs(env.self_pos[0]-pot_pos[0]) + abs(env.self_pos[1]-pot_pos[1])
+             if dist == 1:
+                 self.current_task_idx += 1
+                 return action, reason + " (Done)"
+                 
+        return action, reason
+
+    def _process_serve(self, env, soup_name, pot_pos):
+        parts = soup_name.replace(' soup', '').split('-')
+        ingredients = [p.capitalize() for p in parts]
+        
+        # Delegate to TaskAgent
+        action, reason = self.task_agent.process_serve_task(env, ingredients, assigned_pot=pot_pos)
+        
+        if "Delivering" in reason:
+             # Check if adjacent to ANY delivery
+             deliveries = env.get_pos_by_obj_gs(gs='Delivery')
+             for d_pos in deliveries:
+                 dist = abs(env.self_pos[0]-d_pos[0]) + abs(env.self_pos[1]-d_pos[1])
+                 if dist == 1:
+                     self.current_task_idx += 1
+                     return action, reason + " (Done)"
+        
+        return action, reason
+
     def execute_step(self, env):
         """
         スケジュールに従って行動を決定する。
@@ -141,129 +235,40 @@ class CSPAgent:
         verb, obj, order_idx = tid
         res = task['res'] # e.g. ('cutboard', (x,y)) or ('pot', (x,y))
 
-        self_pos = env.self_pos
-        holding = env.hold
-        # holding.full_name might be 'fresh onion' etc.
-        holding_name = holding.full_name.lower() if holding else None
-
-        # Helper to move to target
-        def move_to(target_pos):
-            dist = abs(self_pos[0] - target_pos[0]) + abs(self_pos[1] - target_pos[1])
-            if dist == 1:
-                return (target_pos[0] - self_pos[0], target_pos[1] - self_pos[1])
-            
-            adjacents = []
-            for dx, dy in [(0,1),(0,-1),(1,0),(-1,0)]:
-                nx, ny = target_pos[0]+dx, target_pos[1]+dy
-                # Use to_grid_a
-                if 0 <= nx < env.world_width and 0 <= ny < env.world_height and env.to_grid_a[nx][ny] == 1:
-                    adjacents.append((nx, ny))
-            
-            best_path = None
-            min_len = float('inf')
-            
-            for adj in adjacents:
-                path = self.astar_path(env, self_pos, adj)
-                if path and len(path) < min_len:
-                    min_len = len(path)
-                    best_path = path
-            
-            if best_path:
-                next_step = best_path[0]
-                return (next_step[0] - self_pos[0], next_step[1] - self_pos[1])
-            return (0, 0)
-
+        # Construct Task Name
+        task_name = None
         if verb == 'chop':
-            cutboard_pos = res[1]
-            # obj e.g. 'onion'
-            if holding_name and obj in holding_name:
-                return move_to(cutboard_pos), f"Putting {obj} on cutboard"
-            
-            name_map = {'onion': 'FreshOnion', 'tomato': 'FreshTomato', 'lettuce': 'FreshLettuce'}
-            target_cls = name_map.get(obj)
-            ing_positions = env.get_pos_by_obj_gs(obj=target_cls)
-            
-            # Also check dispensers if no loose ingredients
-            if not ing_positions:
-                dispenser_map = {'onion': 'FreshOnionTile', 'tomato': 'FreshTomatoTile', 'lettuce': 'FreshLettuceTile'}
-                ing_positions = env.get_pos_by_obj_gs(gs=dispenser_map.get(obj))
-
-            on_cutboard = False
-            for pos in ing_positions:
-                if pos == cutboard_pos:
-                    on_cutboard = True
-                    break
-            
-            if on_cutboard:
-                return move_to(cutboard_pos), f"Chopping {obj}"
-            else:
-                if not ing_positions:
-                    self.current_task_idx += 1
-                    return (0,0), "Task Done (Chopped)"
-                
-                target_ing = min(ing_positions, key=lambda p: abs(p[0]-self_pos[0]) + abs(p[1]-self_pos[1]))
-                return move_to(target_ing), f"Fetching {obj}"
-
+            task_name = f"chop_{obj}"
+            self.task_agent.assigned_cutboard = res[1]
+            self.task_agent.assigned_pot = None
         elif verb == 'cook':
-            pot_pos = res[1]
-            ingredients = obj.replace(' soup', '').split('-')
-            
-            chopped_map = {'onion': 'ChoppedOnion', 'tomato': 'ChoppedTomato', 'lettuce': 'ChoppedLettuce'}
-            
-            missing_ings = []
-            for ing in ingredients:
-                cls_name = chopped_map.get(ing)
-                positions = env.get_pos_by_obj_gs(obj=cls_name)
-                if positions:
-                    missing_ings.append((ing, positions[0]))
-            
-            if not missing_ings and not holding_name:
-                self.current_task_idx += 1
-                return (0,0), "Task Done (Cook)"
-            
-            if holding_name and 'chopped' in holding_name:
-                return move_to(pot_pos), f"Putting {holding_name} in pot"
-            
-            if missing_ings:
-                target_ing_name, target_pos = missing_ings[0]
-                return move_to(target_pos), f"Fetching {target_ing_name}"
-
+            # obj is soup name e.g. "tomato-onion soup"
+            parts = obj.replace(' soup', '').split('-')
+            task_name = f"cook_{'_'.join(parts)}"
+            self.task_agent.assigned_pot = res[1]
+            self.task_agent.assigned_cutboard = None
         elif verb == 'serve':
-            pot_pos = res[1]
-            if holding_name == 'plate':
-                return move_to(pot_pos), "Scooping soup"
-            elif holding_name and 'soup' in holding_name:
-                # Delivery pos (6,3) or find Star
-                delivery_pos = (6,3)
-                # Check if delivered (holding nothing)
-                # But we are holding soup now.
-                # If we interact with delivery, we lose soup.
-                return move_to(delivery_pos), "Delivering"
-            else:
-                # Check if we just delivered (holding nothing)
-                # If we were serving and now holding nothing, task done?
-                # But we might be at start of task (holding nothing).
-                # We need to distinguish start vs end.
-                # If we are at delivery pos and holding nothing, maybe done?
-                # Or just check if we need plate.
-                
-                # If we are near delivery and holding nothing, assume done.
-                dist_delivery = abs(self_pos[0]-6) + abs(self_pos[1]-3)
-                if dist_delivery <= 1:
-                     self.current_task_idx += 1
-                     return (0,0), "Task Done (Served)"
-
-                plate_positions = env.get_pos_by_obj_gs(obj='Plate')
-                if not plate_positions:
-                    # Try PlateDispenser?
-                    plate_positions = env.get_pos_by_obj_gs(gs='PlateTile') # Guessing name
-                
-                if not plate_positions:
-                     # Fallback
-                     plate_positions = [(6,6)]
-
-                target_plate = min(plate_positions, key=lambda p: abs(p[0]-self_pos[0]) + abs(p[1]-self_pos[1]))
-                return move_to(target_plate), "Fetching plate"
+            parts = obj.replace(' soup', '').split('-')
+            task_name = f"serve_{'_'.join(parts)}"
+            self.task_agent.assigned_pot = res[1]
+            self.task_agent.assigned_cutboard = None
+            # serve needs plate and delivery? CSP schedule might not have them all in 'res'.
+            # Assuming default plate/delivery logic in TaskAgent unless specified.
+        
+        if task_name:
+            self.task_agent.task_name = task_name
+            action, reason = self.task_agent(env)
+            
+            # Check completion
+            if "Done" in reason or "done" in reason:
+                self.current_task_idx += 1
+                # Reset assignments
+                self.task_agent.assigned_cutboard = None
+                self.task_agent.assigned_pot = None
+                self.task_agent.assigned_plate = None
+                self.task_agent.assigned_serve_loc = None
+            
+            return action, reason
 
         return (0,0), "Idle"
 
@@ -419,7 +424,7 @@ class CSPAgent:
         タスク所要フレーム数（移動含む）を返す。serveは重めの重みで扱うためベースは同じでも目的関数で重み付け。
         """
         if verb == 'chop':
-            # 距離 + CHOP 8 + 置く1 + 取得1
+            # 距離 + CHOP 8 + 置く1 + 取得1 + 置く1
             # 距離は食材→まな板→特定場所の最短合計
             tile_map = {"lettuce": "FreshLettuceTile", "onion": "FreshOnionTile", "tomato": "FreshTomatoTile"}
             ing_pos = env.get_pos_by_obj_gs(gs=tile_map[obj])
@@ -446,7 +451,7 @@ class CSPAgent:
                         if min_total is None or tot<min_total: min_total=tot
             if min_total is None:
                 return None
-            return int(min_total + 8 + 1 + 1)
+            return int(min_total + 8 + 1 + 1 + 1)
         elif verb == 'cook':
             # 特定場所→鍋 距離 + インタラクト2（~2フレーム）
             # 150フレームの調理時間はタスク実行時間には含めず、スケジューリングの制約として扱う
