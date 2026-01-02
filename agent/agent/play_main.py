@@ -33,11 +33,14 @@ def parse_arguments():
     parser.add_argument(
         "--task", type=str, default=None, help="Task to execute for TaskAgent (e.g. chop_tomato)"
     )
+    parser.add_argument(
+        "--no_reschedule", action='store_true', help="Disable rescheduling in CSPAgent"
+    )
 
     return parser.parse_args()
 
 
-def init_env_replay(map_name, agent_name, task_name=None):
+def init_env_replay(map_name, agent_name, task_name=None, no_reschedule=False):
     map_set = MapSetting(**MAP_SETTINGS[map_name])
     # agent_set = AgentSetting(agent_name, speed=2.5 if map_name != 'quick' else 3.5)
     agent_set = AgentSetting(agent_name, speed=10)
@@ -68,7 +71,7 @@ def init_env_replay(map_name, agent_name, task_name=None):
         ai._compute_all_distances(init_env_state)
         ai.extract_tasks_from_current_orders(init_env_state)
     elif agent_name == "CSP":
-        ai = CSPAgent(agent_set.speed, replay)
+        ai = CSPAgent(agent_set.speed, replay, no_reschedule=no_reschedule)
         # CSPエージェントの初期化（将来的に制約の構築などを行う）
     elif agent_name == "Task":
         from agent.myagent.TaskAgent import TaskAgent
@@ -88,7 +91,7 @@ if __name__ == '__main__':
     arglist = parse_arguments()
 
     # initialize replay
-    game, env, replay = init_env_replay(arglist.map, arglist.agent, arglist.task)
+    game, env, replay = init_env_replay(arglist.map, arglist.agent, arglist.task, arglist.no_reschedule)
 
     # play
     ok = game.on_execute()

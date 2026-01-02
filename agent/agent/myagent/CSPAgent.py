@@ -8,9 +8,10 @@ class CSPAgent:
     """
     CSP(制約充足問題)ベースのエージェント
     """
-    def __init__(self, speed=2.5, replay=None):
+    def __init__(self, speed=2.5, replay=None, no_reschedule=False):
         self.speed = speed
         self.replay = replay
+        self.no_reschedule = no_reschedule
         self.initialized = False
         
         # CSP関連の変数（後で実装）
@@ -58,30 +59,34 @@ class CSPAgent:
 
         # 変化があった場合、または初回の場合
         if added or removed or not self.initialized:
-            if self.initialized: # 初回以外なら差分を表示
-                print(f"\n[Task Update] Time: {env.time}")
-                if added:
-                    print(f"  (+) Added: {added}")
-                if removed:
-                    print(f"  (-) Removed: {removed}")
-                print("  -> Re-calculating Schedule...")
+            # no_rescheduleが有効で、既に初期化済みなら再計算しない
+            if self.no_reschedule and self.initialized:
+                pass
+            else:
+                if self.initialized: # 初回以外なら差分を表示
+                    print(f"\n[Task Update] Time: {env.time}")
+                    if added:
+                        print(f"  (+) Added: {added}")
+                    if removed:
+                        print(f"  (-) Removed: {removed}")
+                    print("  -> Re-calculating Schedule...")
 
-            # 簡易CSPスケジューリング（選択問題：A解釈）
-            try:
-                # solve_csp_selection内でタスクリスト全体も表示される
-                # self.schedule = self.solve_csp_selection(env, orders=current_orders)
+                # 簡易CSPスケジューリング（選択問題：A解釈）
+                try:
+                    # solve_csp_selection内でタスクリスト全体も表示される
+                    # self.schedule = self.solve_csp_selection(env, orders=current_orders)
+                    
+                    # 新しいスケジューリングメソッドを使用
+                    self.schedule = self.solve_csp_scheduling(env, orders=current_orders)
+                    
+                    self._print_schedule(self.schedule)
+                except Exception as e:
+                    print(f"[CSPAgent] CSPスケジュール中に例外: {e}")
+                    import traceback
+                    traceback.print_exc()
                 
-                # 新しいスケジューリングメソッドを使用
-                self.schedule = self.solve_csp_scheduling(env, orders=current_orders)
-                
-                self._print_schedule(self.schedule)
-            except Exception as e:
-                print(f"[CSPAgent] CSPスケジュール中に例外: {e}")
-                import traceback
-                traceback.print_exc()
-            
-            self.prev_task_ids = current_task_ids
-            self.initialized = True
+                self.prev_task_ids = current_task_ids
+                self.initialized = True
 
         # スケジュール実行
         if not hasattr(self, 'schedule') or not self.schedule or self.current_task_idx >= len(self.schedule):
@@ -98,12 +103,14 @@ class CSPAgent:
             task_name = f"chop_{obj}"
             # self.task_agent.assigned_cutboard = res[1]
             # self.task_agent.assigned_pot = None
+            self.task_agent.assigned_counter = task.get('assigned_counter')
         elif verb == 'cook':
             # obj is soup name e.g. "tomato-onion soup"
             parts = obj.replace(' soup', '').split('-')
             task_name = f"cook_{'_'.join(parts)}"
             # self.task_agent.assigned_pot = res[1]
             # self.task_agent.assigned_cutboard = None
+            self.task_agent.assigned_counter = None
         elif verb == 'serve':
             parts = obj.replace(' soup', '').split('-')
             task_name = f"serve_{'_'.join(parts)}"
@@ -111,6 +118,7 @@ class CSPAgent:
             # self.task_agent.assigned_cutboard = None
             # serve needs plate and delivery? CSP schedule might not have them all in 'res'.
             # Assuming default plate/delivery logic in TaskAgent unless specified.
+            self.task_agent.assigned_counter = None
         
         if task_name:
             self.task_agent.task_name = task_name
@@ -131,6 +139,7 @@ class CSPAgent:
                 self.task_agent.assigned_pot = None
                 self.task_agent.assigned_plate = None
                 self.task_agent.assigned_serve_loc = None
+                self.task_agent.assigned_counter = None
             
             return action, reason
 
@@ -225,15 +234,17 @@ class CSPAgent:
         plates = env.get_pos_by_obj_gs(gs="Plate") # Plate object
         if not plates:
             plates = env.get_pos_by_obj_gs(gs="PlateTile") # Dispenser
+        counters = env.get_pos_by_obj_gs(gs="Counter")
 
         return {
             'cutboards': cutboards,
             'pots': pots,
             'delivery': deliveries[0] if deliveries else (0,0),
             'plate': plates[0] if plates else (0,0),
+            'counters': counters,
         }
 
-    def _task_duration_frames(self, env, verb, obj, order_idx):
+    def _task_duration_frames(self, env, verb, obj, order_idx, assigned_counter=None):
         """
         タスク所要フレーム数（移動含む）を返す。serveは重めの重みで扱うためベースは同じでも目的関数で重み付け。
         """
@@ -260,9 +271,12 @@ class CSPAgent:
             cutboard_pos = get_nearest(ing_pos, cutboard_pos_list)
             
             # Find nearest counter to cutboard (to place chopped item)
-            counters = env.get_pos_by_obj_gs(gs="Counter")
-            if not counters: return None
-            target = get_nearest(cutboard_pos, counters)
+            if assigned_counter:
+                target = assigned_counter
+            else:
+                counters = env.get_pos_by_obj_gs(gs="Counter")
+                if not counters: return None
+                target = get_nearest(cutboard_pos, counters)
 
             def adj(pos_list):
                 width = env.world_width; height = env.world_height; grid = env.to_grid
@@ -382,6 +396,7 @@ class CSPAgent:
                     pot_states.append({'names': c_names, 'obj': obj, 'used': False})
 
         resources = self._get_resources(env)
+        counters = resources.get('counters', [])
         orders = []
         order_idx = 0
         
@@ -395,6 +410,11 @@ class CSPAgent:
                 order_idx += 1
                 continue
             
+            # Assign counter for this order (Round-robin)
+            assigned_counter = None
+            if counters:
+                assigned_counter = counters[order_idx % len(counters)]
+
             # 照合用にCapitalize
             ings_cap = [ing.capitalize() for ing in ings_lower]
             
@@ -423,13 +443,14 @@ class CSPAgent:
                     available_chopped[ing] -= 1
                     continue # Skip chop task
 
-                dur = self._task_duration_frames(env, 'chop', ing.lower(), order_idx)
+                dur = self._task_duration_frames(env, 'chop', ing.lower(), order_idx, assigned_counter)
                 if dur is None: continue
                 tasks.append({
                     'id': ('chop', ing.lower(), order_idx),
                     'verb':'chop','obj':ing.lower(),'order':order_idx,
                     'dur':dur,'weight':self._task_weight('chop'),
                     'res_candidates': [('cutboard', r) for r in resources['cutboards']],
+                    'assigned_counter': assigned_counter
                 })
             # cook
             if cook_needed:
@@ -533,8 +554,9 @@ class CSPAgent:
                 cook_end = end_var
                 tasks_vars[t['id']] = {'start': start_var, 'end': end_var, 'task': t}
                 
+                # Cook must start after ALL chops for this order are done
                 for ce in chop_ends:
-                    model.Add(ce <= start_var)
+                    model.Add(start_var >= ce)
 
             # --- Serve Task ---
             serve_start = None

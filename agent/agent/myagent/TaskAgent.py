@@ -11,6 +11,7 @@ class TaskAgent:
         self.assigned_pot = None
         self.assigned_plate = None
         self.assigned_serve_loc = None
+        self.assigned_counter = None # New: for placing chopped ingredients
         
         print(f"[TaskAgent] Initialized with task: {self.task_name}")
 
@@ -102,7 +103,7 @@ class TaskAgent:
         if self.task_name.startswith('chop_'):
             # Extract ingredient name from task_name (e.g. chop_tomato -> Tomato)
             ing_name = self.task_name.split('_')[1].capitalize()
-            return self.process_chop_task(env, ing_name, assigned_cutboard=self.assigned_cutboard)
+            return self.process_chop_task(env, ing_name, assigned_cutboard=self.assigned_cutboard, assigned_counter=self.assigned_counter)
         elif self.task_name.startswith('cook'):
             parts = self.task_name.split('_')
             ingredients = []
@@ -275,7 +276,7 @@ class TaskAgent:
             
         return (0,0), f"Target {target_name if target_name else 'merged ingredients'} not found"
 
-    def process_chop_task(self, env, ing_name, assigned_cutboard=None):
+    def process_chop_task(self, env, ing_name, assigned_cutboard=None, assigned_counter=None):
         self_pos = env.self_pos
         holding = env.hold
         holding_name = holding.full_name if holding else None
@@ -287,20 +288,15 @@ class TaskAgent:
         # 0. If holding Chopped Ingredient -> Place on Table
         if holding_name and chopped_ing_name in holding_name:
             # Find target table
-            # Look for other chopped ingredient
-            # other_ing = 'Onion' if ing_name == 'Tomato' else 'Tomato'
-            # other_chopped = f"Chopped{other_ing}"
-            
             target_table = None
             
-            # First priority: Table with other ingredient
-            # for pos, obj in env.pos_obj.items():
-            #     if obj and other_chopped in obj.full_name:
-            #         print(f"  [Place] Found {other_chopped} at {pos}")
-            #         target_table = pos
-            #         break
+            if assigned_counter:
+                target_table = assigned_counter
+                print(f"  [Place] Using assigned counter: {target_table}")
             
-            # Second priority: Empty Counter
+            # Second priority: Empty Counter (if no assignment or assignment invalid/occupied?)
+            # For now, if assigned, stick to it.
+            
             if not target_table:
                 counters = env.get_pos_by_obj_gs(gs='Counter')
                 best_dist = float('inf')
