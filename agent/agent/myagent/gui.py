@@ -1,5 +1,14 @@
 import tkinter as tk
 from tkinter import ttk
+import os
+from pathlib import Path
+
+# Try importing PIL for better image handling
+try:
+    from PIL import Image, ImageTk
+    HAS_PIL = True
+except ImportError:
+    HAS_PIL = False
 
 class AgentConfigGUI:
     def __init__(self, env):
@@ -7,12 +16,43 @@ class AgentConfigGUI:
         self.weights = {}
         self.text_input_value = ""
         self.tasks = self._get_tasks_from_env()
-        self.vars_dict = None  # To store references to Tk variables
+        self.vars_dict = None
+        self.image_cache = [] # To keep references to images alive
+        
+        # Setup paths
+        # Assuming current structure: agent/agent/myagent/gui.py
+        # Project root is likely 3 levels up from here, or we use CWD if running from root
+        # The user said CWD is C:\Users\sanda\PythonPrograms\OvercookedCspAgent
+        self.project_root = Path(os.getcwd())
+        self.graphics_path = self.project_root / "testbed-cooking" / "gym_cooking" / "misc" / "game" / "graphics"
         
         self.root = tk.Tk()
         self.root.title("Agent Configuration")
-        self.center_window(self.root, 400, 300)
+        self.center_window(self.root, 500, 600) # Slightly larger for icons
         
+        # --- THEMING ---
+        self.bg_color = "#FFE4B5" # Moccasin (Warm Kitchen)
+        self.fg_color = "#5D4037" # Dark Brown
+        self.accent_color = "#D7CCC8" # Light Brown/Beige
+        
+        # Font - Try to find a playful one
+        self.font_family = "Comic Sans MS"
+        self.header_font = (self.font_family, 16, "bold")
+        self.normal_font = (self.font_family, 11)
+        
+        self.root.configure(bg=self.bg_color)
+        
+        self.style = ttk.Style()
+        self.style.theme_use('clam') # 'clam' usually allows easier color customization
+        
+        self.style.configure("TFrame", background=self.bg_color)
+        self.style.configure("TLabel", background=self.bg_color, foreground=self.fg_color, font=self.normal_font)
+        self.style.configure("TButton", background=self.accent_color, foreground=self.fg_color, font=self.header_font)
+        self.style.configure("TEntry", fieldbackground="white", font=self.normal_font)
+        
+        # Scrollbar style (simple tweak)
+        self.style.configure("Vertical.TScrollbar", troughcolor=self.bg_color, background=self.accent_color)
+
         self.main_frame = ttk.Frame(self.root, padding="10")
         self.main_frame.pack(fill=tk.BOTH, expand=True)
         
@@ -33,14 +73,10 @@ class AgentConfigGUI:
             recipe_base_ings = []
             for c in contents:
                 c_lower = c.lower()
-                found = False
                 for base in base_ingredients:
                     if base in c_lower:
                         recipe_base_ings.append(base)
-                        found = True
                         break
-                # If not a standard ingredient (and not Plate), maybe keep it? 
-                # For now, CSPAgent only handles these three.
             
             if not recipe_base_ings:
                 continue
@@ -50,39 +86,13 @@ class AgentConfigGUI:
                 tasks.add(f"chop_{ing}")
             
             # Soup tasks
-            # CSPAgent logic: '-'.join(sorted(ings)) + ' soup'
-            # Note: CSPAgent sorts ings based on fixed order or alphabetically?
-            # looking at CSPAgent.py: 
-            # ings_lower = [ing for ing in ['lettuce','onion','tomato'] if ing in name]
-            # This implies a fixed order: lettuce -> onion -> tomato.
-            # However, recipe_base_ings might have duplicates or different order.
-            
-            # We need to reconstruct the soup name exactly as CSPAgent does.
-            # CSPAgent derives it from the Recipe Goal Name usually.
-            # But here we are deriving from contents.
-            
-            # Let's try to simulate CSPAgent's soup name construction from ingredients
-            # CSPAgent: ings_cap = [ing.capitalize() for ing in ings_lower]
-            # soup_name = '-'.join(ings_lower) + ' soup' (using the ordered list)
-            
-            # Filter and sort according to CSPAgent's implicit priority or just alphabetical?
-            # CSPAgent code: `ings_lower = [ing for ing in ['lettuce','onion','tomato'] if ing in name]`
-            # This scans the full recipe name.
-            
-            # Here we have ingredients. Let's make a unique set of base ingredients for the soup name.
             unique_ings = sorted(list(set(recipe_base_ings)))
-            
-            # CSPAgent actually looks at the recipe FULL NAME. 
-            # If we can get the recipe full name here, that's better.
             recipe_name = getattr(recipe, 'full_name', '').lower()
             if not recipe_name:
-                # Fallback
                 soup_name = '-'.join(unique_ings) + ' soup'
             else:
-                # CSPAgent logic reproduction:
                 csp_ings = [ing for ing in ['lettuce','onion','tomato'] if ing in recipe_name]
                 if not csp_ings:
-                    # Fallback if recipe name doesn't contain ingredients (e.g. "OnionSoup")
                     soup_name = '-'.join(unique_ings) + ' soup'
                 else:
                     soup_name = '-'.join(csp_ings) + ' soup'
@@ -104,15 +114,76 @@ class AgentConfigGUI:
         self.current_frame = None
 
     def _save_current_values(self):
-        # Save text input if visible
         if hasattr(self, 'text_var') and self.text_var:
             self.text_input_value = self.text_var.get()
-            
-        # Save weights if visible
         if self.vars_dict:
             for t, var in self.vars_dict.items():
                 self.weights[t] = var.get()
-            self.vars_dict = None # Reset references as widgets are destroyed
+            self.vars_dict = None
+            
+    def _get_icon_for_task(self, task_name):
+        """
+        Loads an icon based on task name.
+        Returns ImageTk.PhotoImage or tk.PhotoImage
+        """
+        filename = None
+        target_size = (32, 32)
+        
+        parts = task_name.split('_')
+        verb = parts[0]
+        obj = parts[1] if len(parts) > 1 else ""
+        
+        if verb == "chop":
+            # chop_lettuce -> FreshLettuce.png
+            # Capitalize object: lettuce -> Lettuce
+            obj_cap = obj.capitalize()
+            filename = f"Fresh{obj_cap}.png"
+            if not (self.graphics_path / filename).exists():
+                 # Try finding just by containment if exact match fails
+                 filename = f"{obj_cap}.png"
+
+        elif verb == "cook":
+            # cook_lettuce-onion soup -> try to construct CookedName
+            # obj is like "tomato-onion soup"
+            # Remove " soup" and capitalize parts
+            ing_part = obj.replace(" soup", "")
+            ings = [i.capitalize() for i in ing_part.split('-')]
+            # Construct "CookedIng1-CookedIng2..."
+            # Note: File names seem to be "CookedLettuce-CookedOnion.png"
+            cooked_name = "-".join([f"Cooked{i}" for i in ings]) + ".png"
+            
+            if (self.graphics_path / cooked_name).exists():
+                filename = cooked_name
+            else:
+                # Fallback to generic pot
+                filename = "pot.png"
+                
+        elif verb == "serve":
+            filename = "delivery.png"
+        
+        if not filename or not (self.graphics_path / filename).exists():
+            return None
+            
+        filepath = self.graphics_path / filename
+        
+        try:
+            if HAS_PIL:
+                img = Image.open(filepath)
+                img = img.resize(target_size, Image.LANCZOS)
+                photo = ImageTk.PhotoImage(img)
+            else:
+                # Fallback to standard tk PhotoImage (PNG support depends on tk version)
+                photo = tk.PhotoImage(file=str(filepath))
+                # Simple subsample (only integers). 
+                # Assuming original images are large (e.g. 64x64 or larger)
+                # If 32x32 is target, we subsample by 2 or 3
+                photo = photo.subsample(2, 2) 
+            
+            self.image_cache.append(photo) # Keep reference
+            return photo
+        except Exception as e:
+            print(f"Error loading image {filename}: {e}")
+            return None
 
     def show_main_menu(self):
         self._save_current_values()
@@ -121,35 +192,49 @@ class AgentConfigGUI:
         self.current_frame = ttk.Frame(self.main_frame)
         self.current_frame.pack(fill=tk.BOTH, expand=True)
         
-        ttk.Label(self.current_frame, text="Main Menu", font=("Arial", 16)).pack(pady=20)
+        title_lbl = ttk.Label(self.current_frame, text="Overcooked Agent Setup", font=(self.font_family, 24, "bold"))
+        title_lbl.pack(pady=(30, 20))
         
         # Priority Weights Button
-        ttk.Button(self.current_frame, text="Configure Priority Weights", 
-                   command=self.show_weight_config).pack(pady=10, fill=tk.X)
+        btn_font = (self.font_family, 14, "bold")
+        
+        btn_w = tk.Button(self.current_frame, text="⚙ Task Priorities", 
+                          font=btn_font, bg=self.accent_color, fg=self.fg_color,
+                          command=self.show_weight_config, relief="flat", padx=20, pady=10)
+        btn_w.pack(pady=10, fill=tk.X, padx=50)
         
         # Text Input
-        ttk.Label(self.current_frame, text="Additional Settings (Text):").pack(pady=(20, 5), anchor="w")
+        ttk.Label(self.current_frame, text="📝 Additional Instructions:").pack(pady=(20, 5), anchor="w", padx=50)
         self.text_var = tk.StringVar(value=self.text_input_value)
-        ttk.Entry(self.current_frame, textvariable=self.text_var).pack(fill=tk.X)
+        entry = tk.Entry(self.current_frame, textvariable=self.text_var, font=self.normal_font)
+        entry.pack(fill=tk.X, padx=50, ipady=5)
         
         # Start Game Button
-        ttk.Button(self.current_frame, text="Start Game", command=self.finish).pack(pady=30, fill=tk.X)
+        btn_start = tk.Button(self.current_frame, text="▶ START GAME", 
+                              font=btn_font, bg="#4CAF50", fg="white", # Green button
+                              command=self.finish, relief="flat", padx=20, pady=10)
+        btn_start.pack(pady=40, fill=tk.X, padx=50)
 
     def show_weight_config(self):
         self._save_current_values()
         self.clear_frame()
+        self.image_cache = [] # Clear old cache
         
         self.current_frame = ttk.Frame(self.main_frame)
         self.current_frame.pack(fill=tk.BOTH, expand=True)
         
+        # Header
         header = ttk.Frame(self.current_frame)
-        header.pack(fill=tk.X)
+        header.pack(fill=tk.X, pady=10)
         
-        ttk.Button(header, text="< Back", command=self.show_main_menu).pack(side=tk.LEFT)
-        ttk.Label(header, text="Priority Weights", font=("Arial", 14)).pack(side=tk.LEFT, padx=20)
+        btn_back = tk.Button(header, text="⬅ Back", font=(self.font_family, 12, "bold"),
+                             bg=self.accent_color, command=self.show_main_menu, relief="flat")
+        btn_back.pack(side=tk.LEFT, padx=10)
+        
+        ttk.Label(header, text="Adjust Priorities", font=(self.font_family, 18, "bold")).pack(side=tk.LEFT, padx=20)
         
         # Scrollable Area
-        canvas = tk.Canvas(self.current_frame)
+        canvas = tk.Canvas(self.current_frame, bg=self.bg_color, highlightthickness=0)
         scrollbar = ttk.Scrollbar(self.current_frame, orient="vertical", command=canvas.yview)
         scrollable_frame = ttk.Frame(canvas)
         
@@ -158,30 +243,48 @@ class AgentConfigGUI:
             lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
         )
         
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas_window = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw", width=460) # Fix width to avoid weird resizing
+        
+        # Update canvas window width on resize
+        def on_canvas_configure(event):
+            canvas.itemconfig(canvas_window, width=event.width)
+        canvas.bind("<Configure>", on_canvas_configure)
+
         canvas.configure(yscrollcommand=scrollbar.set)
         
-        canvas.pack(side="left", fill="both", expand=True, pady=10)
+        canvas.pack(side="left", fill="both", expand=True, pady=10, padx=10)
         scrollbar.pack(side="right", fill="y")
         
         self.vars_dict = {}
         for t in self.tasks:
-            row = ttk.Frame(scrollable_frame)
-            row.pack(fill=tk.X, pady=2)
+            row = tk.Frame(scrollable_frame, bg=self.bg_color)
+            row.pack(fill=tk.X, pady=5, padx=5)
             
-            lbl = ttk.Label(row, text=t, width=25)
-            lbl.pack(side=tk.LEFT)
+            # Icon
+            icon = self._get_icon_for_task(t)
+            if icon:
+                icon_lbl = tk.Label(row, image=icon, bg=self.bg_color)
+                icon_lbl.pack(side=tk.LEFT, padx=(0, 10))
             
-            # Use existing value or default 1.0
+            # Label
+            # Clean up task name for display? e.g. "chop_onion" -> "Chop Onion"
+            display_name = t.replace("_", " ").title()
+            tk.Label(row, text=display_name, width=20, anchor="w", 
+                     bg=self.bg_color, fg=self.fg_color, font=self.normal_font).pack(side=tk.LEFT)
+            
+            # Value
             val = self.weights.get(t, 1.0)
             var = tk.DoubleVar(value=val)
             self.vars_dict[t] = var
             
-            scale = ttk.Scale(row, from_=0.1, to=10.0, variable=var, orient=tk.HORIZONTAL)
+            # Slider
+            scale = tk.Scale(row, from_=0.1, to=10.0, resolution=0.1, variable=var, orient=tk.HORIZONTAL,
+                             bg=self.bg_color, highlightthickness=0, fg=self.fg_color, length=150)
             scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
             
-            entry = ttk.Entry(row, textvariable=var, width=5)
-            entry.pack(side=tk.LEFT)
+            # Entry
+            # entry = tk.Entry(row, textvariable=var, width=5, font=self.normal_font)
+            # entry.pack(side=tk.LEFT)
 
     def finish(self):
         self._save_current_values()
