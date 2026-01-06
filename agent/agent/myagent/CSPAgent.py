@@ -625,11 +625,17 @@ class CSPAgent:
         for loc, intervals in pot_intervals.items():
             model.AddNoOverlap(intervals)
 
-        # 3. 目的関数: Makespan最小化
-        makespan = model.NewIntVar(0, horizon, 'makespan')
-        if all_end_vars:
-            model.AddMaxEquality(makespan, all_end_vars)
-        model.Minimize(makespan)
+        # 3. 目的関数: タスクごとの {重み × 完了時刻} の合計を最小化
+        # 現在は重みをすべて 1 に設定
+        objective_terms = []
+        for tid, v in tasks_vars.items():
+            weight = 1
+            objective_terms.append(v['end'] * weight)
+            
+        if objective_terms:
+            model.Minimize(sum(objective_terms))
+        else:
+            model.Minimize(0)
 
         # 4. 解く
         solver = cp_model.CpSolver()
