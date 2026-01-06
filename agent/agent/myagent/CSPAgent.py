@@ -79,6 +79,17 @@ class CSPAgent:
                     
                     # 新しいスケジューリングメソッドを使用
                     start_time = time.time()
+                    
+                    # リスケジュール対象のタスク集合を詳細に確認・表示
+                    print(f"\n[CSPAgent] Rescheduling - Verifying Task Set ({len(current_orders)} orders):")
+                    for o in current_orders:
+                        print(f"  Order {o['order']} [{', '.join(o['ingredients'])}]:")
+                        if not o['tasks']:
+                            print("    (No tasks - assumed done or in progress)")
+                        for t in o['tasks']:
+                            print(f"    - Task ID: {t['id']}, Verb: {t['verb']}, Obj: {t['obj']}, Dur: {t['dur']}")
+                    print("--------------------------------------------------")
+
                     self.schedule = self.solve_csp_scheduling(env, orders=current_orders)
                     elapsed_time = time.time() - start_time
                     print(f"[CSPAgent] Scheduling Time: {elapsed_time:.4f} seconds")
@@ -106,23 +117,32 @@ class CSPAgent:
 
         # Construct Task Name
         task_name = None
+        
+        # Set target ingredients for TaskAgent (to prevent wrong merging)
+        target_ingredients = []
+        for o in current_orders:
+            if o['order'] == order_idx:
+                target_ingredients = o['ingredients'] # e.g. ['lettuce', 'tomato']
+                break
+        self.task_agent.target_ingredients = target_ingredients
+
         if verb == 'chop':
             task_name = f"chop_{obj}"
-            # self.task_agent.assigned_cutboard = res[1]
-            # self.task_agent.assigned_pot = None
+            self.task_agent.assigned_cutboard = res[1]
+            self.task_agent.assigned_pot = None
             self.task_agent.assigned_counter = task.get('assigned_counter')
         elif verb == 'cook':
             # obj is soup name e.g. "tomato-onion soup"
             parts = obj.replace(' soup', '').split('-')
             task_name = f"cook_{'_'.join(parts)}"
-            # self.task_agent.assigned_pot = res[1]
-            # self.task_agent.assigned_cutboard = None
+            self.task_agent.assigned_pot = res[1]
+            self.task_agent.assigned_cutboard = None
             self.task_agent.assigned_counter = None
         elif verb == 'serve':
             parts = obj.replace(' soup', '').split('-')
             task_name = f"serve_{'_'.join(parts)}"
-            # self.task_agent.assigned_pot = res[1]
-            # self.task_agent.assigned_cutboard = None
+            self.task_agent.assigned_pot = res[1]
+            self.task_agent.assigned_cutboard = None
             # serve needs plate and delivery? CSP schedule might not have them all in 'res'.
             # Assuming default plate/delivery logic in TaskAgent unless specified.
             self.task_agent.assigned_counter = None
@@ -337,6 +357,21 @@ class CSPAgent:
             d = self.astar_distance(env, start_pos, pot_pos)
             if d is None: return None
             return int(d + 2)
+            # We don't know exactly which counter, so assume nearest counter to Pot
+            pot_pos_list = resources['pots']
+            if not pot_pos_list: return None
+            
+            # Use order_idx to distribute pots if multiple available? 
+            # For duration estimation, just pick one (e.g. first or nearest to center)
+            pot_pos = pot_pos_list[order_idx % len(pot_pos_list)]
+            
+            counters = env.get_pos_by_obj_gs(gs="Counter")
+            if not counters: return None
+            start_pos = get_nearest(pot_pos, counters)
+            
+            d = self.astar_distance(env, start_pos, pot_pos)
+            if d is None: return None
+            return int(d + 2)
 
         elif verb == 'serve':
             # Plate -> Pot -> Delivery
@@ -386,21 +421,37 @@ class CSPAgent:
         # Cutboardの場所を取得
         cutboard_locs = env.get_pos_by_obj_gs(gs="Cutboard")
 
+        # Inventory of chopped items in the world (Location -> [Ingredients])
+        # We need to track merged items and loose items
+        # item_list: [{'names': ['Tomato'], 'loc': (x,y), 'used': False}, {'names': ['Onion', 'Tomato'], 'loc': (x,y), 'used': False}]
+        chopped_objects = []
+
         for obj in all_objects:
-            # Objectクラスのインスタンスかどうかを判定（簡易的）
             if type(obj).__name__ == 'Object':
-                # Chopped check: is_chopped() がTrue かつ 単一の食材
-                # 【修正】まな板の上にあるChopped食材は「完了」とみなさない（タスクを継続させてテーブルへ移動させるため）
-                if hasattr(obj, 'is_chopped') and obj.is_chopped() and len(obj.contents) == 1 and not obj.is_held:
+                # Determine "clean" names of contents (remove 'Chopped' prefix)
+                # contents might be [ChoppedOnion, ChoppedTomato] -> ['Onion', 'Tomato']
+                clean_names = []
+                if hasattr(obj, 'contents') and obj.contents:
+                    for c in obj.contents:
+                        n = c.name
+                        if n.startswith("Chopped"):
+                            n = n.replace("Chopped", "")
+                        clean_names.append(n)
+                clean_names.sort()
+
+                if hasattr(obj, 'is_chopped') and obj.is_chopped():
+                    # まな板の上にあるものは「完了」とみなさない
+                    # Held object counts as "not on cutboard" (location is agent pos)
                     if obj.location not in cutboard_locs:
-                        food_name = obj.contents[0].name
-                        available_chopped[food_name] = available_chopped.get(food_name, 0) + 1
+                        chopped_objects.append({'names': clean_names, 'loc': obj.location, 'used': False})
                 
-                # Pot check: Potの場所にあるObject
+                # Pot check
                 if obj.location in pot_locs:
-                    # Potの中身
-                    c_names = sorted([c.name for c in obj.contents])
-                    pot_states.append({'names': c_names, 'obj': obj, 'used': False})
+                    # Pot contents are already in clean_names (calculated above) logic?
+                    # Wait, Pot object might not be 'is_chopped'. It's a 'Pot' or object on Pot.
+                    # If it's a cooking object, it has contents.
+                    # We use the same clean_names logic.
+                    pot_states.append({'names': clean_names, 'obj': obj, 'used': False})
 
         resources = self._get_resources(env)
         counters = resources.get('counters', [])
@@ -424,31 +475,64 @@ class CSPAgent:
 
             # 照合用にCapitalize
             ings_cap = [ing.capitalize() for ing in ings_lower]
+            sorted_ings = sorted(ings_cap)
             
             soup_name = '-'.join(ings_lower) + ' soup'
             tasks=[]
             
-            # Cookタスクが必要か判定
-            sorted_ings = sorted(ings_cap)
+            # 1. Check if Cook is needed (Pot check)
             cook_needed = True
-            
-            # Potの状態と照合
             for ps in pot_states:
                 if not ps['used'] and ps['names'] == sorted_ings:
                     ps['used'] = True
                     cook_needed = False
                     break
-
+            
+            # 2. Check Ingredient Status (Chop needed?)
+            # Track which ingredients are "satisfied" (don't need chop/merge task)
+            satisfied_ings = set()
+            
+            if not cook_needed:
+                # If in pot, all satisfied
+                satisfied_ings = set(ings_cap)
+            else:
+                # Check for Merged/Loose items
+                # Try to find a merged object that covers all needed ingredients?
+                # Or subsets.
+                
+                # First, look for exact match merged object (e.g. Onion+Tomato on table)
+                for co in chopped_objects:
+                    if not co['used'] and co['names'] == sorted_ings:
+                        co['used'] = True
+                        satisfied_ings = set(ings_cap)
+                        break
+                
+                # If not fully satisfied, check partials/singles
+                if len(satisfied_ings) < len(ings_cap):
+                    # We need to decide which single items are "done".
+                    # User rule: If multiple loose items exist, one is "base" (Done), others need "Merge" (Not Done).
+                    # We sort ings_cap to be deterministic.
+                    
+                    found_loose = []
+                    for ing in sorted_ings:
+                         # Look for this single item
+                         for co in chopped_objects:
+                             if not co['used'] and co['names'] == [ing]:
+                                 co['used'] = True
+                                 found_loose.append(ing)
+                                 break
+                    
+                    # If we found loose items:
+                    if found_loose:
+                        # Mark the FIRST one as satisfied (Base).
+                        # The others remain UNSATISFIED so a task is generated (to trigger merge).
+                        satisfied_ings.add(found_loose[0])
+                        # Note: We do NOT add found_loose[1:] to satisfied_ings.
+                        
             # chops
             for ing in ings_cap:
-                # 既にPotに入っているならChopも不要
-                if not cook_needed:
-                    continue
-
-                # 環境にChopped食材があるか確認
-                if available_chopped.get(ing, 0) > 0:
-                    available_chopped[ing] -= 1
-                    continue # Skip chop task
+                if ing in satisfied_ings:
+                    continue 
 
                 dur = self._task_duration_frames(env, 'chop', ing.lower(), order_idx, assigned_counter)
                 if dur is None: continue
