@@ -218,7 +218,13 @@ class AgentConfigGUI:
     def show_weight_config(self):
         self._save_current_values()
         self.clear_frame()
-        self.image_cache = [] # Clear old cache
+        self.image_cache = [] 
+        
+        # Increase window size significantly to try fitting everything vertically
+        # Getting screen size to max out height if needed
+        screen_height = self.root.winfo_screenheight()
+        target_height = min(900, screen_height - 100)
+        self.center_window(self.root, 800, target_height)
         
         self.current_frame = ttk.Frame(self.main_frame)
         self.current_frame.pack(fill=tk.BOTH, expand=True)
@@ -233,58 +239,50 @@ class AgentConfigGUI:
         
         ttk.Label(header, text="Adjust Priorities", font=(self.font_family, 18, "bold")).pack(side=tk.LEFT, padx=20)
         
-        # Scrollable Area
-        canvas = tk.Canvas(self.current_frame, bg=self.bg_color, highlightthickness=0)
-        scrollbar = ttk.Scrollbar(self.current_frame, orient="vertical", command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas)
+        # Main container
+        # Use a canvas/scrollbar only if absolutely necessary, but user requested "no scrollbar if possible"
+        # However, if items exceed screen height, they become inaccessible. 
+        # I will use a frame that expands, but if it overflows, it overflows.
+        # To be safe for "task name cut off", I will ensure wide horizontal layout.
         
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
-        
-        canvas_window = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw", width=460) # Fix width to avoid weird resizing
-        
-        # Update canvas window width on resize
-        def on_canvas_configure(event):
-            canvas.itemconfig(canvas_window, width=event.width)
-        canvas.bind("<Configure>", on_canvas_configure)
-
-        canvas.configure(yscrollcommand=scrollbar.set)
-        
-        canvas.pack(side="left", fill="both", expand=True, pady=10, padx=10)
-        scrollbar.pack(side="right", fill="y")
+        content_frame = tk.Frame(self.current_frame, bg=self.bg_color)
+        content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
         
         self.vars_dict = {}
         for t in self.tasks:
-            row = tk.Frame(scrollable_frame, bg=self.bg_color)
-            row.pack(fill=tk.X, pady=5, padx=5)
+            # Row container
+            row = tk.Frame(content_frame, bg=self.bg_color, pady=5)
+            row.pack(fill=tk.X, expand=False)
             
             # Icon
             icon = self._get_icon_for_task(t)
             if icon:
                 icon_lbl = tk.Label(row, image=icon, bg=self.bg_color)
-                icon_lbl.pack(side=tk.LEFT, padx=(0, 10))
+                icon_lbl.pack(side=tk.LEFT, padx=(0, 15))
             
-            # Label
-            # Clean up task name for display? e.g. "chop_onion" -> "Chop Onion"
+            # Label - Use explicit width or weight to prevent overlap
             display_name = t.replace("_", " ").title()
-            tk.Label(row, text=display_name, width=20, anchor="w", 
-                     bg=self.bg_color, fg=self.fg_color, font=self.normal_font).pack(side=tk.LEFT)
+            name_lbl = tk.Label(row, text=display_name, anchor="w", 
+                                bg=self.bg_color, fg=self.fg_color, font=self.normal_font)
+            # Push label to left, take available space up to slider
+            name_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True)
             
-            # Value
+            # Slider Container (Right side)
+            slider_frame = tk.Frame(row, bg=self.bg_color)
+            slider_frame.pack(side=tk.RIGHT)
+            
             val = self.weights.get(t, 1.0)
             var = tk.DoubleVar(value=val)
             self.vars_dict[t] = var
             
+            # Value Label
+            val_lbl = tk.Label(slider_frame, textvariable=var, width=4, bg=self.bg_color, fg=self.fg_color, font=self.normal_font)
+            val_lbl.pack(side=tk.RIGHT, padx=(10, 0))
+
             # Slider
-            scale = tk.Scale(row, from_=0.1, to=10.0, resolution=0.1, variable=var, orient=tk.HORIZONTAL,
-                             bg=self.bg_color, highlightthickness=0, fg=self.fg_color, length=150)
-            scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-            
-            # Entry
-            # entry = tk.Entry(row, textvariable=var, width=5, font=self.normal_font)
-            # entry.pack(side=tk.LEFT)
+            scale = tk.Scale(slider_frame, from_=0.1, to=10.0, resolution=0.1, variable=var, orient=tk.HORIZONTAL,
+                             bg=self.bg_color, highlightthickness=0, fg=self.fg_color, length=200)
+            scale.pack(side=tk.RIGHT)
 
     def finish(self):
         self._save_current_values()
