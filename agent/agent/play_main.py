@@ -74,12 +74,14 @@ def init_env_replay(map_name, agent_name, task_name=None, no_reschedule=False):
         ai = CSPAgent(agent_set.speed, replay, no_reschedule=no_reschedule)
         # CSPエージェントの初期化（将来的に制約の構築などを行う）
         try:
-            from agent.myagent.gui import configure_task_weights
-            print("Opening Task Weight Configuration GUI...")
-            ai.priority_weights = configure_task_weights(env)
-            print("Weights configured:", ai.priority_weights)
+            from agent.myagent.gui import configure_agent_settings
+            print("Opening Agent Configuration GUI...")
+            settings = configure_agent_settings(env)
+            ai.priority_weights = settings['weights']
+            ai.gui_text_input = settings['text_input'] # 将来の使用のために保存
+            print("Settings configured:", settings)
         except Exception as e:
-            print(f"Failed to configure weights via GUI: {e}")
+            print(f"Failed to configure settings via GUI: {e}")
     elif agent_name == "Task":
         from agent.myagent.TaskAgent import TaskAgent
         ai = TaskAgent(agent_set.speed, replay, task_name=task_name)
