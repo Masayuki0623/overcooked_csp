@@ -286,6 +286,18 @@ class TaskAgent:
         chopping_ing_name = f"Chopping{ing_name}"
         chopped_ing_name = f"Chopped{ing_name}"
         
+        # Check unwanted
+        if holding_name:
+            # Allow if it's Fresh, Chopping, OR if it contains the Chopped target (e.g. merged)
+            is_valid_holding = False
+            if holding_name in [target_ing_name, chopping_ing_name]:
+                is_valid_holding = True
+            elif chopped_ing_name in holding_name:
+                is_valid_holding = True
+            
+            if not is_valid_holding:
+                 return self.drop_unwanted_item(env, holding, reason=f"Chopping {ing_name}, but holding {holding_name}")
+
         # 0. If holding Chopped Ingredient -> Place on Table
         if holding_name and chopped_ing_name in holding_name:
             # Find target table

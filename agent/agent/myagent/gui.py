@@ -7,6 +7,7 @@ class AgentConfigGUI:
         self.weights = {}
         self.text_input_value = ""
         self.tasks = self._get_tasks_from_env()
+        self.vars_dict = None  # To store references to Tk variables
         
         self.root = tk.Tk()
         self.root.title("Agent Configuration")
@@ -20,29 +21,72 @@ class AgentConfigGUI:
 
     def _get_tasks_from_env(self):
         tasks = set()
+        base_ingredients = ['lettuce', 'onion', 'tomato']
+        
         for recipe in self.env.recipes:
             if hasattr(recipe, 'contents_names'):
                  contents = recipe.contents_names
             else:
                  contents = [c.name for c in recipe.contents if hasattr(c, 'name')]
             
-            ings_lower = [c.lower() for c in contents if c not in ['Plate']]
-            if not ings_lower:
+            # Normalize ingredients: extract base name if present
+            recipe_base_ings = []
+            for c in contents:
+                c_lower = c.lower()
+                found = False
+                for base in base_ingredients:
+                    if base in c_lower:
+                        recipe_base_ings.append(base)
+                        found = True
+                        break
+                # If not a standard ingredient (and not Plate), maybe keep it? 
+                # For now, CSPAgent only handles these three.
+            
+            if not recipe_base_ings:
                 continue
                 
-            for ing in ings_lower:
+            # Chop tasks for each base ingredient
+            for ing in recipe_base_ings:
                 tasks.add(f"chop_{ing}")
             
-            possible_ings = ['lettuce', 'onion', 'tomato']
-            recipe_ings = []
-            for p in possible_ings:
-                if p in ings_lower:
-                    recipe_ings.append(p)
-                    
-            if not recipe_ings:
-                recipe_ings = sorted(ings_lower)
+            # Soup tasks
+            # CSPAgent logic: '-'.join(sorted(ings)) + ' soup'
+            # Note: CSPAgent sorts ings based on fixed order or alphabetically?
+            # looking at CSPAgent.py: 
+            # ings_lower = [ing for ing in ['lettuce','onion','tomato'] if ing in name]
+            # This implies a fixed order: lettuce -> onion -> tomato.
+            # However, recipe_base_ings might have duplicates or different order.
+            
+            # We need to reconstruct the soup name exactly as CSPAgent does.
+            # CSPAgent derives it from the Recipe Goal Name usually.
+            # But here we are deriving from contents.
+            
+            # Let's try to simulate CSPAgent's soup name construction from ingredients
+            # CSPAgent: ings_cap = [ing.capitalize() for ing in ings_lower]
+            # soup_name = '-'.join(ings_lower) + ' soup' (using the ordered list)
+            
+            # Filter and sort according to CSPAgent's implicit priority or just alphabetical?
+            # CSPAgent code: `ings_lower = [ing for ing in ['lettuce','onion','tomato'] if ing in name]`
+            # This scans the full recipe name.
+            
+            # Here we have ingredients. Let's make a unique set of base ingredients for the soup name.
+            unique_ings = sorted(list(set(recipe_base_ings)))
+            
+            # CSPAgent actually looks at the recipe FULL NAME. 
+            # If we can get the recipe full name here, that's better.
+            recipe_name = getattr(recipe, 'full_name', '').lower()
+            if not recipe_name:
+                # Fallback
+                soup_name = '-'.join(unique_ings) + ' soup'
+            else:
+                # CSPAgent logic reproduction:
+                csp_ings = [ing for ing in ['lettuce','onion','tomato'] if ing in recipe_name]
+                if not csp_ings:
+                    # Fallback if recipe name doesn't contain ingredients (e.g. "OnionSoup")
+                    soup_name = '-'.join(unique_ings) + ' soup'
+                else:
+                    soup_name = '-'.join(csp_ings) + ' soup'
 
-            soup_name = '-'.join(recipe_ings) + ' soup'
             tasks.add(f"cook_{soup_name}")
             tasks.add(f"serve_{soup_name}")
             
@@ -57,9 +101,23 @@ class AgentConfigGUI:
     def clear_frame(self):
         if self.current_frame:
             self.current_frame.destroy()
+        self.current_frame = None
+
+    def _save_current_values(self):
+        # Save text input if visible
+        if hasattr(self, 'text_var') and self.text_var:
+            self.text_input_value = self.text_var.get()
+            
+        # Save weights if visible
+        if self.vars_dict:
+            for t, var in self.vars_dict.items():
+                self.weights[t] = var.get()
+            self.vars_dict = None # Reset references as widgets are destroyed
 
     def show_main_menu(self):
+        self._save_current_values()
         self.clear_frame()
+        
         self.current_frame = ttk.Frame(self.main_frame)
         self.current_frame.pack(fill=tk.BOTH, expand=True)
         
@@ -78,10 +136,9 @@ class AgentConfigGUI:
         ttk.Button(self.current_frame, text="Start Game", command=self.finish).pack(pady=30, fill=tk.X)
 
     def show_weight_config(self):
-        # Save text input before switching
-        self.text_input_value = self.text_var.get()
-        
+        self._save_current_values()
         self.clear_frame()
+        
         self.current_frame = ttk.Frame(self.main_frame)
         self.current_frame.pack(fill=tk.BOTH, expand=True)
         
@@ -127,15 +184,7 @@ class AgentConfigGUI:
             entry.pack(side=tk.LEFT)
 
     def finish(self):
-        # Save text input
-        if hasattr(self, 'text_var'):
-            self.text_input_value = self.text_var.get()
-            
-        # Save weights (if currently in weight screen, or generally from dict)
-        if hasattr(self, 'vars_dict'):
-             for t, var in self.vars_dict.items():
-                self.weights[t] = var.get()
-                
+        self._save_current_values()
         self.root.destroy()
 
     def run(self):
