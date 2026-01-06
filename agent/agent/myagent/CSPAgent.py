@@ -39,6 +39,10 @@ class CSPAgent:
         self.holding_state = None # 以前の持ち物状態（変化検知用）
         
         self.task_agent = TaskAgent()
+        
+        # 優先度重み（GUI等で設定）
+        self.priority_weights = {}
+
         print("[CSPAgent] 初期化完了 - 現在はランダム行動")
 
     def __call__(self, env):
@@ -626,10 +630,19 @@ class CSPAgent:
             model.AddNoOverlap(intervals)
 
         # 3. 目的関数: タスクごとの {重み × 完了時刻} の合計を最小化
-        # 現在は重みをすべて 1 に設定
+        # GUI等で設定された self.priority_weights を使用
         objective_terms = []
         for tid, v in tasks_vars.items():
-            weight = 1
+            # tid: (verb, obj, order_idx)
+            verb, obj, _ = tid
+            # key example: "chop_onion", "cook_tomato-onion soup"
+            w_key = f"{verb}_{obj}"
+            weight = self.priority_weights.get(w_key, 1)
+            
+            # デバッグ用: 重みが1以外なら表示
+            if weight != 1:
+                print(f"[CSPAgent] Applying weight {weight} for {w_key}")
+
             objective_terms.append(v['end'] * weight)
             
         if objective_terms:
