@@ -257,6 +257,15 @@ class CSPAgent:
         """
         cutboards = env.get_pos_by_obj_gs(gs="Cutboard")
         pots = env.get_pos_by_obj_gs(gs="Pot")
+        
+        # Fallback: Check object list for 'Pot' objects (if any missed)
+        if hasattr(env, 'world'):
+            all_objs = env.world.get_object_list()
+            for o in all_objs:
+                if getattr(o, 'name', '') == 'Pot':
+                    if o.location not in pots:
+                        pots.append(o.location)
+        
         deliveries = env.get_pos_by_obj_gs(gs="Delivery")
         plates = env.get_pos_by_obj_gs(gs="Plate") # Plate object
         if not plates:

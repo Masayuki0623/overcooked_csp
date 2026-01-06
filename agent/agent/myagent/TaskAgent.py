@@ -1,4 +1,5 @@
 import heapq
+from collections import Counter
 from gym_cooking.utils.core import mergeable
 
 class TaskAgent:
@@ -139,17 +140,29 @@ class TaskAgent:
         
         def is_target_food(name):
             if not name: return False
-            if target_food_name:
-                return name == target_food_name
-            return 'Cooked' in name and '-' in name
+            if 'Cooked' not in name: return False
+            
+            # Normalize name: remove "Cooked" and split
+            current_ings = []
+            parts = name.split('-')
+            for p in parts:
+                # Remove "Cooked" if present
+                clean = p.replace('Cooked', '')
+                if clean:
+                    current_ings.append(clean)
+            
+            current_ings.sort()
+            req_ings = sorted(ingredients) if ingredients else []
+            
+            return current_ings == req_ings
 
         def is_target_plate_food(name):
             if not name: return False
             if 'Plate' not in name: return False
-            if target_food_name:
-                parts = target_food_name.split('-')
-                return all(part in name for part in parts)
-            return 'Cooked' in name and '-' in name
+            # Check if it has the food
+            # name e.g. "Plate-CookedLettuce-CookedOnion"
+            # Just check if it contains "Cooked" and the ingredients
+            return is_target_food(name.replace('Plate-', ''))
 
         # Check unwanted
         is_valid_holding = False
@@ -175,6 +188,7 @@ class TaskAgent:
                 print(f"  -> Delivering to {target}")
                 dist = abs(self_pos[0]-target[0]) + abs(self_pos[1]-target[1])
                 if dist == 1:
+                    # Delivering finishes the task
                     return self.move_to(env, target), "Delivering (Done)"
                 return self.move_to(env, target), "Delivering"
             return (0,0), "No Delivery found"
@@ -188,19 +202,29 @@ class TaskAgent:
             target_pot = None
             min_dist = float('inf')
             
+            found_any_cooked = False
             for p_loc in pots:
                 obj = env.pos_obj.get(p_loc) # Pot object/contents
                 # On pot location, there might be "CookedX-Y"
-                if obj and is_target_food(obj.full_name):
-                    print(f"  [Search] Found cooked food {obj.full_name} in Pot at {p_loc}")
-                    dist = abs(self_pos[0]-p_loc[0]) + abs(self_pos[1]-p_loc[1])
-                    if dist < min_dist:
-                        min_dist = dist
-                        target_pot = p_loc
+                if obj:
+                    print(f"  [Debug] Pot at {p_loc} contains: {obj.full_name}")
+                    if is_target_food(obj.full_name):
+                        found_any_cooked = True
+                        print(f"  [Search] Found TARGET cooked food {obj.full_name} in Pot at {p_loc}")
+                        dist = abs(self_pos[0]-p_loc[0]) + abs(self_pos[1]-p_loc[1])
+                        if dist < min_dist:
+                            min_dist = dist
+                            target_pot = p_loc
             
             if target_pot:
                 print(f"  -> Fetching cooked food from Pot at {target_pot}")
+                dist = abs(self_pos[0]-target_pot[0]) + abs(self_pos[1]-target_pot[1])
+                if dist == 1:
+                    return self.move_to(env, target_pot), "Plating food"
                 return self.move_to(env, target_pot), "Fetching cooked food"
+            
+            if not found_any_cooked:
+                print("  [Serve] No pot with cooked food found.")
             
             return (0,0), "No Pot with target cooked food found"
 
@@ -430,10 +454,19 @@ class TaskAgent:
         
         def is_target(name):
             if not name: return False
-            if target_name:
-                return name == target_name
-            # Default: any merged chopped thing
-            return 'Chopped' in name and '-' in name
+            # Robust check for merged ingredients (order independent)
+            # name e.g. "ChoppedOnion-ChoppedTomato" or "ChoppedTomato-ChoppedOnion"
+            
+            current_ings = []
+            parts = name.split('-')
+            for p in parts:
+                if p.startswith('Chopped'):
+                    current_ings.append(p.replace('Chopped', ''))
+            
+            current_ings.sort()
+            req_ings = sorted(ingredients) if ingredients else []
+            
+            return current_ings == req_ings
 
         # Check for unwanted item (Not target merged, and not one of the ingredients)
         # Ingredients check: e.g. holding ChoppedTomato is fine if we are making Tomato-Onion soup
@@ -470,9 +503,17 @@ class TaskAgent:
                 
                 if pot_obj is None:
                     is_valid_pot = True
-                elif holding and mergeable(holding, pot_obj):
-                    is_valid_pot = True
-                    print(f"  [Cook] Pot at {p_loc} is mergeable with {holding.full_name}")
+                    print(f"  [Cook] Found EMPTY Pot at {p_loc}")
+                else:
+                    # Check if already cooking or cooked
+                    if "Cooking" in pot_obj.full_name or "Cooked" in pot_obj.full_name:
+                        is_valid_pot = False
+                        print(f"  [Cook] Pot at {p_loc} is busy ({pot_obj.full_name})")
+                    elif holding and mergeable(holding, pot_obj):
+                        is_valid_pot = True
+                        print(f"  [Cook] Pot at {p_loc} is mergeable with {holding.full_name}")
+                    else:
+                        print(f"  [Cook] Pot at {p_loc} is occupied/not mergeable ({pot_obj.full_name})")
                 
                 if is_valid_pot:
                     dist = abs(self_pos[0]-p_loc[0]) + abs(self_pos[1]-p_loc[1])
@@ -520,7 +561,14 @@ class TaskAgent:
         
         # Check unwanted
         if holding_name:
-            if holding_name not in [target_ing_name, chopping_ing_name, chopped_ing_name]:
+            # Allow if it's Fresh, Chopping, OR if it contains the Chopped target (e.g. merged)
+            is_valid_holding = False
+            if holding_name in [target_ing_name, chopping_ing_name]:
+                is_valid_holding = True
+            elif chopped_ing_name in holding_name:
+                is_valid_holding = True
+            
+            if not is_valid_holding:
                  return self.drop_unwanted_item(env, holding, reason=f"Chopping {ing_name}, but holding {holding_name}")
 
         # 0. If holding Chopped Ingredient -> Place on Table
@@ -535,23 +583,35 @@ class TaskAgent:
             for c_pos in counters:
                 c_obj = env.pos_obj.get(c_pos)
                 if c_obj and mergeable(holding, c_obj):
-                    # Check if c_obj contents are valid for current order
+                    # Check if c_obj contents are valid for current order (Quantity Check)
                     is_valid_merge = True
                     if self.target_ingredients:
-                        # Extract ingredients from c_obj
-                        # c_obj might be a Plate or food. Food usually has contents.
-                        contents = c_obj.contents if hasattr(c_obj, 'contents') else [c_obj]
-                        for item in contents:
-                            # Item name e.g. "ChoppedLettuce", "Lettuce"
-                            # We want to match with ["lettuce", "onion"]
-                            name_lower = item.name.lower()
-                            # Remove prefixes
-                            for prefix in ["chopped", "fresh", "cooked", "chopping"]:
-                                if name_lower.startswith(prefix):
-                                    name_lower = name_lower.replace(prefix, "")
-                            
-                            if name_lower not in self.target_ingredients:
-                                is_valid_merge = False
+                        target_counts = Counter(self.target_ingredients)
+                        
+                        # Helper to extract normalized names
+                        def get_names(obj):
+                            names = []
+                            contents = obj.contents if hasattr(obj, 'contents') else [obj]
+                            for item in contents:
+                                n = item.name.lower()
+                                for p in ["chopped", "fresh", "cooked", "chopping"]:
+                                    if n.startswith(p): n = n.replace(p, "")
+                                names.append(n)
+                            return names
+
+                        # Current ingredients on counter + holding
+                        counter_ings = get_names(c_obj)
+                        holding_ings = get_names(holding)
+                        
+                        combined_counts = Counter(counter_ings + holding_ings)
+                        
+                        # Validate
+                        for ing, count in combined_counts.items():
+                            if count > target_counts[ing]:
+                                is_valid_merge = False # Exceeds required quantity
+                                break
+                            if ing not in target_counts:
+                                is_valid_merge = False # Unwanted ingredient
                                 break
                     
                     if is_valid_merge:
@@ -600,6 +660,16 @@ class TaskAgent:
                 print(f"  [Check Cutboard] Found {chopped_ing_name} at {loc}")
                 if not holding:
                     return self.move_to(env, loc), f"Picking up {chopped_ing_name}"
+
+        # 1.5 Check Counters for existing Chopped Ingredient (Reuse)
+        # If we have a chop task but the item is already chopped on a counter, use it!
+        if not holding:
+            counters = env.get_pos_by_obj_gs(gs='Counter')
+            for c_loc in counters:
+                obj = env.pos_obj.get(c_loc)
+                if obj and chopped_ing_name in obj.full_name:
+                     print(f"  [Reuse] Found existing {chopped_ing_name} at {c_loc}")
+                     return self.move_to(env, c_loc), f"Picking up existing {chopped_ing_name}"
 
         # For Chopping/Placing Fresh, respect assignment
         if assigned_cutboard:
