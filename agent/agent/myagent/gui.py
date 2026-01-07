@@ -29,7 +29,7 @@ class AgentConfigGUI:
         self.tasks = self._get_tasks_from_env()
         self.vars_dict = None
         self.image_cache = [] # To keep references to images alive
-        self.selected_model = "gpt-4o-mini"
+        self.selected_model = "gemini-2.5-flash"
         
         # Setup paths
         self.project_root = Path(os.getcwd())
