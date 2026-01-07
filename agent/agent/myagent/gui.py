@@ -199,8 +199,10 @@ class AgentConfigGUI:
         model_frame.pack(fill=tk.X, padx=10, pady=5)
         tk.Label(model_frame, text="モデル:", bg=self.bg_color, fg=self.fg_color, font=self.normal_font).pack(side=tk.LEFT)
         self.model_var = tk.StringVar(value=self.selected_model)
-        model_combo = ttk.Combobox(model_frame, textvariable=self.model_var, values=["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest"], state="readonly", width=20)
-        model_combo.pack(side=tk.LEFT, padx=10)
+        model_combo = ttk.Combobox(model_frame, textvariable=self.model_var, 
+                                   values=["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-3-pro-preview", "gemini-exp-1206", "gemini-pro-latest", "gemini-2.0-flash", "gemini-flash-latest"], 
+                                   state="readonly", width=25, font=self.normal_font)
+        model_combo.pack(side=tk.LEFT, padx=15)
         
         # Text Input
         tk.Label(ai_frame, text="指示 (例: '切る作業を優先して'):", bg=self.bg_color, fg=self.fg_color, font=self.normal_font).pack(anchor="w", padx=10)
