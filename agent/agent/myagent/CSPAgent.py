@@ -15,28 +15,27 @@ class CSPAgent:
         self.no_reschedule = no_reschedule
         self.initialized = False
         
-        # CSP関連の変数（後で実装）
-        self.variables = []  # CSPの変数
-        self.domains = {}    # 各変数のドメイン
-        self.constraints = [] # 制約のリスト
-        # 入力フレーム間隔（1アクションに必要なフレーム数）
-        # 環境側でフレームスキップがある場合にコストへ反映するための係数
-        self.frames_per_action = 1  # デフォルト: 毎フレーム入力可能
+        # CSP関連の変数
+        self.variables = []  
+        self.domains = {}
+        self.constraints = [] 
+        # 入力フレーム間隔
+        self.frames_per_action = 1 
 
-        # FPS（フレーム→秒換算用）。環境側は10fps
+        # FPS
         self.fps = 10
-        # 期限（MAX_ORDER_LENGTH_SECONDS）をフレームへ
+        # 期限
         self.deadline_frames = 75 * self.fps
-        # 30秒の選択予算（A解釈）
+        # 30秒の選択予算
         self.budget_frames = 30 * self.fps
-        # タスク重み（serve重め）
+        # タスク重み
         self.w_chop = 1
         self.w_cook = 2
         self.w_serve = 5
         
         # 実行状態管理
         self.current_task_idx = 0
-        self.holding_state = None # 以前の持ち物状態（変化検知用）
+        self.holding_state = None 
         
         self.task_agent = TaskAgent()
         
@@ -69,23 +68,19 @@ class CSPAgent:
                 pass
             else:
                 if self.initialized: # 初回以外なら差分を表示
-                    print(f"\n[Task Update] Time: {env.time}")
+                    print(f"\n[タスク更新] 時間: {env.time}")
                     if added:
-                        print(f"  (+) Added: {added}")
+                        print(f"  (+) 追加: {added}")
                     if removed:
-                        print(f"  (-) Removed: {removed}")
-                    print("  -> Re-calculating Schedule...")
+                        print(f"  (-) 削除: {removed}")
+                    print("  -> スケジュール再計算中...")
 
                 # 簡易CSPスケジューリング（選択問題：A解釈）
                 try:
-                    # solve_csp_selection内でタスクリスト全体も表示される
-                    # self.schedule = self.solve_csp_selection(env, orders=current_orders)
-                    
-                    # 新しいスケジューリングメソッドを使用
                     start_time = time.time()
                     self.schedule = self.solve_csp_scheduling(env, orders=current_orders)
                     elapsed_time = time.time() - start_time
-                    print(f"[CSPAgent] Scheduling Time: {elapsed_time:.4f} seconds")
+                    print(f"[CSPAgent] スケジューリング時間: {elapsed_time:.4f} 秒")
                     
                     self._print_schedule(self.schedule)
                     
@@ -101,49 +96,34 @@ class CSPAgent:
 
         # スケジュール実行
         if not hasattr(self, 'schedule') or not self.schedule or self.current_task_idx >= len(self.schedule):
-            return (0, 0), "No Task"
+            return (0, 0), "タスクなし"
 
         task = self.schedule[self.current_task_idx]
         tid = task['id']
         verb, obj, order_idx = tid
-        res = task['res'] # e.g. ('cutboard', (x,y)) or ('pot', (x,y))
+        res = task['res'] 
 
         # Construct Task Name
         task_name = None
         if verb == 'chop':
             task_name = f"chop_{obj}"
-            # self.task_agent.assigned_cutboard = res[1]
-            # self.task_agent.assigned_pot = None
             self.task_agent.assigned_counter = task.get('assigned_counter')
         elif verb == 'cook':
-            # obj is soup name e.g. "tomato-onion soup"
             parts = obj.replace(' soup', '').split('-')
             task_name = f"cook_{'_'.join(parts)}"
-            # self.task_agent.assigned_pot = res[1]
-            # self.task_agent.assigned_cutboard = None
             self.task_agent.assigned_counter = None
         elif verb == 'serve':
             parts = obj.replace(' soup', '').split('-')
             task_name = f"serve_{'_'.join(parts)}"
-            # self.task_agent.assigned_pot = res[1]
-            # self.task_agent.assigned_cutboard = None
-            # serve needs plate and delivery? CSP schedule might not have them all in 'res'.
-            # Assuming default plate/delivery logic in TaskAgent unless specified.
             self.task_agent.assigned_counter = None
         
         if task_name:
             self.task_agent.task_name = task_name
-            # Debug: Print what we are delegating
-            # print(f"[CSPAgent] Delegating {task_name} to TaskAgent. Res: {res}")
-            
             action, reason = self.task_agent(env)
             
-            # Debug: Print result
-            # print(f"  -> TaskAgent returned: {reason}")
-
             # Check completion
-            if "Done" in reason or "done" in reason:
-                print(f"[CSPAgent] Task {task_name} DONE. Moving to next.")
+            if "Done" in reason or "done" in reason or "完了" in reason:
+                print(f"[CSPAgent] タスク {task_name} 完了。次へ移動。")
                 self.current_task_idx += 1
                 # Reset assignments
                 self.task_agent.assigned_cutboard = None
@@ -154,19 +134,10 @@ class CSPAgent:
             
             return action, reason
 
-        return (0,0), "Idle"
+        return (0,0), "アイドル"
 
-    # ============ OR-Tools: 0-1選択問題（予算内で重み最大化） ============
+    # ============ OR-Tools: 0-1選択問題（予算内で重み最大化） ============ 
     def solve_csp_knapsack_with_ortools(self, env):
-
-        """
-        0-1選択問題（Knapsack with precedence）：
-        - 各タスクに Bool 変数 x_t を割当
-        - 予算制約: sum(dur_t * x_t) <= budget
-        - 前後関係: serve <= cook, cook <= chop_i（各注文）
-        - 目的: sum(weight_t * dur_t * x_t) を最大化
-        戻り値: 選択されたタスクリスト（開始時刻は付与しない簡易版）
-        """
         orders = self._build_order_tasks(env)
         tasks = []
         for o in orders:
@@ -183,14 +154,8 @@ class CSPAgent:
             durations[name] = int(t['dur'])
             benefits[name] = int(t['weight'] * t['dur'])
 
-        # 予算制約
         model.add_linear_le(durations, self.budget_frames)
 
-        # 前後関係（各注文に対して）
-        # cook は全chopが選ばれている必要がある: x_cook <= x_chop_i
-        # serve は cook が選ばれている必要がある: x_serve <= x_cook
-        # NewBoolVarはIntVar扱いなので線形比較で十分（0/1）
-        # ここでは model.model 直接アクセスで関係式を追加（具体的な変数参照が必要なため）
         name_by_task_id = {}
         for name, t in zip(var_names, tasks):
             name_by_task_id[id(t)] = name
@@ -210,7 +175,6 @@ class CSPAgent:
                     c_name = name_by_task_id[id(cooks[0])]
                     model.model.Add(model.vars[s_name] <= model.vars[c_name])
 
-        # 目的関数（重み*時間の合計を最大化）
         model.maximize_linear(benefits)
 
         result = solve_csp(model, time_limit=5.0)
@@ -229,22 +193,18 @@ class CSPAgent:
             verb = t['verb']; obj = t['obj']; order = t['order']
             dur = t['dur']; w = t['weight']
             total += dur
-            print(f"選択: {verb} {obj} (注文{order+1}) dur={dur}, weight={w}")
+            print(f"選択: {verb} {obj} (注文{order+1}) 所要={dur}, 重み={w}")
         print(f"合計投入フレーム(選択分): {total}")
         print("===================================\n")
 
-    # ============ CSP（選択問題 A解釈） ============
+    # ============ CSP（選択問題 A解釈） ============ 
     def _get_resources(self, env):
-        """
-        資源ID（座標）を取得。
-        Cutboard複数、Pot複数に対応。戻り値は辞書。
-        """
         cutboards = env.get_pos_by_obj_gs(gs="Cutboard")
         pots = env.get_pos_by_obj_gs(gs="Pot")
         deliveries = env.get_pos_by_obj_gs(gs="Delivery")
-        plates = env.get_pos_by_obj_gs(gs="Plate") # Plate object
+        plates = env.get_pos_by_obj_gs(gs="Plate") 
         if not plates:
-            plates = env.get_pos_by_obj_gs(gs="PlateTile") # Dispenser
+            plates = env.get_pos_by_obj_gs(gs="PlateTile") 
         counters = env.get_pos_by_obj_gs(gs="Counter")
 
         return {
@@ -256,32 +216,24 @@ class CSPAgent:
         }
 
     def _task_duration_frames(self, env, verb, obj, order_idx, assigned_counter=None):
-        """
-        タスク所要フレーム数（移動含む）を返す。serveは重めの重みで扱うためベースは同じでも目的関数で重み付け。
-        """
         resources = self._get_resources(env)
         
         def get_nearest(start_pos, candidates):
             if not candidates: return None
             if not start_pos: return candidates[0]
-            # Simple Manhattan distance for heuristic
             return min(candidates, key=lambda p: abs(p[0]-start_pos[0]) + abs(p[1]-start_pos[1]))
 
         if verb == 'chop':
-            # 距離 + CHOP 8 + 置く1 + 取得1 + 置く1
-            # 距離は食材→まな板→特定場所の最短合計
             tile_map = {"lettuce": "FreshLettuceTile", "onion": "FreshOnionTile", "tomato": "FreshTomatoTile"}
             ing_pos_list = env.get_pos_by_obj_gs(gs=tile_map.get(obj, ""))
             if not ing_pos_list: return None
-            ing_pos = ing_pos_list[0] # Assume first dispenser
+            ing_pos = ing_pos_list[0] 
 
             cutboard_pos_list = resources['cutboards']
             if not cutboard_pos_list: return None
             
-            # Find nearest cutboard to ingredient
             cutboard_pos = get_nearest(ing_pos, cutboard_pos_list)
             
-            # Find nearest counter to cutboard (to place chopped item)
             if assigned_counter:
                 target = assigned_counter
             else:
@@ -299,14 +251,9 @@ class CSPAgent:
                             out.append((nx,ny))
                 return list(set(out))
             
-            # Calculate path: Ing -> Cutboard -> Counter
-            # Note: astar_distance takes (start, goal). We need adjacent cells.
-            # Simplified: just use center-to-center astar for estimation, or use existing adj logic
-            
             ing_adj=adj([ing_pos]); cut_adj=adj([cutboard_pos]); tgt_adj=adj([target])
             
             min_total=None
-            # Try to find valid path
             for s in ing_adj:
                 for m in cut_adj:
                     d1 = self.astar_distance(env, s, m)
@@ -325,13 +272,9 @@ class CSPAgent:
             return int(min_total + 8 + 1 + 1 + 1)
 
         elif verb == 'cook':
-            # Counter (Chopped) -> Pot
-            # We don't know exactly which counter, so assume nearest counter to Pot
             pot_pos_list = resources['pots']
             if not pot_pos_list: return None
             
-            # Use order_idx to distribute pots if multiple available? 
-            # For duration estimation, just pick one (e.g. first or nearest to center)
             pot_pos = pot_pos_list[order_idx % len(pot_pos_list)]
             
             counters = env.get_pos_by_obj_gs(gs="Counter")
@@ -343,7 +286,6 @@ class CSPAgent:
             return int(d + 2)
 
         elif verb == 'serve':
-            # Plate -> Pot -> Delivery
             plate_pos = resources['plate']
             pot_pos_list = resources['pots']
             delivery_pos = resources['delivery']
@@ -363,17 +305,10 @@ class CSPAgent:
         return { 'chop': self.w_chop, 'cook': self.w_cook, 'serve': self.w_serve }.get(verb, 1)
 
     def _build_order_tasks(self, env):
-        """
-        注文ごとにタスク列を作成（chop群→cook→serve）。各タスクにID、所要時間、資源候補を付与。
-        環境の状態（Chopped食材の有無、Potの中身）を考慮し、不要なタスクは生成しない。
-        """
-        # 1. 環境内のChopped食材をカウント
-        available_chopped = {} # {'Tomato': count, ...}
+        available_chopped = {} 
         
-        # 2. Potの中身を確認
-        pot_states = [] # [{'names': ['Tomato', 'Lettuce'], 'obj': obj, 'used': False}, ...]
+        pot_states = [] 
 
-        # env.world.get_object_list() を使用 -> env.world_all (EnvState) or env.world.get_object_list() (Environment)
         if hasattr(env, 'world_all'):
             all_objects = env.world_all
         elif hasattr(env, 'world'):
@@ -381,28 +316,21 @@ class CSPAgent:
         else:
             all_objects = []
 
-        # Potの場所を取得 (PotはGridSquare)
         pot_locs = []
         for o in all_objects:
              if getattr(o, 'name', '') == 'Pot':
                  pot_locs.append(o.location)
         
-        # Cutboardの場所を取得
         cutboard_locs = env.get_pos_by_obj_gs(gs="Cutboard")
 
         for obj in all_objects:
-            # Objectクラスのインスタンスかどうかを判定（簡易的）
             if type(obj).__name__ == 'Object':
-                # Chopped check: is_chopped() がTrue かつ 単一の食材
-                # 【修正】まな板の上にあるChopped食材は「完了」とみなさない（タスクを継続させてテーブルへ移動させるため）
                 if hasattr(obj, 'is_chopped') and obj.is_chopped() and len(obj.contents) == 1 and not obj.is_held:
                     if obj.location not in cutboard_locs:
                         food_name = obj.contents[0].name
                         available_chopped[food_name] = available_chopped.get(food_name, 0) + 1
                 
-                # Pot check: Potの場所にあるObject
                 if obj.location in pot_locs:
-                    # Potの中身
                     c_names = sorted([c.name for c in obj.contents])
                     pot_states.append({'names': c_names, 'obj': obj, 'used': False})
 
@@ -421,38 +349,31 @@ class CSPAgent:
                 order_idx += 1
                 continue
             
-            # Assign counter for this order (Round-robin)
             assigned_counter = None
             if counters:
                 assigned_counter = counters[order_idx % len(counters)]
 
-            # 照合用にCapitalize
             ings_cap = [ing.capitalize() for ing in ings_lower]
             
             soup_name = '-'.join(ings_lower) + ' soup'
             tasks=[]
             
-            # Cookタスクが必要か判定
             sorted_ings = sorted(ings_cap)
             cook_needed = True
             
-            # Potの状態と照合
             for ps in pot_states:
                 if not ps['used'] and ps['names'] == sorted_ings:
                     ps['used'] = True
                     cook_needed = False
                     break
 
-            # chops
             for ing in ings_cap:
-                # 既にPotに入っているならChopも不要
                 if not cook_needed:
                     continue
 
-                # 環境にChopped食材があるか確認
                 if available_chopped.get(ing, 0) > 0:
                     available_chopped[ing] -= 1
-                    continue # Skip chop task
+                    continue 
 
                 dur = self._task_duration_frames(env, 'chop', ing.lower(), order_idx, assigned_counter)
                 if dur is None: continue
@@ -463,7 +384,6 @@ class CSPAgent:
                     'res_candidates': [('cutboard', r) for r in resources['cutboards']],
                     'assigned_counter': assigned_counter
                 })
-            # cook
             if cook_needed:
                 dur = self._task_duration_frames(env, 'cook', soup_name, order_idx)
                 if dur is not None:
@@ -473,7 +393,6 @@ class CSPAgent:
                         'dur':dur,'weight':self._task_weight('cook'),
                         'res_candidates': [('pot', r) for r in resources['pots']],
                     })
-            # serve
             dur = self._task_duration_frames(env, 'serve', soup_name, order_idx)
             if dur is not None:
                 tasks.append({
@@ -490,17 +409,13 @@ class CSPAgent:
         """
         OR-Tools CP-SAT を用いたスケジューリング（Makespan最小化）。
         """
-        print(f"[CSPAgent] Solving CSP Scheduling for {len(orders)} orders...")
+        print(f"[CSPAgent] CSPスケジューリング開始 ({len(orders)} 注文)...")
         model = cp_model.CpModel()
         
-        # 1. 変数定義
         tasks_vars = {}
         agent_intervals = []
         
-        # リソース割り当て変数の保存用
-        # task_id -> {loc: bool_var}
         chop_res_vars = {} 
-        # order_idx -> {loc: bool_var}
         pot_res_vars = {}
 
         resources = self._get_resources(env)
@@ -511,9 +426,6 @@ class CSPAgent:
         pot_intervals = {loc: [] for loc in pot_locs}
         
         all_end_vars = []
-        # Horizon (十分大きな値)
-        # 150フレームの待機時間があるため、タスク数が多いと時間は伸びる。
-        # 予算制約ではなく物理的な限界として大きめに設定する。
         horizon = 10000 
         
         total_tasks_count = 0
@@ -525,7 +437,7 @@ class CSPAgent:
             
             total_tasks_count += len(chops) + len(cooks) + len(serves)
 
-            # --- Chop Tasks ---
+            # --- Chop Tasks --- 
             chop_ends = []
             for t in chops:
                 dur = int(t['dur'])
@@ -549,7 +461,7 @@ class CSPAgent:
                     opts.append(is_present)
                 model.Add(sum(opts) == 1)
 
-            # --- Cook Task ---
+            # --- Cook Task --- 
             cook_end = None
             cook_start = None
             if cooks:
@@ -565,11 +477,10 @@ class CSPAgent:
                 cook_end = end_var
                 tasks_vars[t['id']] = {'start': start_var, 'end': end_var, 'task': t}
                 
-                # Cook must start after ALL chops for this order are done
                 for ce in chop_ends:
                     model.Add(start_var >= ce)
 
-            # --- Serve Task ---
+            # --- Serve Task --- 
             serve_start = None
             if serves:
                 t = serves[0]
@@ -587,7 +498,7 @@ class CSPAgent:
                     model.Add(cook_end <= start_var)
                     model.Add(start_var >= cook_end + 150)
 
-            # --- Pot Allocation & Usage ---
+            # --- Pot Allocation & Usage --- 
             if cooks and serves:
                 pot_opts = []
                 pot_res_vars[o['order']] = {}
@@ -596,16 +507,9 @@ class CSPAgent:
                     pot_res_vars[o['order']][p_loc] = is_present
                     pot_opts.append(is_present)
                     
-                    # Pot占有区間: Cook開始 〜 Serve開始
-                    # Cookタスクは「鍋に入れる」作業。この時点で鍋は占有される。
-                    # Serve開始時に鍋から取り出すので、Serve開始まで占有。
-                    
-                    # duration = serve_start - cook_start
                     duration_var = model.NewIntVar(0, horizon, f"dur_pot_{o['order']}_{p_loc}")
                     model.Add(duration_var == serve_start - cook_start)
                     
-                    # OptionalInterval
-                    # start=cook_start, size=duration_var, end=serve_start
                     pot_interval = model.NewOptionalIntervalVar(
                         cook_start, duration_var, serve_start, 
                         is_present, 
@@ -615,12 +519,11 @@ class CSPAgent:
                 
                 model.Add(sum(pot_opts) == 1)
 
-        print(f"[CSPAgent] Total tasks to schedule: {total_tasks_count}")
+        print(f"[CSPAgent] スケジュール対象タスク数: {total_tasks_count}")
         if total_tasks_count == 0:
-            print("[CSPAgent] No tasks to schedule.")
+            print("[CSPAgent] スケジュール対象タスクがありません。")
             return []
 
-        # 2. 資源制約 (NoOverlap)
         model.AddNoOverlap(agent_intervals)
         
         for loc, intervals in cutboard_intervals.items():
@@ -629,19 +532,14 @@ class CSPAgent:
         for loc, intervals in pot_intervals.items():
             model.AddNoOverlap(intervals)
 
-        # 3. 目的関数: タスクごとの {重み × 完了時刻} の合計を最小化
-        # GUI等で設定された self.priority_weights を使用
         objective_terms = []
         for tid, v in tasks_vars.items():
-            # tid: (verb, obj, order_idx)
             verb, obj, _ = tid
-            # key example: "chop_onion", "cook_tomato-onion soup"
             w_key = f"{verb}_{obj}"
             weight = self.priority_weights.get(w_key, 1)
             
-            # デバッグ用: 重みが1以外なら表示
             if weight != 1:
-                print(f"[CSPAgent] Applying weight {weight} for {w_key}")
+                print(f"[CSPAgent] 重み適用: {weight} ({w_key})")
 
             objective_terms.append(v['end'] * weight)
             
@@ -650,14 +548,13 @@ class CSPAgent:
         else:
             model.Minimize(0)
 
-        # 4. 解く
         solver = cp_model.CpSolver()
         status = solver.Solve(model)
-        print(f"[CSPAgent] Solver Status: {solver.StatusName(status)}")
+        print(f"[CSPAgent] ソルバー状態: {solver.StatusName(status)}")
 
         schedule = []
         if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-            print(f"[CSPAgent] Optimal Makespan: {solver.ObjectiveValue()}")
+            print(f"[CSPAgent] 最適Makespan: {solver.ObjectiveValue()}")
             for tid, v in tasks_vars.items():
                 start_val = solver.Value(v['start'])
                 end_val = solver.Value(v['end'])
@@ -668,7 +565,6 @@ class CSPAgent:
                 order_idx = t['order']
                 
                 if verb == 'chop':
-                    # 割り当てられたまな板を探す
                     for loc, var in chop_res_vars.get(tid, {}).items():
                         if solver.Value(var) == 1:
                             res = ('cutboard', loc)
@@ -676,7 +572,6 @@ class CSPAgent:
                     if res is None: res = ('cutboard', '?')
                     
                 elif verb == 'cook':
-                    # 割り当てられた鍋を探す
                     for loc, var in pot_res_vars.get(order_idx, {}).items():
                         if solver.Value(var) == 1:
                             res = ('pot', loc)
@@ -684,7 +579,6 @@ class CSPAgent:
                     if res is None: res = ('pot', '?')
                     
                 elif verb == 'serve':
-                    # 割り当てられた鍋を探す（cookと同じはず）
                     for loc, var in pot_res_vars.get(order_idx, {}).items():
                         if solver.Value(var) == 1:
                             res = ('pot', loc)
@@ -700,47 +594,35 @@ class CSPAgent:
                 })
             schedule.sort(key=lambda x: x['start'])
         else:
-            print(f"[CSPAgent] No solution found. Status: {solver.StatusName(status)}")
+            print(f"[CSPAgent] 解が見つかりませんでした。状態: {solver.StatusName(status)}")
             
         return schedule
 
     def solve_csp_selection(self, env, orders=None):
-        """
-        選択問題（A解釈）：予算300フレーム内でスケジュール可能なタスク集合を選び、未選択コスト（重み*dur）の合計を最小化。
-        近似解法：順序制約と資源占有を守りつつ、serveを優先し、予算まで積み上げる。
-        戻り値：スケジュールリスト [{id, start, end, res}]
-        """
         if orders is None:
             orders = self._build_order_tasks(env)
         
-        # タスク列の表示
-        print("\n--- Generated Tasks (Filtered by Environment State) ---")
+        print("\n--- 生成タスク (環境状態でフィルタ済) ---")
         for o in orders:
-            print(f"Order {o['order']} (Ings: {o['ingredients']}):")
+            print(f"注文 {o['order']} (食材: {o['ingredients']}):")
             if not o['tasks']:
-                print("  (No tasks needed)")
+                print("  (タスク不要)")
             for t in o['tasks']:
-                print(f"  - {t['id']}: dur={t['dur']}, res={t['res_candidates']}")
+                print(f"  - {t['id']}: 所要={t['dur']}, 資源候補={t['res_candidates']}")
         print("-------------------------------------------------------\n")
 
         budget = self.budget_frames
-        # 資源タイムライン（各IDごとに終了時刻）
         res_timeline = {'cutboard':{}, 'pot':{}}
         schedule = []
         time_cursor = 0
 
-        # serve重視のため、注文をserve重みでソート（擬似的に）
         orders_sorted = sorted(orders, key=lambda o: sum(t['weight']*t['dur'] for t in o['tasks'] if t['verb']=='serve'), reverse=True)
 
         for o in orders_sorted:
-            # 前段階の終了時刻を追跡
             prev_finish = time_cursor
-            # まず全chop
             for t in [t for t in o['tasks'] if t['verb']=='chop']:
-                # cutboard資源割当：最も早く空くIDを選ぶ
                 if not t['res_candidates']:
                     continue
-                # 候補の中で最小の空き時刻
                 best_id=None; earliest=0
                 for _, rid in t['res_candidates']:
                     free = res_timeline['cutboard'].get(rid, 0)
@@ -749,12 +631,10 @@ class CSPAgent:
                 start = max(prev_finish, earliest)
                 end = start + t['dur']
                 if end - time_cursor > budget:
-                    # 予算超過ならこの注文の残りはスキップ
                     break
                 res_timeline['cutboard'][best_id] = end
                 schedule.append({'id':t['id'],'start':start,'end':end,'res':('cutboard',best_id)})
                 prev_finish = end
-            # cook
             cooks = [t for t in o['tasks'] if t['verb']=='cook']
             if cooks:
                 t = cooks[0]
@@ -767,10 +647,9 @@ class CSPAgent:
                     start = max(prev_finish, earliest)
                     end = start + t['dur']
                     if end - time_cursor <= budget:
-                        res_timeline['pot'][best_id] = end  # 調理中占有
+                        res_timeline['pot'][best_id] = end 
                         schedule.append({'id':t['id'],'start':start,'end':end,'res':('pot',best_id)})
                         prev_finish = end
-            # serve
             serves = [t for t in o['tasks'] if t['verb']=='serve']
             if serves:
                 t = serves[0]
@@ -780,7 +659,6 @@ class CSPAgent:
                     schedule.append({'id':t['id'],'start':start,'end':end,'res':None})
                     prev_finish = end
 
-            # 予算更新（累積投入分）
             if prev_finish - time_cursor > budget:
                 break
             else:
@@ -792,22 +670,16 @@ class CSPAgent:
     def _print_schedule(self, schedule):
         print("\n=== CSP スケジュール（フレーム単位） ===")
         total_frames = 0
-        total_weighted_unselected = 0  # 近似実装では未選択評価を省略（必要なら追加）
+        total_weighted_unselected = 0
         for item in schedule:
             tid = item['id']; start=item['start']; end=item['end']; res=item['res']
             verb,obj,order = tid
-            print(f"{verb} {obj} (注文{order+1}) : start={start}, end={end}, res={res}")
+            print(f"{verb} {obj} (注文{order+1}) : 開始={start}, 終了={end}, 資源={res}")
             total_frames = max(total_frames, end)
         print(f"総投入フレーム: {total_frames}")
         print("===================================\n")
 
-    # ============ 距離計算: A* ============
     def astar_distance(self, env, start, goal):
-        """
-        A*アルゴリズムで2座標間の最短距離(歩数)を返す。
-        引数: start=(x,y), goal=(x,y)
-        戻り値: 距離(整数)。到達不能ならNone。
-        """
         import heapq
         width = env.world_width
         height = env.world_height
@@ -817,17 +689,10 @@ class CSPAgent:
             return 0 <= x < width and 0 <= y < height
 
         def walkable(x, y):
-            # Relaxed walkable check: allow goal to be non-walkable (e.g. interaction target)
-            # But A* usually finds path to adjacent.
-            # Here we assume start/goal are walkable OR we want path to adjacent?
-            # If goal is a counter/pot (grid=0), we can't step ON it.
-            # So we should find path to adjacent of goal.
             return in_bounds(x, y) and grid[x][y] == 1
 
-        # If goal is not walkable (e.g. object), we need to find path to adjacent
         original_goal = goal
         if not walkable(goal[0], goal[1]):
-            # Find nearest walkable adjacent
             adjacents = []
             for dx, dy in [(0,1),(0,-1),(1,0),(-1,0)]:
                 nx, ny = goal[0]+dx, goal[1]+dy
@@ -837,7 +702,6 @@ class CSPAgent:
             if not adjacents:
                 return None
             
-            # Pick closest adjacent to start
             goal = min(adjacents, key=lambda p: abs(p[0]-start[0]) + abs(p[1]-start[1]))
 
         def heuristic(a, b):
@@ -865,12 +729,7 @@ class CSPAgent:
                     heapq.heappush(open_set, (f_score[neighbor], neighbor))
         return None
 
-    # ============ タスクコスト出力(簡易) ============
     def print_task_costs(self, env):
-        """
-        現在の注文からタスク列を生成し、各タスクのコストを簡易に出力する。
-        TSPソルバーの出力形式を参考に再実装。
-        """
         tasks_all = []
         for order_tuple in env.order.current_orders:
             goal_obj = order_tuple[0]
@@ -895,11 +754,6 @@ class CSPAgent:
                 print("  ", t)
         print("=====================================")
 
-        # タスクコスト計算(簡易版):
-        # chop: 食材タイルの隣接 -> まな板隣接 -> 特定場所隣接 の最短合計移動 + 定数
-        # cook: 特定場所 -> 鍋 の移動 + インタラクト定数
-        # serve: 皿 -> 鍋 -> 配膳 の移動 + 取得/配膳定数
-        # さらに、1アクションあたり必要フレーム数(self.frames_per_action)をコストへ乗算して反映
         def get_adjacent_walkables(pos_list):
             width = env.world_width
             height = env.world_height
@@ -918,7 +772,6 @@ class CSPAgent:
             "tomato": "FreshTomatoTile"
         }
 
-        # 固定座標(現行レベルに合わせた簡易設定)
         special_places = [(2,3), (2,4), (2,5)]
         pot_places = [(3,5), (4,5), (5,5)]
         plate_pos = (6,6)
@@ -950,7 +803,6 @@ class CSPAgent:
                     if min_total is None:
                         print((verb, obj, order_idx), ": 経路なし")
                     else:
-                        # 定数コスト(簡易): chop動作8 + 置く1 + 取得1
                         base = min_total + 8 + 1 + 1
                         cost = base * self.frames_per_action
                         print((verb, obj, order_idx), ":", cost)
@@ -961,7 +813,6 @@ class CSPAgent:
                     if d is None:
                         print((verb, obj, order_idx), ": 経路なし")
                     else:
-                        # インタラクト2回を+2
                         base = d + 2
                         cost = base * self.frames_per_action
                         print((verb, obj, order_idx), ":", cost)
@@ -972,7 +823,6 @@ class CSPAgent:
                     if d1 is None or d2 is None:
                         print((verb, obj, order_idx), ": 経路なし")
                     else:
-                        # 皿取得1 + 料理取得1 + 配膳1 を+3
                         base = d1 + d2 + 3
                         cost = base * self.frames_per_action
                         print((verb, obj, order_idx), ":", cost)

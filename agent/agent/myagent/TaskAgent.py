@@ -12,18 +12,13 @@ class TaskAgent:
         self.assigned_pot = None
         self.assigned_plate = None
         self.assigned_serve_loc = None
-        self.assigned_counter = None # New: for placing chopped ingredients
+        self.assigned_counter = None 
         
-        print(f"[TaskAgent] Initialized with task: {self.task_name}")
+        print(f"[TaskAgent] タスクで初期化: {self.task_name}")
 
     def astar_path(self, env, start, goal):
-        """
-        A*探索で経路を求める。
-        戻り値: [(x,y), ...] のリスト（startを含まず、goalを含む）。到達不能ならNone。
-        """
         width = env.world_width
         height = env.world_height
-        # Use to_grid_a to avoid other agents
         grid = env.to_grid_a
 
         def in_bounds(x, y):
@@ -69,18 +64,17 @@ class TaskAgent:
         self_pos = env.self_pos
         dist = abs(self_pos[0] - target_pos[0]) + abs(self_pos[1] - target_pos[1])
         if dist == 1:
-            print(f"  [MoveTo] Adjacent to target {target_pos}. Interacting.")
+            print(f"  [MoveTo] ターゲット {target_pos} に隣接。インタラクトします。")
             return (target_pos[0] - self_pos[0], target_pos[1] - self_pos[1])
         
         adjacents = []
         for dx, dy in [(0,1),(0,-1),(1,0),(-1,0)]:
             nx, ny = target_pos[0]+dx, target_pos[1]+dy
-            # Use to_grid_a to check if adjacent is occupied by agent
             if 0 <= nx < env.world_width and 0 <= ny < env.world_height and env.to_grid_a[nx][ny] == 1:
                 adjacents.append((nx, ny))
         
         if not adjacents:
-            print(f"  [MoveTo] No walkable adjacents for {target_pos} (checked to_grid_a)")
+            print(f"  [MoveTo] ターゲット {target_pos} の歩行可能な隣接セルがありません (to_grid_a で確認)")
             return (0,0)
 
         best_path = None
@@ -94,22 +88,20 @@ class TaskAgent:
         
         if best_path:
             next_step = best_path[0]
-            print(f"  [MoveTo] Path found. Next step: {next_step}")
+            print(f"  [MoveTo] 経路が見つかりました。次のステップ: {next_step}")
             return (next_step[0] - self_pos[0], next_step[1] - self_pos[1])
         
-        print(f"  [MoveTo] No path found to {target_pos}")
+        print(f"  [MoveTo] {target_pos} への経路が見つかりません")
         return (0, 0)
 
     def __call__(self, env):
         if self.task_name.startswith('chop_'):
-            # Extract ingredient name from task_name (e.g. chop_tomato -> Tomato)
             ing_name = self.task_name.split('_')[1].capitalize()
             return self.process_chop_task(env, ing_name, assigned_cutboard=self.assigned_cutboard, assigned_counter=self.assigned_counter)
         elif self.task_name.startswith('cook'):
             parts = self.task_name.split('_')
             ingredients = []
             if len(parts) > 1:
-                # e.g. cook_tomato_onion -> ['Tomato', 'Onion']
                 ingredients = [p.capitalize() for p in parts[1:]]
             return self.process_cook_task(env, ingredients, assigned_pot=self.assigned_pot)
         elif self.task_name.startswith('serve'):
@@ -118,19 +110,18 @@ class TaskAgent:
             if len(parts) > 1:
                 ingredients = [p.capitalize() for p in parts[1:]]
             return self.process_serve_task(env, ingredients, assigned_plate=self.assigned_plate, assigned_serve_loc=self.assigned_serve_loc, assigned_pot=self.assigned_pot)
-        return (0,0), f"Unknown Task: {self.task_name}"
+        return (0,0), f"不明なタスク: {self.task_name}"
 
     def process_serve_task(self, env, ingredients=None, assigned_plate=None, assigned_serve_loc=None, assigned_pot=None):
         self_pos = env.self_pos
         holding = env.hold
         holding_name = holding.full_name if holding else None
         
-        # Target food name (without Plate)
         target_food_name = None
         if ingredients:
             ingredients.sort()
             target_food_name = "-".join([f"Cooked{i}" for i in ingredients])
-            print(f"[TaskAgent] Serve Target: {target_food_name}")
+            print(f"[TaskAgent] 配膳ターゲット: {target_food_name}")
         
         def is_target_food(name):
             if not name: return False
@@ -155,12 +146,12 @@ class TaskAgent:
             
             if deliveries:
                 target = min(deliveries, key=lambda p: abs(p[0]-self_pos[0]) + abs(p[1]-self_pos[1]))
-                print(f"  -> Delivering to {target}")
+                print(f"  -> {target} へ配膳中")
                 dist = abs(self_pos[0]-target[0]) + abs(self_pos[1]-target[1])
                 if dist == 1:
-                    return self.move_to(env, target), "Delivering (Done)"
-                return self.move_to(env, target), "Delivering"
-            return (0,0), "No Delivery found"
+                    return self.move_to(env, target), "配膳 (完了)"
+                return self.move_to(env, target), "配膳"
+            return (0,0), "受取場所が見つかりません"
 
         # 2. If holding Plate -> Go to Pot with Cooked Food
         if holding_name == 'Plate':
@@ -174,17 +165,17 @@ class TaskAgent:
             for p_loc in pots:
                 obj = env.pos_obj[p_loc]
                 if obj and is_target_food(obj.full_name):
-                    print(f"  [Search] Found cooked food {obj.full_name} in Pot at {p_loc}")
+                    print(f"  [探索] 鍋 {p_loc} に調理済み料理 {obj.full_name} を発見")
                     dist = abs(self_pos[0]-p_loc[0]) + abs(self_pos[1]-p_loc[1])
                     if dist < min_dist:
                         min_dist = dist
                         target_pot = p_loc
             
             if target_pot:
-                print(f"  -> Fetching cooked food from Pot at {target_pot}")
-                return self.move_to(env, target_pot), "Fetching cooked food"
+                print(f"  -> 鍋 {target_pot} から調理済み料理を取りに行きます")
+                return self.move_to(env, target_pot), "調理済み料理の取得"
             
-            return (0,0), "No Pot with target cooked food found"
+            return (0,0), "ターゲットの調理済み料理が入った鍋が見つかりません"
 
         # 3. If holding nothing -> Get Plate
         if not holding:
@@ -197,12 +188,12 @@ class TaskAgent:
             
             if plate_locs:
                 target = min(plate_locs, key=lambda p: abs(p[0]-self_pos[0]) + abs(p[1]-self_pos[1]))
-                print(f"  -> Fetching Plate from {target}")
-                return self.move_to(env, target), "Fetching Plate"
+                print(f"  -> {target} から皿を取得しに行きます")
+                return self.move_to(env, target), "皿の取得"
             
-            return (0,0), "No Plate found"
+            return (0,0), "皿が見つかりません"
             
-        return (0,0), f"Holding {holding_name}, not sure what to do for serve"
+        return (0,0), f"{holding_name} を持っていますが、配膳タスクで何をすべきかわかりません"
 
     def process_cook_task(self, env, ingredients=None, assigned_pot=None):
         self_pos = env.self_pos
@@ -213,18 +204,16 @@ class TaskAgent:
         if ingredients:
             ingredients.sort()
             target_name = "-".join([f"Chopped{i}" for i in ingredients])
-            print(f"[TaskAgent] Cooking Target: {target_name}")
+            print(f"[TaskAgent] 調理ターゲット: {target_name}")
         
         def is_target(name):
             if not name: return False
             if target_name:
                 return name == target_name
-            # Default: any merged chopped thing
             return 'Chopped' in name and '-' in name
 
         # 1. If holding target -> Go to Pot
         if is_target(holding_name):
-            # Find empty or compatible Pot
             if assigned_pot:
                 pots = [assigned_pot]
             else:
@@ -234,10 +223,6 @@ class TaskAgent:
             min_dist = float('inf')
             
             for p_loc in pots:
-                # Check if pot is empty or has same ingredients (cooking)
-                # For simplicity, look for empty pot first
-                # Pot is a GridSquare. Check if occupied.
-                # env.pos_obj[p_loc] is the object ON the pot (cooking food)
                 pot_obj = env.pos_obj[p_loc]
                 
                 if pot_obj is None:
@@ -246,17 +231,15 @@ class TaskAgent:
                     if dist < min_dist:
                         min_dist = dist
                         best_pot = p_loc
-                # If pot is not empty, we might be able to add to it, but task says "chopped X and chopped Y combined"
-                # so we assume we have the full set.
             
             if best_pot:
-                print(f"  -> Moving to Pot at {best_pot}")
+                print(f"  -> 鍋 {best_pot} へ移動中")
                 dist = abs(self_pos[0]-best_pot[0]) + abs(self_pos[1]-best_pot[1])
                 if dist == 1:
-                    return self.move_to(env, best_pot), "Putting ingredients in Pot (Done)"
-                return self.move_to(env, best_pot), "Putting ingredients in Pot"
+                    return self.move_to(env, best_pot), "鍋に食材を入れる (完了)"
+                return self.move_to(env, best_pot), "鍋に食材を入れる"
             else:
-                return (0,0), "No empty Pot found"
+                return (0,0), "空の鍋が見つかりません"
 
         # 2. Find target in environment
         target_loc = None
@@ -265,17 +248,17 @@ class TaskAgent:
         for pos, obj in env.pos_obj.items():
             if obj:
                 if is_target(obj.full_name):
-                    print(f"  [Search] Found target {obj.full_name} at {pos}")
+                    print(f"  [探索] ターゲット {obj.full_name} を {pos} で発見")
                     dist = abs(self_pos[0]-pos[0]) + abs(self_pos[1]-pos[1])
                     if dist < min_dist:
                         min_dist = dist
                         target_loc = pos
         
         if target_loc:
-            print(f"  -> Fetching target from {target_loc}")
-            return self.move_to(env, target_loc), "Fetching ingredients"
+            print(f"  -> {target_loc} からターゲットを取得しに行きます")
+            return self.move_to(env, target_loc), "食材の取得"
             
-        return (0,0), f"Target {target_name if target_name else 'merged ingredients'} not found"
+        return (0,0), f"ターゲット {target_name if target_name else 'merged ingredients'} が見つかりません"
 
     def process_chop_task(self, env, ing_name, assigned_cutboard=None, assigned_counter=None):
         self_pos = env.self_pos
@@ -288,7 +271,6 @@ class TaskAgent:
         
         # Check unwanted
         if holding_name:
-            # Allow if it's Fresh, Chopping, OR if it contains the Chopped target (e.g. merged)
             is_valid_holding = False
             if holding_name in [target_ing_name, chopping_ing_name]:
                 is_valid_holding = True
@@ -296,15 +278,13 @@ class TaskAgent:
                 is_valid_holding = True
             
             if not is_valid_holding:
-                 return self.drop_unwanted_item(env, holding, reason=f"Chopping {ing_name}, but holding {holding_name}")
+                 return self.drop_unwanted_item(env, holding, reason=f"{ing_name} を切るタスクですが、{holding_name} を持っています")
 
         # 0. If holding Chopped Ingredient -> Place on Table
         if holding_name and chopped_ing_name in holding_name:
-            # Find target table
             target_table = None
             
             if assigned_counter:
-                # Check if assigned counter is empty OR mergeable
                 counter_obj = env.pos_obj.get(assigned_counter)
                 can_place = False
                 
@@ -312,19 +292,17 @@ class TaskAgent:
                     can_place = True
                 elif mergeable(holding, counter_obj):
                     can_place = True
-                    print(f"  [Place] Assigned counter {assigned_counter} has {counter_obj.full_name}, but is mergeable.")
+                    print(f"  [配置] 割り当てられたカウンター {assigned_counter} に {counter_obj.full_name} がありますが、マージ可能です。")
                 
                 if can_place:
                     target_table = assigned_counter
-                    print(f"  [Place] Using assigned counter: {target_table}")
+                    print(f"  [配置] 割り当てられたカウンターを使用: {target_table}")
                 else:
-                    print(f"  [Place] Assigned counter {assigned_counter} is occupied/not mergeable. Searching nearby...")
-                    # Search for nearest empty counter to assigned_counter
+                    print(f"  [配置] 割り当てられたカウンター {assigned_counter} は使用中/マージ不可です。近くを探します...")
                     counters = env.get_pos_by_obj_gs(gs='Counter')
                     best_dist = float('inf')
                     best_c = None
                     for c_pos in counters:
-                        # Check if empty OR mergeable
                         c_obj = env.pos_obj.get(c_pos)
                         is_valid = False
                         if c_obj is None:
@@ -333,7 +311,6 @@ class TaskAgent:
                             is_valid = True
                         
                         if is_valid:
-                            # Distance from assigned_counter
                             dist = abs(assigned_counter[0]-c_pos[0]) + abs(assigned_counter[1]-c_pos[1])
                             if dist < best_dist:
                                 best_dist = dist
@@ -341,10 +318,7 @@ class TaskAgent:
                     
                     if best_c:
                         target_table = best_c
-                        print(f"  [Place] Found nearby valid counter at {target_table} (dist {best_dist})")
-            
-            # Second priority: Empty Counter (if no assignment or assignment invalid/occupied?)
-            # For now, if assigned, stick to it.
+                        print(f"  [配置] 近くの有効なカウンター {target_table} を発見 (距離 {best_dist})")
             
             if not target_table:
                 counters = env.get_pos_by_obj_gs(gs='Counter')
@@ -357,27 +331,23 @@ class TaskAgent:
                             target_table = c_pos
             
             if target_table:
-                print(f"  -> Placing {chopped_ing_name} at {target_table}")
-                # Check if adjacent (Done)
+                print(f"  -> {chopped_ing_name} を {target_table} に置きます")
                 dist = abs(self_pos[0]-target_table[0]) + abs(self_pos[1]-target_table[1])
                 if dist == 1:
-                    return self.move_to(env, target_table), f"Placing {chopped_ing_name} (Done)"
-                return self.move_to(env, target_table), f"Placing {chopped_ing_name}"
+                    return self.move_to(env, target_table), f"{chopped_ing_name} を置く (完了)"
+                return self.move_to(env, target_table), f"{chopped_ing_name} を置く"
             else:
-                return (0,0), "No suitable table found"
+                return (0,0), "適切なテーブルが見つかりません"
 
         # 1. Check Cutboards
-        # Relaxed: Check ALL cutboards for the finished product (ChoppedX) to ensure pickup
         all_cutboards = env.get_pos_by_obj_gs(gs='Cutboard')
         for loc in all_cutboards:
             obj = env.pos_obj[loc]
             if obj and chopped_ing_name in obj.full_name:
-                # Chopped ingredient on cutboard -> Pick it up
-                print(f"  [Check Cutboard] Found {chopped_ing_name} at {loc}")
+                print(f"  [まな板確認] {loc} で {chopped_ing_name} を発見")
                 if not holding:
-                    return self.move_to(env, loc), f"Picking up {chopped_ing_name}"
+                    return self.move_to(env, loc), f"{chopped_ing_name} を拾う"
 
-        # For Chopping/Placing Fresh, respect assignment
         if assigned_cutboard:
             cutboard_locs = [assigned_cutboard]
         else:
@@ -387,13 +357,11 @@ class TaskAgent:
             obj = env.pos_obj[loc]
             if obj:
                 if target_ing_name in obj.full_name or chopping_ing_name in obj.full_name:
-                    # Fresh or Chopping ingredient on cutboard -> Chop it
-                    print(f"  [Check Cutboard] Found {obj.full_name} at {loc}")
-                    return self.move_to(env, loc), f"Chopping {ing_name}"
+                    print(f"  [まな板確認] {loc} で {obj.full_name} を発見")
+                    return self.move_to(env, loc), f"{ing_name} を切る"
         
         # 2. If holding Fresh Ingredient -> Place on Cutboard
         if holding_name and target_ing_name in holding_name:
-            # Find empty cutboard
             best_cb = None
             min_dist = float('inf')
             for loc in cutboard_locs:
@@ -404,16 +372,15 @@ class TaskAgent:
                         best_cb = loc
             
             if best_cb:
-                print(f"  -> Placing {target_ing_name} on Cutboard {best_cb}")
-                return self.move_to(env, best_cb), f"Placing {target_ing_name}"
+                print(f"  -> {target_ing_name} をまな板 {best_cb} に置きます")
+                return self.move_to(env, best_cb), f"{target_ing_name} を置く"
             else:
-                return (0,0), "No Empty Cutboard"
+                return (0,0), "空いているまな板がありません"
 
         # 3. Fetch Fresh Ingredient
         target_loc = None
         min_dist = float('inf')
         
-        # Check all objects for Fresh Ingredient
         for pos, obj in env.pos_obj.items():
             if obj and target_ing_name in obj.full_name:
                 dist = abs(self_pos[0]-pos[0]) + abs(self_pos[1]-pos[1])
@@ -422,11 +389,9 @@ class TaskAgent:
                     target_loc = pos
         
         if not target_loc:
-            # Check dispensers
-            dispenser_name = f"{target_ing_name}Tile" # e.g. FreshTomatoTile
+            dispenser_name = f"{target_ing_name}Tile" 
             dispensers = env.get_pos_by_obj_gs(gs=dispenser_name)
             if dispensers:
-                # Pick closest
                 for d_pos in dispensers:
                     dist = abs(self_pos[0]-d_pos[0]) + abs(self_pos[1]-d_pos[1])
                     if dist < min_dist:
@@ -434,7 +399,7 @@ class TaskAgent:
                         target_loc = d_pos
 
         if target_loc:
-            print(f"  -> Fetching {target_ing_name} from {target_loc}")
-            return self.move_to(env, target_loc), f"Fetching {target_ing_name}"
+            print(f"  -> {target_loc} から {target_ing_name} を取得しに行きます")
+            return self.move_to(env, target_loc), f"{target_ing_name} の取得"
 
-        return (0,0), f"No {target_ing_name} found"
+        return (0,0), f"{target_ing_name} が見つかりません"

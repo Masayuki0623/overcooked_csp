@@ -69,6 +69,31 @@ python agent/agent/play_main.py --map <MAP_NAME> --agent <AGENT_NAME>
 python agent/agent/play_main.py --map ring --agent CSP
 ```
 
+### AIによる優先度自動生成 (CSP Agent)
+
+CSPエージェントでは、ゲーム開始前に表示されるGUIからAI（OpenAI API）を使用して、日本語の指示からタスクの優先度を自動生成することができます。この機能を使用するには、OpenAIのAPIキーの設定が必要です。
+
+#### APIキーの設定方法
+
+環境変数 `OPENAI_API_KEY` にAPIキーを設定してください。
+
+**Windows (PowerShell):**
+```powershell
+$env:OPENAI_API_KEY = "your-api-key-here"
+```
+
+**Windows (コマンドプロンプト):**
+```cmd
+set OPENAI_API_KEY=your-api-key-here
+```
+
+**Linux / macOS:**
+```bash
+export OPENAI_API_KEY="your-api-key-here"
+```
+
+設定後、`play_main.py` を実行し、GUIの「AI Assistant」セクションから指示を入力して「Generate Weights with AI」ボタンを押してください。
+
 **TSP Solver Agent** で partition マップを実行する場合：
 ```bash
 python agent/agent/play_main.py --map partition --agent TSPSolver

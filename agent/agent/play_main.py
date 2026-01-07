@@ -111,6 +111,6 @@ if __name__ == '__main__':
 
     # record
     if ok is True:
-        popup_box("Game End!")
+        print("Game End!")
     else:
-        popup_box("Game Failed!")
+        print("Game Failed!")
