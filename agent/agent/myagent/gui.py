@@ -11,6 +11,15 @@ try:
 except ImportError:
     HAS_PIL = False
 
+# Try importing pygame for map rendering
+try:
+    import pygame
+    from gym_cooking.misc.game.game import Game
+    HAS_PYGAME = True
+except ImportError:
+    HAS_PYGAME = False
+    print("Pygame or Game class not found. Map preview disabled.")
+
 try:
     try:
         from agent.agent.mind.llm_api import LLMService
@@ -128,7 +137,7 @@ class AgentConfigGUI:
             
     def _get_icon_for_task(self, task_name):
         filename = None
-        target_size = (32, 32)
+        target_size = (24, 24) # Smaller icons for compact view
         
         parts = task_name.split('_')
         verb = parts[0]
@@ -173,30 +182,106 @@ class AgentConfigGUI:
             print(f"Error loading image {filename}: {e}")
             return None
 
+    def _generate_map_image(self):
+        if not HAS_PYGAME:
+            return None
+        try:
+            # Create a temporary game instance for rendering
+            # We assume env is fully initialized
+            game = Game(self.env, play=False)
+            game.on_init()
+            game.on_render()
+            
+            # Convert pygame surface to PIL Image
+            data = pygame.image.tostring(game.screen, 'RGB')
+            w, h = game.screen.get_size()
+            img = Image.frombytes('RGB', (w, h), data)
+            
+            game.on_cleanup()
+            return img
+        except Exception as e:
+            print(f"Error generating map image: {e}")
+            return None
+
+    def _show_not_implemented(self):
+        messagebox.showinfo("未実装", "この機能は将来のアップデートで追加される予定です。")
+
     def show_main_menu(self):
         self._save_current_values()
         self.clear_frame()
+        self.image_cache = []
         
         self.current_frame = ttk.Frame(self.main_frame)
         self.current_frame.pack(fill=tk.BOTH, expand=True)
         
         title_lbl = ttk.Label(self.current_frame, text="Overcooked エージェント設定", font=(self.font_family, 24, "bold"))
-        title_lbl.pack(pady=(20, 10))
+        title_lbl.pack(pady=(10, 5))
+
+        # Top Section: Map (Left) and Buttons (Right)
+        top_frame = tk.Frame(self.current_frame, bg=self.bg_color)
+        top_frame.pack(fill=tk.X, padx=20, pady=5)
+
+        # Left Panel for Map
+        left_panel = tk.Frame(top_frame, bg=self.bg_color)
+        left_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        # Right Panel for Buttons
+        right_panel = tk.Frame(top_frame, bg=self.bg_color)
+        right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(20, 0))
+        
+        # --- Map Preview (Left Panel) ---
+        if HAS_PYGAME and HAS_PIL:
+            map_img = self._generate_map_image()
+            if map_img:
+                # Resize if too big - Reduced to 180 as requested
+                max_width = 180
+                ratio = max_width / map_img.width
+                new_height = int(map_img.height * ratio)
+                map_img = map_img.resize((max_width, new_height), Image.LANCZOS)
+                
+                photo = ImageTk.PhotoImage(map_img)
+                self.image_cache.append(photo)
+                
+                img_lbl = tk.Label(left_panel, image=photo, bg=self.bg_color, relief="solid", borderwidth=2)
+                img_lbl.pack(pady=5)
+                
+                # Agent Locations
+                agents_info = []
+                for agent in self.env.sim_agents:
+                    agents_info.append(f"{agent.name}: {agent.location}")
+                
+                loc_text = "Start Pos:\n" + "\n".join(agents_info) # Multiline for better fit
+                tk.Label(left_panel, text=loc_text, bg=self.bg_color, fg="#333333", font=(self.font_family, 9), justify=tk.LEFT).pack(pady=2)
+
+        # --- Buttons (Right Panel) ---
+        # Smaller button font
+        btn_font = (self.font_family, 11, "bold") # Reduced from 14
         
         # Priority Weights Button
-        btn_font = (self.font_family, 14, "bold")
-        btn_w = tk.Button(self.current_frame, text="⚙ タスク優先度設定", 
+        btn_w = tk.Button(right_panel, text="⚙ タスク優先度設定", 
                           font=btn_font, bg=self.accent_color, fg=self.fg_color,
-                          command=self.show_weight_config, relief="flat", padx=20, pady=10)
-        btn_w.pack(pady=10, fill=tk.X, padx=50)
+                          command=self.show_weight_config, relief="flat", padx=10, pady=5)
+        btn_w.pack(pady=5, fill=tk.X)
+
+        # Future Setting 1
+        btn_f1 = tk.Button(right_panel, text="⚙ 詳細設定 A (未実装)", 
+                          font=btn_font, bg=self.accent_color, fg=self.fg_color,
+                          command=self._show_not_implemented, relief="flat", padx=10, pady=5)
+        btn_f1.pack(pady=5, fill=tk.X)
+
+        # Future Setting 2
+        btn_f2 = tk.Button(right_panel, text="⚙ 詳細設定 B (未実装)", 
+                          font=btn_font, bg=self.accent_color, fg=self.fg_color,
+                          command=self._show_not_implemented, relief="flat", padx=10, pady=5)
+        btn_f2.pack(pady=5, fill=tk.X)
         
-        # --- AI Section ---
+        # --- AI Section (Bottom) ---
         ai_frame = tk.LabelFrame(self.current_frame, text=" AI アシスタント ", bg=self.bg_color, fg=self.fg_color, font=self.header_font)
-        ai_frame.pack(pady=10, padx=50, fill=tk.X)
+        ai_frame.pack(pady=10, padx=20, fill=tk.X)
         
         # Model Selection
         model_frame = tk.Frame(ai_frame, bg=self.bg_color)
-        model_frame.pack(fill=tk.X, padx=10, pady=5)
+        model_frame.pack(fill=tk.X, padx=10, pady=2)
         tk.Label(model_frame, text="モデル:", bg=self.bg_color, fg=self.fg_color, font=self.normal_font).pack(side=tk.LEFT)
         self.model_var = tk.StringVar(value=self.selected_model)
         model_combo = ttk.Combobox(model_frame, textvariable=self.model_var, 
@@ -208,19 +293,20 @@ class AgentConfigGUI:
         tk.Label(ai_frame, text="指示 (例: '切る作業を優先して'):", bg=self.bg_color, fg=self.fg_color, font=self.normal_font).pack(anchor="w", padx=10)
         self.text_var = tk.StringVar(value=self.text_input_value)
         entry = tk.Entry(ai_frame, textvariable=self.text_var, font=self.normal_font)
-        entry.pack(fill=tk.X, padx=10, pady=5, ipady=5)
+        entry.pack(fill=tk.X, padx=10, pady=2, ipady=3)
         
         # Generate Button
         self.btn_gen = tk.Button(ai_frame, text="✨ AIで重みを生成", 
                             font=self.normal_font, bg="#81D4FA", fg=self.fg_color, # Light Blue
-                            command=self.generate_with_ai, relief="flat", padx=10, pady=5)
-        self.btn_gen.pack(pady=10)
+                            command=self.generate_with_ai, relief="flat", padx=10, pady=2)
+        self.btn_gen.pack(pady=5)
         
         # Start Game Button
+        btn_start_font = (self.font_family, 14, "bold")
         btn_start = tk.Button(self.current_frame, text="▶ ゲーム開始", 
-                              font=btn_font, bg="#4CAF50", fg="white", # Green button
+                              font=btn_start_font, bg="#4CAF50", fg="white", # Green button
                               command=self.finish, relief="flat", padx=20, pady=10)
-        btn_start.pack(pady=20, fill=tk.X, padx=50)
+        btn_start.pack(pady=10, fill=tk.X, padx=50)
 
     def generate_with_ai(self):
         if not HAS_LLM:
@@ -279,30 +365,31 @@ class AgentConfigGUI:
         self.current_frame.pack(fill=tk.BOTH, expand=True)
         
         header = ttk.Frame(self.current_frame)
-        header.pack(fill=tk.X, pady=10)
+        header.pack(fill=tk.X, pady=5)
         
-        btn_back = tk.Button(header, text="⬅ 戻る", font=(self.font_family, 12, "bold"),
-                             bg=self.accent_color, command=self.show_main_menu, relief="flat")
+        btn_back = tk.Button(header, text="⬅ 戻る", font=(self.font_family, 10, "bold"),
+                             bg=self.accent_color, command=self.show_main_menu, relief="flat", padx=10)
         btn_back.pack(side=tk.LEFT, padx=10)
         
-        ttk.Label(header, text="優先度調整", font=(self.font_family, 18, "bold")).pack(side=tk.LEFT, padx=20)
+        ttk.Label(header, text="優先度調整", font=(self.font_family, 14, "bold")).pack(side=tk.LEFT, padx=20)
         
         content_frame = tk.Frame(self.current_frame, bg=self.bg_color)
-        content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=5)
         
         self.vars_dict = {}
         for t in self.tasks:
-            row = tk.Frame(content_frame, bg=self.bg_color, pady=5)
+            # More compact row
+            row = tk.Frame(content_frame, bg=self.bg_color, pady=2)
             row.pack(fill=tk.X, expand=False)
             
             icon = self._get_icon_for_task(t)
             if icon:
                 icon_lbl = tk.Label(row, image=icon, bg=self.bg_color)
-                icon_lbl.pack(side=tk.LEFT, padx=(0, 15))
+                icon_lbl.pack(side=tk.LEFT, padx=(0, 5))
             
             display_name = t.replace("_", " ").title()
             name_lbl = tk.Label(row, text=display_name, anchor="w", 
-                                bg=self.bg_color, fg=self.fg_color, font=self.normal_font)
+                                bg=self.bg_color, fg=self.fg_color, font=(self.font_family, 10))
             name_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True)
             
             slider_frame = tk.Frame(row, bg=self.bg_color)
@@ -312,11 +399,11 @@ class AgentConfigGUI:
             var = tk.DoubleVar(value=val)
             self.vars_dict[t] = var
             
-            val_lbl = tk.Label(slider_frame, textvariable=var, width=4, bg=self.bg_color, fg=self.fg_color, font=self.normal_font)
-            val_lbl.pack(side=tk.RIGHT, padx=(10, 0))
+            val_lbl = tk.Label(slider_frame, textvariable=var, width=4, bg=self.bg_color, fg=self.fg_color, font=(self.font_family, 10))
+            val_lbl.pack(side=tk.RIGHT, padx=(5, 0))
 
             scale = tk.Scale(slider_frame, from_=0.1, to=10.0, resolution=0.1, variable=var, orient=tk.HORIZONTAL,
-                             bg=self.bg_color, highlightthickness=0, fg=self.fg_color, length=200)
+                             bg=self.bg_color, highlightthickness=0, fg=self.fg_color, length=150, sliderlength=15, width=10)
             scale.pack(side=tk.RIGHT)
 
     def finish(self):
