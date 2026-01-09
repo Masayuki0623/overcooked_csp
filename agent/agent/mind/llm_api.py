@@ -10,17 +10,26 @@ class LLMService:
         self.is_gemini = self.model.startswith("gemini")
 
         if self.is_gemini:
-            self.api_key = api_key or os.getenv("GOOGLE_API_KEY")
+            self.api_key = api_key or os.getenv("GOOGLE_API_KEY") or self._read_key_from_file("google_api_key.txt")
             if self.api_key:
                 genai.configure(api_key=self.api_key)
             else:
                 print("[LLMService] Warning: No API key provided and GOOGLE_API_KEY not set for Gemini.")
         else:
-            self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+            self.api_key = api_key or os.getenv("OPENAI_API_KEY") or self._read_key_from_file("openai_api_key.txt")
             if self.api_key:
                 self.client = OpenAI(api_key=self.api_key)
             else:
                 print("[LLMService] Warning: No API key provided and OPENAI_API_KEY not set for OpenAI.")
+
+    def _read_key_from_file(self, filename):
+        try:
+            if os.path.exists(filename):
+                with open(filename, 'r', encoding='utf-8') as f:
+                    return f.read().strip()
+        except Exception:
+            pass
+        return None
 
     def set_model(self, model_name):
         self.model = model_name
