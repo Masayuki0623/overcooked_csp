@@ -69,7 +69,7 @@ class Game:
         if event.type == pygame.QUIT:
             self._running = False
 
-    def on_render(self, paused=False, chat='', replay=False):
+    def on_render(self, paused=False, chat='', replay=False, debug_info=None):
         self.__plot_elements = []
         try:
             self.screen.fill(Color.FLOOR)
@@ -131,6 +131,9 @@ class Game:
         # Draw current time
         self.draw_current_time()
 
+        if debug_info:
+            self.draw_debug_overlay(debug_info)
+
         # print("[Plot]", self.__plot_elements, flush=True)
 
         if paused:
@@ -141,6 +144,21 @@ class Game:
         if self.play:
             pygame.display.flip()
             pygame.display.update()
+
+    def draw_debug_overlay(self, debug_info):
+        """Draw debug information overlay."""
+        for order_idx, loc in debug_info.items():
+            if not loc: continue
+            sl = self.scaled_location(loc)
+            
+            # Draw red frame
+            pygame.draw.rect(self.screen, (255, 0, 0), (sl[0], sl[1], self.scale, self.scale), 3)
+            
+            # Draw text
+            text = f"Order {order_idx+1}"
+            # Render text with white background for readability
+            t = self.small_font.render(text, True, (255, 0, 0), (255, 255, 255))
+            self.screen.blit(t, (sl[0], sl[1] - 20))
 
     def draw_gridsquare(self, gs):
         sl = self.scaled_location(gs.location)

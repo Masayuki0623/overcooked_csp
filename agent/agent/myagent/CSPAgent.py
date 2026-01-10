@@ -679,6 +679,25 @@ class CSPAgent:
         print(f"総投入フレーム: {total_frames}")
         print("===================================\n")
 
+    def get_assigned_counters(self):
+        """
+        デバッグ用：各注文ごとの割り当てカウンター座標を返す
+        Returns: {order_idx: (x, y), ...}
+        """
+        if not hasattr(self, 'schedule') or not self.schedule:
+            return {}
+        
+        assignments = {}
+        for task in self.schedule:
+            tid = task['id']
+            # tid is (verb, obj, order_idx)
+            if len(tid) == 3 and tid[0] == 'chop':
+                order_idx = tid[2]
+                counter = task.get('assigned_counter')
+                if counter:
+                    assignments[order_idx] = counter
+        return assignments
+
     def astar_distance(self, env, start, goal):
         import heapq
         width = env.world_width

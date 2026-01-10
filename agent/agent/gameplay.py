@@ -33,10 +33,11 @@ from copy import deepcopy as dcopy
 
 
 class GamePlay(Game):
-    def __init__(self, env, replay: Replay, agent_set: AgentSetting):
+    def __init__(self, env, replay: Replay, agent_set: AgentSetting, debug_mode: bool = False):
         Game.__init__(self, env, play=True)
         self.replay = replay
         self.agent_set = agent_set
+        self.debug_mode = debug_mode
 
         # fps of human and ai
         self.fps = 10
@@ -157,9 +158,13 @@ class GamePlay(Game):
 
             chat = chat_in + '\n\n' + chat_out
 
+            debug_info = None
+            if self.debug_mode and hasattr(self.ai, 'get_assigned_counters'):
+                debug_info = self.ai.get_assigned_counters()
+
             if not paused:
                 self.replay.log('on_render', {'paused': paused, 'chat': chat})
-            self.on_render(paused=paused, chat=chat)
+            self.on_render(paused=paused, chat=chat, debug_info=debug_info)
 
     def _run_ai(self):
         time_per_step = 1 / self.fps_ai

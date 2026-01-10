@@ -36,11 +36,14 @@ def parse_arguments():
     parser.add_argument(
         "--no_reschedule", action='store_true', help="Disable rescheduling in CSPAgent"
     )
+    parser.add_argument(
+        "--debug", action='store_true', help="Enable debug mode with overlay"
+    )
 
     return parser.parse_args()
 
 
-def init_env_replay(map_name, agent_name, task_name=None, no_reschedule=False):
+def init_env_replay(map_name, agent_name, task_name=None, no_reschedule=False, debug_mode=False):
     map_set = MapSetting(**MAP_SETTINGS[map_name])
     # agent_set = AgentSetting(agent_name, speed=2.5 if map_name != 'quick' else 3.5)
     agent_set = AgentSetting(agent_name, speed=10)
@@ -87,7 +90,7 @@ def init_env_replay(map_name, agent_name, task_name=None, no_reschedule=False):
         ai = TaskAgent(agent_set.speed, replay, task_name=task_name)
     else:
         ai = get_agent(agent_set, replay)
-    game = GamePlay(env, replay, agent_set)
+    game = GamePlay(env, replay, agent_set, debug_mode=debug_mode)
     game.ai = ai
     replay['set_map'] = deepcopy(map_set)
     replay['set_agent'] = deepcopy(agent_set)
@@ -100,17 +103,22 @@ if __name__ == '__main__':
     arglist = parse_arguments()
 
     # initialize replay
-    game, env, replay = init_env_replay(arglist.map, arglist.agent, arglist.task, arglist.no_reschedule)
+    game, env, replay = init_env_replay(arglist.map, arglist.agent, arglist.task, arglist.no_reschedule, arglist.debug)
 
-    # play
-    ok = game.on_execute()
-    
-    print(replay['order_result'])
-    repdir = Path(__file__).resolve().parent / 'replay'
-    replay.save(repdir / f'{arglist.map}-{arglist.agent}-{datetime.now().strftime("%Y%m%d_%H%M%S")}.rep')
+    try:
+        # play
+        ok = game.on_execute()
+        
+        if ok is True:
+            print("Game End!")
+        else:
+            print("Game Failed!")
 
-    # record
-    if ok is True:
-        print("Game End!")
-    else:
-        print("Game Failed!")
+    except KeyboardInterrupt:
+        print("\nGame interrupted by user.")
+
+    finally:
+        print(replay['order_result'])
+        repdir = Path(__file__).resolve().parent / 'replay'
+        replay.save(repdir / f'{arglist.map}-{arglist.agent}-{datetime.now().strftime("%Y%m%d_%H%M%S")}.rep')
+        print(f"Replay saved to {repdir}")
