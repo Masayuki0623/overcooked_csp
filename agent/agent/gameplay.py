@@ -137,7 +137,7 @@ class GamePlay(Game):
                              event_history=info['event_history'],
                              time=info['current_time'],
                              chg_grid=info['chg_grid'])
-                
+                #for commit
                 # Human Prediction
                 task_name, cost, all_costs = self.predictor.predict(e, self.idx_human)
                 #print(f"[Human Prediction] Task: {task_name}, Remaining Cost: {cost}")
