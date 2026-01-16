@@ -50,8 +50,8 @@ class Game:
             (self.container_scale * np.asarray(self.holding_size)).astype(int))
         # self.font = pygame.font.SysFont('arialttf', 10)
 
-        self.small_font = pygame.font.SysFont('Times', 20)
-        self.font = pygame.font.SysFont('Times', 40)
+        self.small_font = pygame.font.SysFont('Times', 16)
+        self.font = pygame.font.SysFont('Times', 24)
         self.large_font = pygame.font.SysFont('Times', 100)
 
         self.__plot_elements = []
@@ -138,8 +138,8 @@ class Game:
 
         if paused:
             self.draw_paused()
-        if chat:
-            self.draw_multiline(chat)
+        # if chat:
+        #     self.draw_multiline(chat)
 
         if self.play:
             pygame.display.flip()
@@ -317,9 +317,9 @@ class Game:
 
         # draw success and failed ones
         self.put_text(self.small_font, "Score", (40, 80, 180),
-                      ((0 + 0.15) * self.tile_size[0], (self.world.height + 1.6) * self.tile_size[1]))
+                      ((0 + 0.15) * self.tile_size[0], (self.world.height + 1.2) * self.tile_size[1]))
         self.put_text(self.font, str(self.order_scheduler.reward), (40, 80, 180),
-                      ((0.5 + 0.3) * self.tile_size[0], (self.world.height + 1.4) * self.tile_size[1]))
+                      ((0.5 + 0.8) * self.tile_size[0], (self.world.height + 1.1) * self.tile_size[1]))
 
     def draw_current_order(self, idx, obj, t):
         # order
@@ -357,32 +357,32 @@ class Game:
         name = name.replace("CookedLettuce-CookedTomato-Plate", "Bob")
         name = name.replace("CookedOnion-CookedTomato-Plate", "Cathy")
         pos = self.scaled_location(obj_loc)
-        self.put_text(self.small_font, name, (40, 40, 100),
-                      (pos[0] + self.tile_size[0] * 0.2, pos[1]))
+        # self.put_text(self.small_font, name, (40, 40, 100),
+        #               (pos[0] + self.tile_size[0] * 0.2, pos[1]))
 
     def draw_soup_hint(self):
         if self.world.arglist.user_recipy:
             return
-        self.put_text(self.small_font, "Hint:", (0, 0, 0),
-                      ((self.world.width - 3.3) * self.tile_size[0], (self.world.height + 0.25) * self.tile_size[1]))
+        # self.put_text(self.small_font, "Hint:", (0, 0, 0),
+        #               ((self.world.width - 3.3) * self.tile_size[0], (self.world.height + 0.25) * self.tile_size[1]))
 
-        self.put_text(self.small_font, "Alice", (40, 40, 100),
-                      ((self.world.width - 2.6) * self.tile_size[0], (self.world.height + 0.25) * self.tile_size[1]))
+        # self.put_text(self.small_font, "Alice", (40, 40, 100),
+        #               ((self.world.width - 2.6) * self.tile_size[0], (self.world.height + 0.25) * self.tile_size[1]))
         self.draw("ChoppedLettuce-ChoppedOnion", (self.tile_size[0] / 2.5, self.tile_size[1] / 2.5),
                   ((self.world.width - 2.0) * self.tile_size[0], (self.world.height + 0.2) * self.tile_size[1]))
 
-        self.put_text(self.small_font, "Bob", (40, 40, 100),
-                      ((self.world.width - 1.1) * self.tile_size[0], (self.world.height + 0.25) * self.tile_size[1]))
+        # self.put_text(self.small_font, "Bob", (40, 40, 100),
+        #               ((self.world.width - 1.1) * self.tile_size[0], (self.world.height + 0.25) * self.tile_size[1]))
         self.draw("ChoppedLettuce-ChoppedTomato", (self.tile_size[0] / 2.5, self.tile_size[1] / 2.5),
                   ((self.world.width - 0.5) * self.tile_size[0], (self.world.height + 0.2) * self.tile_size[1]))
 
-        self.put_text(self.small_font, "Cathy", (40, 40, 100),
-                      ((self.world.width - 2.6) * self.tile_size[0], (self.world.height + 0.75) * self.tile_size[1]))
+        # self.put_text(self.small_font, "Cathy", (40, 40, 100),
+        #               ((self.world.width - 2.6) * self.tile_size[0], (self.world.height + 0.75) * self.tile_size[1]))
         self.draw("ChoppedOnion-ChoppedTomato", (self.tile_size[0] / 2.5, self.tile_size[1] / 2.5),
                   ((self.world.width - 2.0) * self.tile_size[0], (self.world.height + 0.7) * self.tile_size[1]))
 
-        self.put_text(self.small_font, "David", (40, 40, 100),
-                      ((self.world.width - 1.1) * self.tile_size[0], (self.world.height + 0.75) * self.tile_size[1]))
+        # self.put_text(self.small_font, "David", (40, 40, 100),
+        #               ((self.world.width - 1.1) * self.tile_size[0], (self.world.height + 0.75) * self.tile_size[1]))
         self.draw("ChoppedLettuce-ChoppedOnion-ChoppedTomato", (self.tile_size[0] / 2.5, self.tile_size[1] / 2.5),
                   ((self.world.width - 0.5) * self.tile_size[0], (self.world.height + 0.7) * self.tile_size[1]))
         pass
@@ -391,7 +391,7 @@ class Game:
         # time_render = f"Time: {self.env.current_time: .1f}/{60: .1f}"
         time_render = f"Time: {self.env.current_time: .1f}/{self.env.arglist.max_num_timesteps: .1f}"
         self.put_text(self.small_font, time_render, (220, 70, 1),
-                      ((self.world.width - 2.0) * self.tile_size[0], (self.world.height + 1.6) * self.tile_size[1]))
+                      ((self.world.width - 2.5) * self.tile_size[0], (self.world.height + 1.2) * self.tile_size[1]))
 
     def draw_paused(self):
         self.put_text(self.large_font, "PAUSED", (255, 0, 0),
