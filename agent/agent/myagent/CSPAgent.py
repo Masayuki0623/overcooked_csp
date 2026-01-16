@@ -240,7 +240,7 @@ class CSPAgent:
                 counters = env.get_pos_by_obj_gs(gs="Counter")
                 if not counters: return None
                 target = get_nearest(cutboard_pos, counters)
-
+#
             def adj(pos_list):
                 width = env.world_width; height = env.world_height; grid = env.to_grid
                 out=[]
