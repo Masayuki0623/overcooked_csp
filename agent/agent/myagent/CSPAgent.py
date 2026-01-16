@@ -523,12 +523,49 @@ class CSPAgent:
                 
                 model.Add(sum(pot_opts) == 1)
 
+        # Helper: Group tasks by Order ID for sequential constraints
+        tasks_by_order = {}
+        for tid, v in tasks_vars.items():
+            order_idx = tid[2] # ('chop', 'onion', 0)
+            if order_idx not in tasks_by_order:
+                tasks_by_order[order_idx] = []
+            tasks_by_order[order_idx].append(v)
+
         # --- Dynamic Constraints (LLM Generated) ---
         if hasattr(self, 'active_constraints') and self.active_constraints:
             print(f"[CSPAgent] 動的制約を適用中: {len(self.active_constraints)}件")
             for constr in self.active_constraints:
                 c_type = constr.get('type')
                 
+                if c_type == 'order_sequential':
+                    mode = constr.get('mode', 'pipeline')
+                    sorted_orders = sorted(tasks_by_order.keys())
+                    
+                    for i in range(len(sorted_orders) - 1):
+                        curr_o = sorted_orders[i]
+                        next_o = sorted_orders[i+1]
+                        
+                        curr_tasks = tasks_by_order[curr_o]
+                        next_tasks = tasks_by_order[next_o]
+                        
+                        if mode == 'strict':
+                            # Order i completely before Order i+1
+                            # All next starts >= All curr ends
+                            for v_next in next_tasks:
+                                for v_curr in curr_tasks:
+                                    model.Add(v_next['start'] >= v_curr['end'])
+                                    
+                        elif mode == 'pipeline':
+                            # Pipeline by verb type (Chop->Chop, Cook->Cook, Serve->Serve)
+                            for verb in ['chop', 'cook', 'serve']:
+                                curr_v_tasks = [v for v in curr_tasks if v['task']['verb'] == verb]
+                                next_v_tasks = [v for v in next_tasks if v['task']['verb'] == verb]
+                                
+                                # All next-verb starts >= All curr-verb ends
+                                for v_next in next_v_tasks:
+                                    for v_curr in curr_v_tasks:
+                                        model.Add(v_next['start'] >= v_curr['end'])
+
                 if c_type == 'concurrency_limit':
                     # "limit" tasks matching "tasks" list
                     target_substrings = constr.get('tasks', [])

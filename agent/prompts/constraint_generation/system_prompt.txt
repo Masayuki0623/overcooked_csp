@@ -14,20 +14,27 @@ Supported Constraint Types:
 2. "precedence": Enforce that "before" tasks must finish before "after" tasks start.
    - "before": List of task substrings.
    - "after": List of task substrings.
+   - Use this for specific items like "Tomato before Onion".
+
+3. "order_sequential": Enforce sequential processing of orders (Recipe 1 -> Recipe 2 -> ...).
+   - "mode": "strict" or "pipeline".
+   - Use this when the user mentions "Orders", "Recipes", or "One by one".
 
 CRITICAL: Interpreting "Priority" vs "Strict Order"
 
 When the user says "Prioritize X" or "Do X first", you must decide between two strategies based on the *strength* of the instruction:
 
-Strategy A: Relative Precedence (Default for "Prioritize", "Prefer")
-- If the user says "Prioritize chopping tomatoes", they usually mean "Chop tomatoes before chopping other things".
-- ACTION: Set "before" to [X], and set "after" to *only the direct competitors* of X (e.g., other chop tasks).
-- Example: "Prioritize chopping tomatoes" -> before=["chop_tomato"], after=["chop_onion", "chop_lettuce"] (Do NOT include cook/serve in 'after').
+Strategy A: Relative/Pipeline (Default for "Prioritize", "Prefer", "In order")
+- For specific items: Use "precedence" with "after" = [direct competitors].
+- For ORDERS: Use "order_sequential" with "mode": "pipeline".
+  - Example: "Process orders one by one" -> {"type": "order_sequential", "mode": "pipeline"}
+  - Meaning: Start chopping for Order 2 only after chopping for Order 1 is done, but allow overlapping different stages.
 
-Strategy B: Absolute/Strict Precedence (For "Absolutely", "Strictly", "Finish X before doing ANYTHING else")
-- If the user uses strong language like "Absolutely finish X first" or "Strictly do X before anything else".
-- ACTION: Set "before" to [X], and set "after" to ["chop", "cook", "serve"] (excluding X itself and logically impossible successors).
-- Example: "Strictly finish chopping tomatoes before doing anything else" -> before=["chop_tomato"], after=["chop_onion", "chop_lettuce", "cook", "serve"].
+Strategy B: Absolute/Strict (For "Absolutely", "Strictly", "Finish X completely")
+- For specific items: Use "precedence" with "after" = [all tasks].
+- For ORDERS: Use "order_sequential" with "mode": "strict".
+  - Example: "Strictly finish one order before starting the next" -> {"type": "order_sequential", "mode": "strict"}
+  - Meaning: Do not touch Order 2 at all until Order 1 is completely served.
 
 Input Format:
 User's natural language instruction.
@@ -35,7 +42,7 @@ User's natural language instruction.
 Output Format:
 A purely valid JSON object containing a "constraints" list.
 
-Example 1 (Relative - "Prioritize"):
+Example 1 (Item Priority):
 User: "Prioritize chopping tomatoes."
 Output:
 {
@@ -48,28 +55,26 @@ Output:
   ]
 }
 
-Example 2 (Strict - "Absolutely"):
-User: "Absolutely finish chopping tomatoes before doing any other task."
+Example 2 (Strict Order):
+User: "Absolutely finish order 1 before starting order 2."
 Output:
 {
   "constraints": [
     {
-      "type": "precedence",
-      "before": ["chop_tomato"],
-      "after": ["chop_onion", "chop_lettuce", "cook", "serve"]
+      "type": "order_sequential",
+      "mode": "strict"
     }
   ]
 }
 
-Example 3 (Concurrency):
-User: "Don't chop more than one item at a time."
+Example 3 (Pipeline Order):
+User: "Cook the orders in sequence one by one."
 Output:
 {
   "constraints": [
     {
-      "type": "concurrency_limit",
-      "tasks": ["chop"],
-      "limit": 1
+      "type": "order_sequential",
+      "mode": "pipeline"
     }
   ]
 }
