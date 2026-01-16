@@ -41,6 +41,10 @@ class CSPAgent:
         
         # 優先度重み（GUI等で設定）
         self.priority_weights = {}
+        # 制約指示テキスト（GUI等で設定）
+        self.gui_constraint_input = ""
+        # 適用する動的制約リスト (JSON format)
+        self.active_constraints = []
 
         print("[CSPAgent] 初期化完了 - 現在はランダム行動")
 
@@ -448,7 +452,7 @@ class CSPAgent:
                 all_end_vars.append(end_var)
                 chop_ends.append(end_var)
                 
-                tasks_vars[t['id']] = {'start': start_var, 'end': end_var, 'task': t}
+                tasks_vars[t['id']] = {'start': start_var, 'end': end_var, 'task': t, 'interval': agent_interval}
                 
                 opts = []
                 chop_res_vars[t['id']] = {}
@@ -475,7 +479,7 @@ class CSPAgent:
                 
                 cook_start = start_var
                 cook_end = end_var
-                tasks_vars[t['id']] = {'start': start_var, 'end': end_var, 'task': t}
+                tasks_vars[t['id']] = {'start': start_var, 'end': end_var, 'task': t, 'interval': agent_interval}
                 
                 for ce in chop_ends:
                     model.Add(start_var >= ce)
@@ -492,7 +496,7 @@ class CSPAgent:
                 all_end_vars.append(end_var)
                 
                 serve_start = start_var
-                tasks_vars[t['id']] = {'start': start_var, 'end': end_var, 'task': t}
+                tasks_vars[t['id']] = {'start': start_var, 'end': end_var, 'task': t, 'interval': agent_interval}
                 
                 if cook_end is not None:
                     model.Add(cook_end <= start_var)
@@ -518,6 +522,68 @@ class CSPAgent:
                     pot_intervals[p_loc].append(pot_interval)
                 
                 model.Add(sum(pot_opts) == 1)
+
+        # --- Dynamic Constraints (LLM Generated) ---
+        if hasattr(self, 'active_constraints') and self.active_constraints:
+            print(f"[CSPAgent] 動的制約を適用中: {len(self.active_constraints)}件")
+            for constr in self.active_constraints:
+                c_type = constr.get('type')
+                
+                if c_type == 'concurrency_limit':
+                    # "limit" tasks matching "tasks" list
+                    target_substrings = constr.get('tasks', [])
+                    limit = int(constr.get('limit', 1))
+                    
+                    target_intervals = []
+                    target_demands = []
+                    
+                    for tid, v in tasks_vars.items():
+                        # tid: (verb, obj, order)
+                        # Check if task name matches any substring
+                        # Construct a full name for checking: "verb_obj"
+                        full_name = f"{tid[0]}_{tid[1]}"
+                        match = False
+                        for sub in target_substrings:
+                            if sub in full_name:
+                                match = True
+                                break
+                        
+                        if match:
+                            target_intervals.append(v['interval'])
+                            target_demands.append(1)
+                    
+                    if target_intervals:
+                        # Add Cumulative Constraint
+                        # limit must be int
+                        model.AddCumulative(target_intervals, target_demands, limit)
+                        print(f"  -> Concurrency Limit Applied: {target_substrings} <= {limit}")
+                            
+                elif c_type == 'precedence':
+                    before_subs = constr.get('before', [])
+                    after_subs = constr.get('after', [])
+                    
+                    before_ends = []
+                    after_starts = []
+                    
+                    for tid, v in tasks_vars.items():
+                        full_name = f"{tid[0]}_{tid[1]}"
+                        
+                        # Check "before"
+                        for sub in before_subs:
+                            if sub in full_name:
+                                before_ends.append(v['end'])
+                                break
+                        
+                        # Check "after"
+                        for sub in after_subs:
+                            if sub in full_name:
+                                after_starts.append(v['start'])
+                                break
+                    
+                    # Apply All-to-All precedence
+                    for be in before_ends:
+                        for ast in after_starts:
+                            model.Add(ast >= be)
 
         print(f"[CSPAgent] スケジュール対象タスク数: {total_tasks_count}")
         if total_tasks_count == 0:

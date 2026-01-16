@@ -35,6 +35,8 @@ class AgentConfigGUI:
         self.env = env
         self.weights = {}
         self.text_input_value = ""
+        self.constraint_input_value = ""
+        self.generated_constraints = []
         self.tasks = self._get_tasks_from_env()
         self.vars_dict = None
         self.image_cache = [] # To keep references to images alive
@@ -44,10 +46,11 @@ class AgentConfigGUI:
         self.project_root = Path(os.getcwd())
         self.graphics_path = self.project_root / "testbed-cooking" / "gym_cooking" / "misc" / "game" / "graphics"
         self.prompt_path = self.project_root / "agent" / "prompts" / "weight_tuning" / "system_prompt.txt"
+        self.constraint_prompt_path = self.project_root / "agent" / "prompts" / "constraint_generation" / "system_prompt.txt"
         
         self.root = tk.Tk()
         self.root.title("エージェント設定")
-        self.center_window(self.root, 800, 700)
+        self.center_window(self.root, 800, 650)
         
         # --- THEMING ---
         self.bg_color = "#FFE4B5" # Moccasin (Warm Kitchen)
@@ -130,6 +133,8 @@ class AgentConfigGUI:
     def _save_current_values(self):
         if hasattr(self, 'text_var') and self.text_var:
             self.text_input_value = self.text_var.get()
+        if hasattr(self, 'constraint_var') and self.constraint_var:
+            self.constraint_input_value = self.constraint_var.get()
         if self.vars_dict:
             for t, var in self.vars_dict.items():
                 self.weights[t] = var.get()
@@ -208,12 +213,37 @@ class AgentConfigGUI:
 
     def show_main_menu(self):
         self._save_current_values()
-        self.clear_frame()
+        # Clean up main_frame completely to rebuild with scrollbar
+        for widget in self.main_frame.winfo_children():
+            widget.destroy()
+            
         self.image_cache = []
         
-        self.current_frame = ttk.Frame(self.main_frame)
-        self.current_frame.pack(fill=tk.BOTH, expand=True)
+        # --- Scrollable Container Setup ---
+        canvas = tk.Canvas(self.main_frame, bg=self.bg_color, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(self.main_frame, orient="vertical", command=canvas.yview)
+        self.current_frame = ttk.Frame(canvas) # This is the scrollable content area
+
+        self.current_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(
+                scrollregion=canvas.bbox("all")
+            )
+        )
+
+        canvas.create_window((0, 0), window=self.current_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
         
+        # Mousewheel scrolling
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        # --- Content Construction (same as before but parented to self.current_frame) ---
         title_lbl = ttk.Label(self.current_frame, text="Overcooked エージェント設定", font=(self.font_family, 24, "bold"))
         title_lbl.pack(pady=(10, 5))
 
@@ -275,9 +305,9 @@ class AgentConfigGUI:
                           command=self._show_not_implemented, relief="flat", padx=10, pady=5)
         btn_f2.pack(pady=5, fill=tk.X)
         
-        # --- AI Section (Bottom) ---
-        ai_frame = tk.LabelFrame(self.current_frame, text=" AI アシスタント ", bg=self.bg_color, fg=self.fg_color, font=self.header_font)
-        ai_frame.pack(pady=10, padx=20, fill=tk.X)
+        # --- AI Section (Weights) ---
+        ai_frame = tk.LabelFrame(self.current_frame, text=" AI 重み調整 ", bg=self.bg_color, fg=self.fg_color, font=self.header_font)
+        ai_frame.pack(pady=5, padx=20, fill=tk.X)
         
         # Model Selection
         model_frame = tk.Frame(ai_frame, bg=self.bg_color)
@@ -300,6 +330,21 @@ class AgentConfigGUI:
                             font=self.normal_font, bg="#81D4FA", fg=self.fg_color, # Light Blue
                             command=self.generate_with_ai, relief="flat", padx=10, pady=2)
         self.btn_gen.pack(pady=5)
+
+        # --- AI Section (Constraints) ---
+        cons_frame = tk.LabelFrame(self.current_frame, text=" AI 制約生成 ", bg=self.bg_color, fg=self.fg_color, font=self.header_font)
+        cons_frame.pack(pady=5, padx=20, fill=tk.X)
+        
+        tk.Label(cons_frame, text="制約指示 (例: 'トマトを切る作業は同時に行わないで'):", bg=self.bg_color, fg=self.fg_color, font=self.normal_font).pack(anchor="w", padx=10)
+        self.constraint_var = tk.StringVar(value=self.constraint_input_value)
+        c_entry = tk.Entry(cons_frame, textvariable=self.constraint_var, font=self.normal_font)
+        c_entry.pack(fill=tk.X, padx=10, pady=2, ipady=3)
+
+        # Generate Constraints Button
+        self.btn_gen_cons = tk.Button(cons_frame, text="✨ AIで制約を生成", 
+                            font=self.normal_font, bg="#C5E1A5", fg=self.fg_color, # Light Green
+                            command=self.generate_constraints_with_ai, relief="flat", padx=10, pady=2)
+        self.btn_gen_cons.pack(pady=5)
         
         # Start Game Button
         btn_start_font = (self.font_family, 14, "bold")
@@ -352,13 +397,54 @@ class AgentConfigGUI:
             messagebox.showinfo("成功", f"AIの提案に基づいて {updated_count} 個のタスク優先度を更新しました。")
             self.show_weight_config()
 
+    def generate_constraints_with_ai(self):
+        if not HAS_LLM:
+            messagebox.showerror("エラー", "LLMService モジュールが見つかりません。")
+            return
+
+        instruction = self.constraint_var.get()
+        if not instruction:
+            messagebox.showwarning("警告", "AIへの制約指示を入力してください。")
+            return
+        
+        self.selected_model = self.model_var.get()
+        self.constraint_input_value = instruction # save
+        
+        original_text = self.btn_gen_cons.cget("text")
+        self.btn_gen_cons.config(text="⏳ 解析中...", state="disabled")
+        self.root.update()
+        
+        def run_inference():
+            service = LLMService(model=self.selected_model)
+            result = service.infer_constraints(instruction, self.constraint_prompt_path)
+            self.root.after(0, lambda: self._on_ai_constraint_complete(result, original_text))
+            
+        threading.Thread(target=run_inference, daemon=True).start()
+
+    def _on_ai_constraint_complete(self, result, original_text):
+        self.btn_gen_cons.config(text=original_text, state="normal")
+        
+        if not result or "error" in result:
+            err = result.get("error", "不明なエラー") if result else "応答なし"
+            messagebox.showerror("AI エラー", f"制約の解析に失敗しました:\n{err}")
+        else:
+            cons_list = result.get("constraints", [])
+            if not cons_list:
+                messagebox.showinfo("情報", "制約は生成されませんでした（指示が曖昧か、該当する制約タイプがありません）。")
+                self.generated_constraints = []
+            else:
+                self.generated_constraints = cons_list
+                # Show simple summary
+                summary = "\n".join([f"- {c['type']}: {c.get('tasks', c.get('before', ''))}..." for c in cons_list])
+                messagebox.showinfo("成功", f"以下の制約が生成されました:\n{summary}\n\nゲーム開始時に適用されます。")
+
     def show_weight_config(self):
         self._save_current_values()
         self.clear_frame()
         self.image_cache = [] 
         
         screen_height = self.root.winfo_screenheight()
-        target_height = min(900, screen_height - 100)
+        target_height = min(700, screen_height - 100)
         self.center_window(self.root, 800, target_height)
         
         self.current_frame = ttk.Frame(self.main_frame)
@@ -416,5 +502,7 @@ def configure_agent_settings(env):
     gui.root.mainloop()
     return {
         'weights': gui.weights,
-        'text_input': gui.text_input_value
+        'text_input': gui.text_input_value,
+        'constraint_input': gui.constraint_input_value,
+        'constraints': gui.generated_constraints
     }

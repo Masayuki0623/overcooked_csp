@@ -82,6 +82,8 @@ def init_env_replay(map_name, agent_name, task_name=None, no_reschedule=False, d
             settings = configure_agent_settings(env)
             ai.priority_weights = settings['weights']
             ai.gui_text_input = settings['text_input'] # 将来の使用のために保存
+            ai.gui_constraint_input = settings.get('constraint_input', "") # 制約テキストを保存
+            ai.active_constraints = settings.get('constraints', []) # 生成された制約リスト
             print("Settings configured:", settings)
         except Exception as e:
             print(f"Failed to configure settings via GUI: {e}")

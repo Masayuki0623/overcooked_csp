@@ -91,6 +91,54 @@ class LLMService:
             print(f"[LLMService] Inference error: {e}")
             return {"error": str(e)}
 
+    def infer_constraints(self, instruction, system_prompt_path):
+        if self.is_gemini:
+             if not os.getenv("GOOGLE_API_KEY") and not self.api_key:
+                 return {"error": "Google API Key missing"}
+        elif not self.client:
+            return {"error": "OpenAI API Key missing"}
+
+        try:
+            with open(system_prompt_path, 'r', encoding='utf-8') as f:
+                system_prompt = f.read()
+        except Exception as e:
+            return {"error": f"Failed to read system prompt: {e}"}
+
+        user_content = f"Instruction: \"{instruction}\""
+
+        try:
+            if self.is_gemini:
+                # Gemini Implementation
+                model_name = self.model
+                if not model_name.startswith("models/"):
+                    model_name = f"models/{model_name}"
+                
+                model = genai.GenerativeModel(
+                    model_name,
+                    system_instruction=system_prompt,
+                    generation_config={"response_mime_type": "application/json"}
+                )
+                response = model.generate_content(user_content)
+                content = response.text
+            else:
+                # OpenAI Implementation
+                messages = [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_content}
+                ]
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    temperature=0.1,
+                    response_format={"type": "json_object"}
+                )
+                content = response.choices[0].message.content
+
+            return json.loads(content)
+        except Exception as e:
+            print(f"[LLMService] Inference error: {e}")
+            return {"error": str(e)}
+
 class LLM_LLAMA_LOCAL:
     def __init__(self, nodes):
         self.nodes = nodes
