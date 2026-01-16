@@ -411,127 +411,285 @@ class CSPAgent:
 
     def solve_csp_scheduling(self, env, orders):
         """
-        OR-Tools CP-SAT を用いたスケジューリング（Makespan最小化）。
+        OR-Tools CP-SAT を用いたスケジューリング（移動コスト込み）。
+        Circuit制約を用いて順序依存のセットアップ時間（移動時間）を正確にモデル化する。
         """
         print(f"[CSPAgent] CSPスケジューリング開始 ({len(orders)} 注文)...")
         model = cp_model.CpModel()
         
-        tasks_vars = {}
-        agent_intervals = []
-        
-        chop_res_vars = {} 
-        pot_res_vars = {}
-
-        resources = self._get_resources(env)
-        cutboard_locs = resources['cutboards']
-        pot_locs = resources['pots']
-        
-        cutboard_intervals = {loc: [] for loc in cutboard_locs}
-        pot_intervals = {loc: [] for loc in pot_locs}
-        
-        all_end_vars = []
-        horizon = 10000 
-        
-        total_tasks_count = 0
-
+        # 1. タスクのリスト化とリソース位置の固定
+        tasks = []
         for o in orders:
-            chops = [t for t in o['tasks'] if t['verb'] == 'chop']
-            cooks = [t for t in o['tasks'] if t['verb'] == 'cook']
-            serves = [t for t in o['tasks'] if t['verb'] == 'serve']
+            for t in o['tasks']:
+                t['order_obj'] = o # 親注文への参照（便利のため）
+                tasks.append(t)
+        
+        num_tasks = len(tasks)
+        if num_tasks == 0:
+            print("[CSPAgent] スケジュール対象タスクがありません。")
+            return []
+
+        # 現在のエージェント位置（初期位置）
+        if hasattr(env, 'sim_agents'):
+            agent_pos = env.sim_agents[0].location
+        elif hasattr(env, 'agents'):
+            agent_pos = env.agents[0].location
+        else:
+            # Fallback (should not happen in standard gym_cooking envs)
+            agent_pos = (0, 0)
+        
+        # リソース位置の特定と固定 (Fixed Position)
+        resources = self._get_resources(env)
+        
+        def get_nearest(start_pos, candidates):
+            if not candidates: return start_pos # Fallback
+            return min(candidates, key=lambda p: abs(p[0]-start_pos[0]) + abs(p[1]-start_pos[1]))
+
+        for t in tasks:
+            verb = t['verb']
+            obj = t['obj']
+            order_idx = t['order']
             
-            total_tasks_count += len(chops) + len(cooks) + len(serves)
+            if verb == 'chop':
+                # 食材の位置から一番近いまな板を選ぶ
+                tile_map = {"lettuce": "FreshLettuceTile", "onion": "FreshOnionTile", "tomato": "FreshTomatoTile"}
+                ing_pos_list = env.get_pos_by_obj_gs(gs=tile_map.get(obj, ""))
+                ing_pos = ing_pos_list[0] if ing_pos_list else agent_pos
+                
+                cutboards = resources['cutboards']
+                best_cb = get_nearest(ing_pos, cutboards)
+                
+                t['start_pos'] = best_cb
+                t['end_pos'] = best_cb
+                t['fixed_res'] = ('cutboard', best_cb)
+                
+            elif verb == 'cook':
+                pots = resources['pots']
+                # 注文インデックスに基づく鍋割り当て（簡易）
+                pot = pots[order_idx % len(pots)] if pots else agent_pos
+                t['start_pos'] = pot
+                t['end_pos'] = pot
+                t['fixed_res'] = ('pot', pot)
+                
+            elif verb == 'serve':
+                pots = resources['pots']
+                pot = pots[order_idx % len(pots)] if pots else agent_pos
+                delivery = resources['delivery']
+                
+                t['start_pos'] = pot
+                t['end_pos'] = delivery
+                t['fixed_res'] = ('pot', pot) # ServeもPotリソース扱いにしておく
 
-            # --- Chop Tasks --- 
-            chop_ends = []
-            for t in chops:
-                dur = int(t['dur'])
-                start_var = model.NewIntVar(0, horizon, f"start_{t['id']}")
-                end_var = model.NewIntVar(0, horizon, f"end_{t['id']}")
-                agent_interval = model.NewIntervalVar(start_var, dur, end_var, f"interval_{t['id']}")
-                agent_intervals.append(agent_interval)
-                all_end_vars.append(end_var)
-                chop_ends.append(end_var)
-                
-                tasks_vars[t['id']] = {'start': start_var, 'end': end_var, 'task': t, 'interval': agent_interval}
-                
-                opts = []
-                chop_res_vars[t['id']] = {}
-                for c_loc in cutboard_locs:
-                    is_present = model.NewBoolVar(f"pres_{t['id']}_{c_loc}")
-                    chop_res_vars[t['id']][c_loc] = is_present
-                    
-                    opt_interval = model.NewOptionalIntervalVar(start_var, dur, end_var, is_present, f"opt_{t['id']}_{c_loc}")
-                    cutboard_intervals[c_loc].append(opt_interval)
-                    opts.append(is_present)
-                model.Add(sum(opts) == 1)
+        # 2. 距離行列の作成 (A* distance)
+        all_nodes = list(range(num_tasks + 1))
+        start_node = num_tasks # ダミーノード
+        
+        dist_matrix = {} # (from_idx, to_idx) -> distance
+        print("[CSPAgent] 距離行列を計算中...")
+        
+        # キャッシュ付きA*
+        dist_cache = {}
+        def get_dist(p1, p2):
+            if (p1, p2) in dist_cache: return dist_cache[(p1, p2)]
+            d = self.astar_distance(env, p1, p2)
+            if d is None: d = 1000
+            dist_cache[(p1, p2)] = d
+            return d
 
-            # --- Cook Task --- 
-            cook_end = None
-            cook_start = None
-            if cooks:
-                t = cooks[0]
-                dur = int(t['dur'])
-                start_var = model.NewIntVar(0, horizon, f"start_{t['id']}")
-                end_var = model.NewIntVar(0, horizon, f"end_{t['id']}")
-                agent_interval = model.NewIntervalVar(start_var, dur, end_var, f"interval_{t['id']}")
-                agent_intervals.append(agent_interval)
-                all_end_vars.append(end_var)
-                
-                cook_start = start_var
-                cook_end = end_var
-                tasks_vars[t['id']] = {'start': start_var, 'end': end_var, 'task': t, 'interval': agent_interval}
-                
-                for ce in chop_ends:
-                    model.Add(start_var >= ce)
+        for i in all_nodes:
+            for j in all_nodes:
+                if i == j:
+                    dist_matrix[(i,j)] = 0
+                    continue
+                # From Node
+                if i == start_node:
+                    pos_i = agent_pos
+                else:
+                    pos_i = tasks[i]['end_pos']
+                # To Node
+                if j == start_node:
+                    dist_matrix[(i,j)] = 0
+                else:
+                    pos_j = tasks[j]['start_pos']
+                    dist = get_dist(pos_i, pos_j)
+                    dist_matrix[(i,j)] = dist
 
-            # --- Serve Task --- 
-            serve_start = None
-            if serves:
-                t = serves[0]
-                dur = int(t['dur'])
-                start_var = model.NewIntVar(0, horizon, f"start_{t['id']}")
-                end_var = model.NewIntVar(0, horizon, f"end_{t['id']}")
-                agent_interval = model.NewIntervalVar(start_var, dur, end_var, f"interval_{t['id']}")
-                agent_intervals.append(agent_interval)
-                all_end_vars.append(end_var)
-                
-                serve_start = start_var
-                tasks_vars[t['id']] = {'start': start_var, 'end': end_var, 'task': t, 'interval': agent_interval}
-                
-                if cook_end is not None:
-                    model.Add(cook_end <= start_var)
-                    model.Add(start_var >= cook_end + 150)
+        # Debug: Check distances between task types
+        print("--- 距離行列サンプル ---")
+        sample_chop = next((i for i, t in enumerate(tasks) if t['verb'] == 'chop'), None)
+        sample_cook = next((i for i, t in enumerate(tasks) if t['verb'] == 'cook'), None)
+        if sample_chop is not None and sample_cook is not None:
+            d1 = dist_matrix.get((sample_chop, sample_cook), -1)
+            d2 = dist_matrix.get((sample_cook, sample_chop), -1)
+            p1 = tasks[sample_chop]['end_pos']
+            p2 = tasks[sample_cook]['start_pos']
+            print(f"Chop({sample_chop} @ {p1}) -> Cook({sample_cook} @ {p2}): {d1}")
+            print(f"Cook({sample_cook} @ {p2}) -> Chop({sample_chop} @ {p1}): {d2}")
+        print("------------------------")
 
-            # --- Pot Allocation & Usage --- 
+        # 3. 変数と制約の定義
+        horizon = 10000 
+
+        starts = {}
+        ends = {}
+        intervals = {}
+        
+        # タスクごとのInterval作成
+        for i in range(num_tasks):
+            t = tasks[i]
+            dur = int(t['dur']) # これは作業自体の正味時間（移動含まない）
+            
+            s_var = model.NewIntVar(0, horizon, f'start_{t["id"]}')
+            e_var = model.NewIntVar(0, horizon, f'end_{t["id"]}')
+            interval = model.NewIntervalVar(s_var, dur, e_var, f'interval_{t["id"]}')
+            
+            starts[i] = s_var
+            ends[i] = e_var
+            intervals[i] = interval
+        
+        # Startノード用のダミー変数（Circuit用）
+        starts[start_node] = model.NewIntVar(0, 0, 'start_dummy')
+        ends[start_node] = model.NewIntVar(0, 0, 'end_dummy')
+
+        # Circuit用のArc変数
+        arcs = []
+        lit_map = {} # (i, j) -> literal
+        
+        for i in all_nodes:
+            for j in all_nodes:
+                if i == j: continue
+                
+                lit = model.NewBoolVar(f'arc_{i}_{j}')
+                arcs.append((i, j, lit))
+                lit_map[(i, j)] = lit
+                
+                # 遷移制約: i -> j ならば start[j] >= end[i] + distance
+                if j != start_node: # Startノードに戻るときは制約不要
+                    dist = dist_matrix[(i, j)]
+                    model.Add(starts[j] >= ends[i] + dist).OnlyEnforceIf(lit)
+                
+                # 最初のタスク（Start -> j）の場合
+                if i == start_node:
+                    dist = dist_matrix[(i, j)]
+                    model.Add(starts[j] >= dist).OnlyEnforceIf(lit)
+
+        # 一筆書き制約 (TSP)
+        model.AddCircuit(arcs)
+        
+        # Helper: Group vars by Order ID / TID
+        vars_by_order = {} 
+        vars_by_tid = {}   
+        
+        for i in range(num_tasks):
+            t = tasks[i]
+            tid = t['id']
+            order_idx = t['order']
+            if order_idx not in vars_by_order: vars_by_order[order_idx] = []
+            
+            v_obj = {'start': starts[i], 'end': ends[i], 'task': t, 'interval': intervals[i]}
+            vars_by_order[order_idx].append(v_obj)
+            vars_by_tid[tid] = v_obj
+            
+            # Legacy compatibility (for dynamic constraints)
+            # tasks_vars used to map tid -> dict
+            # We can reuse vars_by_tid as tasks_vars equivalent if we rename it later or use it directly.
+
+        # 標準的な順序制約 (Chop -> Cook -> Serve)
+        for i in range(num_tasks):
+            t = tasks[i]
+            verb = t['verb']
+            if verb == 'cook':
+                order_vars = vars_by_order.get(t['order'], [])
+                chops = [v for v in order_vars if v['task']['verb'] == 'chop']
+                for c in chops:
+                    model.Add(starts[i] >= c['end'])
+            elif verb == 'serve':
+                order_vars = vars_by_order.get(t['order'], [])
+                cooks = [v for v in order_vars if v['task']['verb'] == 'cook']
+                for c in cooks:
+                    model.Add(starts[i] >= c['end'])
+                    model.Add(starts[i] >= c['end'] + 150)
+
+
+
+
+        print(f"[CSPAgent] スケジュール対象タスク数: {num_tasks}")
+        
+        # Helper: Group vars by Order ID / TID
+        vars_by_order = {} 
+        vars_by_tid = {}   
+        
+        for i in range(num_tasks):
+            t = tasks[i]
+            tid = t['id']
+            order_idx = t['order']
+            if order_idx not in vars_by_order: vars_by_order[order_idx] = []
+            
+            v_obj = {'start': starts[i], 'end': ends[i], 'task': t, 'interval': intervals[i]}
+            vars_by_order[order_idx].append(v_obj)
+            vars_by_tid[tid] = v_obj
+
+        # 標準的な順序制約 (Chop -> Cook -> Serve)
+        for i in range(num_tasks):
+            t = tasks[i]
+            verb = t['verb']
+            if verb == 'cook':
+                order_vars = vars_by_order.get(t['order'], [])
+                chops = [v for v in order_vars if v['task']['verb'] == 'chop']
+                for c in chops:
+                    model.Add(starts[i] >= c['end'])
+            elif verb == 'serve':
+                order_vars = vars_by_order.get(t['order'], [])
+                cooks = [v for v in order_vars if v['task']['verb'] == 'cook']
+                for c in cooks:
+                    model.Add(starts[i] >= c['end'])
+                    model.Add(starts[i] >= c['end'] + 150)
+
+        # 鍋の占有制約 (Pot Usage Constraint)
+        # Cook開始からServe完了まで、その鍋は使用中となる
+        # 同じ鍋を使う注文同士は、この期間が重なってはならない
+        pot_usage_intervals = {} # pot_loc -> list of interval_vars
+        
+        for order_idx, tasks_list in vars_by_order.items():
+            cooks = [v for v in tasks_list if v['task']['verb'] == 'cook']
+            serves = [v for v in tasks_list if v['task']['verb'] == 'serve']
+            
             if cooks and serves:
-                pot_opts = []
-                pot_res_vars[o['order']] = {}
-                for p_loc in pot_locs:
-                    is_present = model.NewBoolVar(f"pres_pot_{o['order']}_{p_loc}")
-                    pot_res_vars[o['order']][p_loc] = is_present
-                    pot_opts.append(is_present)
-                    
-                    duration_var = model.NewIntVar(0, horizon, f"dur_pot_{o['order']}_{p_loc}")
-                    model.Add(duration_var == serve_start - cook_start)
-                    
-                    pot_interval = model.NewOptionalIntervalVar(
-                        cook_start, duration_var, serve_start, 
-                        is_present, 
-                        f"opt_pot_{o['order']}_{p_loc}"
-                    )
-                    pot_intervals[p_loc].append(pot_interval)
+                cook_task = cooks[0]
+                serve_task = serves[0]
                 
-                model.Add(sum(pot_opts) == 1)
+                # この注文が使う鍋の位置
+                # fixed_res = ('pot', (x, y))
+                pot_res = cook_task['task'].get('fixed_res')
+                if pot_res and pot_res[0] == 'pot':
+                    pot_loc = pot_res[1]
+                    
+                    if pot_loc not in pot_usage_intervals:
+                        pot_usage_intervals[pot_loc] = []
+                    
+                    # 占有期間: Cook開始 -> Serve終了
+                    # IntervalVarを作成するには、Start, Size, Endの変数が必要
+                    # Sizeは定数ではない（Serve開始が遅れる可能性があるため）
+                    # なので、StartとEndを指定してSizeを推論させる、あるいはStart, Size, Endの関係式を持つIntervalを作る
+                    
+                    p_start = cook_task['start']
+                    p_end = serve_task['end']
+                    p_size = model.NewIntVar(0, horizon, f'pot_usage_dur_{order_idx}')
+                    
+                    # IntervalVar(start, size, end, name)
+                    # p_size = p_end - p_start
+                    model.Add(p_size == p_end - p_start)
+                    
+                    p_interval = model.NewIntervalVar(p_start, p_size, p_end, f'pot_usage_{order_idx}')
+                    pot_usage_intervals[pot_loc].append(p_interval)
 
-        # Helper: Group tasks by Order ID for sequential constraints
-        tasks_by_order = {}
-        for tid, v in tasks_vars.items():
-            order_idx = tid[2] # ('chop', 'onion', 0)
-            if order_idx not in tasks_by_order:
-                tasks_by_order[order_idx] = []
-            tasks_by_order[order_idx].append(v)
+        # 各鍋について、占有期間の重複を禁止
+        for pot_loc, intervals_list in pot_usage_intervals.items():
+            if len(intervals_list) > 1:
+                model.AddNoOverlap(intervals_list)
+                print(f"[CSPAgent] 鍋 {pot_loc} の重複禁止制約を追加 ({len(intervals_list)} 注文)")
 
-        # --- Dynamic Constraints (LLM Generated) ---
+        # 動的制約 (Dynamic Constraints)
         if hasattr(self, 'active_constraints') and self.active_constraints:
             print(f"[CSPAgent] 動的制約を適用中: {len(self.active_constraints)}件")
             for constr in self.active_constraints:
@@ -539,61 +697,26 @@ class CSPAgent:
                 
                 if c_type == 'order_sequential':
                     mode = constr.get('mode', 'pipeline')
-                    sorted_orders = sorted(tasks_by_order.keys())
+                    sorted_orders = sorted(vars_by_order.keys())
                     
-                    for i in range(len(sorted_orders) - 1):
-                        curr_o = sorted_orders[i]
-                        next_o = sorted_orders[i+1]
+                    for k in range(len(sorted_orders) - 1):
+                        curr_o = sorted_orders[k]
+                        next_o = sorted_orders[k+1]
                         
-                        curr_tasks = tasks_by_order[curr_o]
-                        next_tasks = tasks_by_order[next_o]
+                        curr_tasks_v = vars_by_order[curr_o]
+                        next_tasks_v = vars_by_order[next_o]
                         
                         if mode == 'strict':
-                            # Order i completely before Order i+1
-                            # All next starts >= All curr ends
-                            for v_next in next_tasks:
-                                for v_curr in curr_tasks:
+                            for v_next in next_tasks_v:
+                                for v_curr in curr_tasks_v:
                                     model.Add(v_next['start'] >= v_curr['end'])
-                                    
                         elif mode == 'pipeline':
-                            # Pipeline by verb type (Chop->Chop, Cook->Cook, Serve->Serve)
                             for verb in ['chop', 'cook', 'serve']:
-                                curr_v_tasks = [v for v in curr_tasks if v['task']['verb'] == verb]
-                                next_v_tasks = [v for v in next_tasks if v['task']['verb'] == verb]
-                                
-                                # All next-verb starts >= All curr-verb ends
-                                for v_next in next_v_tasks:
-                                    for v_curr in curr_v_tasks:
+                                curr_verb_tasks = [v for v in curr_tasks_v if v['task']['verb'] == verb]
+                                next_verb_tasks = [v for v in next_tasks_v if v['task']['verb'] == verb]
+                                for v_next in next_verb_tasks:
+                                    for v_curr in curr_verb_tasks:
                                         model.Add(v_next['start'] >= v_curr['end'])
-
-                if c_type == 'concurrency_limit':
-                    # "limit" tasks matching "tasks" list
-                    target_substrings = constr.get('tasks', [])
-                    limit = int(constr.get('limit', 1))
-                    
-                    target_intervals = []
-                    target_demands = []
-                    
-                    for tid, v in tasks_vars.items():
-                        # tid: (verb, obj, order)
-                        # Check if task name matches any substring
-                        # Construct a full name for checking: "verb_obj"
-                        full_name = f"{tid[0]}_{tid[1]}"
-                        match = False
-                        for sub in target_substrings:
-                            if sub in full_name:
-                                match = True
-                                break
-                        
-                        if match:
-                            target_intervals.append(v['interval'])
-                            target_demands.append(1)
-                    
-                    if target_intervals:
-                        # Add Cumulative Constraint
-                        # limit must be int
-                        model.AddCumulative(target_intervals, target_demands, limit)
-                        print(f"  -> Concurrency Limit Applied: {target_substrings} <= {limit}")
                             
                 elif c_type == 'precedence':
                     before_subs = constr.get('before', [])
@@ -602,54 +725,29 @@ class CSPAgent:
                     before_ends = []
                     after_starts = []
                     
-                    for tid, v in tasks_vars.items():
+                    for tid, v in vars_by_tid.items():
                         full_name = f"{tid[0]}_{tid[1]}"
-                        
-                        # Check "before"
                         for sub in before_subs:
                             if sub in full_name:
                                 before_ends.append(v['end'])
                                 break
-                        
-                        # Check "after"
                         for sub in after_subs:
                             if sub in full_name:
                                 after_starts.append(v['start'])
                                 break
                     
-                    # Apply All-to-All precedence
                     for be in before_ends:
                         for ast in after_starts:
                             model.Add(ast >= be)
 
-        print(f"[CSPAgent] スケジュール対象タスク数: {total_tasks_count}")
-        if total_tasks_count == 0:
-            print("[CSPAgent] スケジュール対象タスクがありません。")
-            return []
-
-        model.AddNoOverlap(agent_intervals)
-        
-        for loc, intervals in cutboard_intervals.items():
-            model.AddNoOverlap(intervals)
-            
-        for loc, intervals in pot_intervals.items():
-            model.AddNoOverlap(intervals)
-
-        objective_terms = []
-        for tid, v in tasks_vars.items():
-            verb, obj, _ = tid
-            w_key = f"{verb}_{obj}"
-            weight = self.priority_weights.get(w_key, 1)
-            
-            if weight != 1:
-                print(f"[CSPAgent] 重み適用: {weight} ({w_key})")
-
-            objective_terms.append(v['end'] * weight)
-            
-        if objective_terms:
-            model.Minimize(sum(objective_terms))
+        # Makespan 最小化
+        makespan = model.NewIntVar(0, horizon, 'makespan')
+        task_ends = [ends[i] for i in range(num_tasks)]
+        if task_ends:
+            model.AddMaxEquality(makespan, task_ends)
         else:
-            model.Minimize(0)
+            model.Add(makespan == 0)
+        model.Minimize(makespan)
 
         solver = cp_model.CpSolver()
         status = solver.Solve(model)
@@ -657,47 +755,75 @@ class CSPAgent:
 
         schedule = []
         if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-            print(f"[CSPAgent] 最適Makespan: {solver.ObjectiveValue()}")
-            for tid, v in tasks_vars.items():
-                start_val = solver.Value(v['start'])
-                end_val = solver.Value(v['end'])
-                
-                res = None
-                t = v['task']
-                verb = t['verb']
-                order_idx = t['order']
-                
-                if verb == 'chop':
-                    for loc, var in chop_res_vars.get(tid, {}).items():
-                        if solver.Value(var) == 1:
-                            res = ('cutboard', loc)
-                            break
-                    if res is None: res = ('cutboard', '?')
-                    
-                elif verb == 'cook':
-                    for loc, var in pot_res_vars.get(order_idx, {}).items():
-                        if solver.Value(var) == 1:
-                            res = ('pot', loc)
-                            break
-                    if res is None: res = ('pot', '?')
-                    
-                elif verb == 'serve':
-                    for loc, var in pot_res_vars.get(order_idx, {}).items():
-                        if solver.Value(var) == 1:
-                            res = ('pot', loc)
-                            break
-                    if res is None: res = ('pot', '?')
+            print(f"[CSPAgent] 最適Makespan(移動込み): {solver.ObjectiveValue()}")
+            
+            for i in range(num_tasks):
+                t = tasks[i]
+                start_val = solver.Value(starts[i])
+                end_val = solver.Value(ends[i])
                 
                 schedule.append({
-                    'id': tid,
+                    'id': t['id'],
                     'start': start_val,
                     'end': end_val,
-                    'res': res,
+                    'res': t.get('fixed_res'),
                     'assigned_counter': t.get('assigned_counter')
                 })
+            
             schedule.sort(key=lambda x: x['start'])
+            
+            # デバッグ: 順序と移動の表示
+            print("--- 推定順序と移動時間 (詳細) ---")
+            current_node = start_node
+            visited_count = 0
+            
+            # Start node "end time" is effectively 0 for the first task calculation
+            last_end_time = 0 
+            
+            while visited_count < num_tasks:
+                found_next = False
+                for j in all_nodes:
+                    if current_node == j: continue
+                    lit = lit_map.get((current_node, j))
+                    if lit is not None and solver.Value(lit) == 1:
+                        dist = dist_matrix[(current_node, j)]
+                        
+                        # 座標情報の取得
+                        if current_node == start_node:
+                            prev_pos = agent_pos
+                            prev_end_time = 0
+                        else:
+                            prev_pos = tasks[current_node]['end_pos']
+                            prev_end_time = solver.Value(ends[current_node])
+                            
+                        if j == start_node:
+                            next_pos = agent_pos # ゴール（初期位置に戻る想定）
+                            next_start_time = solver.ObjectiveValue() # Makespan
+                        else:
+                            next_pos = tasks[j]['start_pos']
+                            next_start_time = solver.Value(starts[j])
+                        
+                        actual_gap = next_start_time - prev_end_time
+                        
+                        if j != start_node:
+                            task_name = f"{tasks[j]['verb']} {tasks[j]['obj']}"
+                            print(f" -> {task_name}")
+                            print(f"    移動: {prev_pos} -> {next_pos} (距離: {dist})")
+                            print(f"    時間: 前完了={prev_end_time} + 移動={dist} <= 次開始={next_start_time} (実ギャップ: {actual_gap})")
+                            
+                            if actual_gap < dist:
+                                print("    [WARNING] 移動時間が不足しています！制約違反の可能性があります。")
+
+                        current_node = j
+                        found_next = True
+                        visited_count += 1
+                        break
+                if not found_next:
+                    break
+            print("---------------------------------")
+            
         else:
-            print(f"[CSPAgent] 解が見つかりませんでした。状態: {solver.StatusName(status)}")
+            print(f"[CSPAgent] 解が見つかりませんでした。")
             
         return schedule
 
