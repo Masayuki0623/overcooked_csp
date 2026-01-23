@@ -58,15 +58,7 @@ class GamePlay(Game):
             self._q_control.put(('Quit', {}))
 
         elif event.type == pygame.KEYDOWN:
-            if event.key in KeyToTuple.keys():
-                # Control
-                action_dict = {agent.name: (0, 0) for agent in self.sim_agents}
-                action = KeyToTuple[event.key]
-                action_dict[self.current_agent.name] = action
-                self._q_env.put(
-                    ('Action', {"agent": "human", "action": action}))
-                self._q_ai.put(
-                    ('Action', {"agent": "human", "action": action}))
+            # Direction keys are now handled in _run_human via get_pressed()
 
             if pygame.key.name(event.key) == "space":
                 self._q_env.put(('Pause', {}))
@@ -246,6 +238,7 @@ class GamePlay(Game):
     #                 self._q_ai.put(('Chat', dict(chat=s)))
 
     def _run_human(self):
+        clock = pygame.time.Clock()
         while True:
             for event in pygame.event.get():
                 self.on_event(event)
@@ -254,6 +247,18 @@ class GamePlay(Game):
                 if event == 'Quit':
                     self._q_ai.put(('Quit', {}))
                     return
+            
+            # Continuous key check
+            keys = pygame.key.get_pressed()
+            for key, action in KeyToTuple.items():
+                if keys[key]:
+                    self._q_env.put(
+                        ('Action', {"agent": "human", "action": action}))
+                    self._q_ai.put(
+                        ('Action', {"agent": "human", "action": action}))
+                    break # Prioritize one key at a time
+
+            clock.tick(30) # Limit polling rate
 
     def on_execute(self):
         if self.on_init() == False:
