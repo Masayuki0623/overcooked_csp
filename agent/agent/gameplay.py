@@ -44,7 +44,7 @@ class GamePlay(Game):
         self.fps_ai = agent_set.speed
 
         self.idx_human = 1
-        self.ai = get_agent(self.agent_set, self.replay)
+        self.ai = None
         self.predictor = HumanPredictor(env)
 
         # concurrent control variables
