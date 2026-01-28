@@ -38,14 +38,18 @@ class GamePlay(Game):
         self.replay = replay
         self.agent_set = agent_set
         self.debug_mode = debug_mode
+        self.num_agents = len(self.sim_agents)
+        self.is_ai_only = self.num_agents == 1
 
         # fps of human and ai
         self.fps = 10
         self.fps_ai = agent_set.speed
 
-        self.idx_human = 1
+        self.idx_human = 1 if not self.is_ai_only else -1
         self.ai = None
-        self.predictor = HumanPredictor(env)
+        self.predictor = None
+        if not self.is_ai_only:
+            self.predictor = HumanPredictor(env)
 
         # concurrent control variables
         self._q_control = queue.Queue()  # receive
@@ -57,7 +61,7 @@ class GamePlay(Game):
         if event.type == pygame.QUIT:
             self._q_control.put(('Quit', {}))
 
-        elif event.type == pygame.KEYDOWN:
+        elif event.type == pygame.KEYDOWN and not self.is_ai_only:
             if event.key in KeyToTuple.keys():
                 # Control
                 action_dict = {agent.name: (0, 0) for agent in self.sim_agents}
@@ -89,9 +93,13 @@ class GamePlay(Game):
 
         self.on_render(paused=paused)
         info = self.env.get_ai_info()
+        
+        # Determine agent_idx for AI
+        ai_idx = 0 if self.is_ai_only else (1 - idx_human)
+
         e = EnvState(world=info['world'],
                      agents=info['sim_agents'],
-                     agent_idx=1 - idx_human,
+                     agent_idx=ai_idx,
                      order=info['order_scheduler'],
                      event_history=info['event_history'],
                      time=info['current_time'],
@@ -103,10 +111,10 @@ class GamePlay(Game):
                 event = self._q_env.get_nowait()
                 event_type, args = event
                 if event_type == 'Action':
-                    if args['agent'] == "human":
+                    if args['agent'] == "human" and not self.is_ai_only:
                         action_dict[self.sim_agents[idx_human].name] = args['action']
-                    elif idx_human == 1:
-                        action_dict[self.sim_agents[0].name] = args['action']
+                    elif args['agent'] == "ai":
+                        action_dict[self.sim_agents[ai_idx].name] = args['action']
                 elif event_type == 'Pause':
                     paused += 1
                 elif event_type == 'Continue':
@@ -132,23 +140,19 @@ class GamePlay(Game):
                 info = self.env.get_ai_info()
                 e = EnvState(world=info['world'],
                              agents=info['sim_agents'],
-                             agent_idx=0,
+                             agent_idx=ai_idx,
                              order=info['order_scheduler'],
                              event_history=info['event_history'],
                              time=info['current_time'],
                              chg_grid=info['chg_grid'])
                 
-                # Human Prediction
-                task_name, cost, all_costs = self.predictor.predict(e, self.idx_human)
-                #print(f"[Human Prediction] Task: {task_name}, Remaining Cost: {cost}")
-                if all_costs:
-                    # Sort by cost
-                    all_costs.sort(key=lambda x: x[1])
-                    # Print top 5 or all
-                    costs_str = ", ".join([f"{t}: {c}" for t, c in all_costs])
-                    #print(f"   All costs: {costs_str}")
+                if not self.is_ai_only and self.predictor:
+                    task_name, cost, all_costs = self.predictor.predict(e, self.idx_human)
+                    if all_costs:
+                        all_costs.sort(key=lambda x: x[1])
+                        costs_str = ", ".join([f"{t}: {c}" for t, c in all_costs])
 
-                if action_dict[self.sim_agents[0].name] is not None:
+                if action_dict[self.sim_agents[ai_idx].name] is not None:
                     self._q_ai.put(('Env', {"EnvState": dcopy(e)}))
                 action_dict = {agent.name: None for agent in self.sim_agents}
 
@@ -191,14 +195,13 @@ class GamePlay(Game):
                 else:
                     break
 
-            if chat != '':
+            if chat != '' and not self.is_ai_only:
                 self.ai.high_level_infer(env, chat)
                 chat = ''
 
             if env_update:
                 move, chat_ret = self.ai(env)
 
-                # sleep
                 sleep_time = max(time_per_step - (time.time() - time_last), 0)
                 time.sleep(sleep_time)
                 time_last = time.time()
@@ -261,12 +264,17 @@ class GamePlay(Game):
 
         thread_env = threading.Thread(target=self._run_env, daemon=True)
         thread_ai = threading.Thread(target=self._run_ai, daemon=True)
-        # thread_listen = threading.Thread(target=self._run_listen, daemon=True)
         thread_env.start()
         thread_ai.start()
-        # thread_listen.start()
 
-        self._run_human()
+        if not self.is_ai_only:
+            self._run_human()
+        else:
+            # In AI-only mode, the main thread waits for the environment thread to finish.
+            thread_env.join()
+            # Also wait for AI thread to prevent premature exit
+            self._q_ai.put(('Quit', {}))
+            thread_ai.join()
 
         # clean up
         self.on_cleanup()

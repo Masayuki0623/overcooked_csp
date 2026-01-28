@@ -40,12 +40,19 @@ def parse_arguments():
     parser.add_argument(
         "--debug", action='store_true', help="Enable debug mode with overlay"
     )
+    parser.add_argument(
+        "--ai-only", action='store_true', help="Run with only the AI agent"
+    )
 
     return parser.parse_args()
 
 
-def init_env_replay(map_name, agent_name, task_name=None, no_reschedule=False, debug_mode=False):
-    map_set = MapSetting(**MAP_SETTINGS[map_name])
+def init_env_replay(map_name, agent_name, task_name=None, no_reschedule=False, debug_mode=False, ai_only=False):
+    map_kwargs = MAP_SETTINGS[map_name].copy()
+    if ai_only:
+        map_kwargs['num_agents'] = 1
+    
+    map_set = MapSetting(**map_kwargs)
     agent_set = AgentSetting(agent_name, speed=10)
     replay = Replay()
 
@@ -105,7 +112,7 @@ def init_env_replay(map_name, agent_name, task_name=None, no_reschedule=False, d
 if __name__ == '__main__':
     arglist = parse_arguments()
 
-    game, env, replay = init_env_replay(arglist.map, arglist.agent, arglist.task, arglist.no_reschedule, arglist.debug)
+    game, env, replay = init_env_replay(arglist.map, arglist.agent, arglist.task, arglist.no_reschedule, arglist.debug, arglist.ai_only)
 
     # BFSエージェントの場合、ゲーム開始前にプランニングを行う
     if arglist.agent == 'BFS':
@@ -130,7 +137,6 @@ if __name__ == '__main__':
             print("プランが見つかりませんでした。\n")
             game.ai.current_plan = []
         
-        # __call__が呼ばれたときに再度bfsを実行しないように、ステップを0に設定
         game.ai.current_step = 0
 
     try:
@@ -145,7 +151,6 @@ if __name__ == '__main__':
         print("\nGame interrupted by user.")
 
     finally:
-        # order_resultが生成される前にエラー終了する場合があるためチェック
         if 'order_result' in replay._d['dict']:
             print(replay['order_result'])
         
