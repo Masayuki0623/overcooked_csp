@@ -3,6 +3,7 @@ from tkinter import ttk, messagebox
 import os
 from pathlib import Path
 import threading
+from collections import deque
 
 # Try importing PIL for better image handling
 try:
@@ -209,17 +210,28 @@ class AgentConfigGUI:
             print(f"Error generating map image: {e}")
             return None
 
+    def strip_ansi(self, text):
+        import re
+        ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+        return ansi_escape.sub('', str(text))
+
     def _show_not_implemented(self):
         messagebox.showinfo("未実装", "この機能は将来のアップデートで追加される予定です。")
 
     def show_forbidden_area_config(self):
         self._save_current_values()
-        self.clear_frame()
+        
+        # Clean up main_frame completely (remove scrollbar/canvas from main menu if any)
+        for widget in self.main_frame.winfo_children():
+            widget.destroy()
+        self.current_frame = None
+
         self.image_cache = []
 
         screen_height = self.root.winfo_screenheight()
+
         target_height = min(750, screen_height - 100) 
-        self.center_window(self.root, 900, target_height) 
+        self.center_window(self.root, 1100, target_height) # Widen window for side-by-side view
 
         self.current_frame = ttk.Frame(self.main_frame)
         self.current_frame.pack(fill=tk.BOTH, expand=True)
@@ -254,13 +266,43 @@ class AgentConfigGUI:
         
         tk.Label(tool_frame, text="※ドラッグで連続塗りつぶし可能", bg=self.bg_color, fg="#555", font=("MS Gothic", 9)).pack(side=tk.LEFT, padx=20)
 
-        # --- Content ---
-        content_frame = tk.Frame(self.current_frame, bg=self.bg_color)
-        content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        # Content has 2 columns: Map (Left) and Tasks (Right)
+        # Use simple Frame with pack(side) instead of PanedWindow to ensure visibility
+        split_frame = tk.Frame(self.current_frame, bg=self.bg_color)
+        split_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        
+        # Left: Map container
+        map_frame = tk.Frame(split_frame, bg=self.bg_color)
+        map_frame.pack(side=tk.LEFT, anchor="nw") # Stuck to left, no expand
 
-        # Canvas for Map
-        self.map_canvas = tk.Canvas(content_frame, bg="white", highlightthickness=1, highlightbackground="black")
-        self.map_canvas.pack(anchor="center", expand=True) 
+        # Right (but packed Left to be next to map): Tasks status
+        task_frame = tk.LabelFrame(split_frame, text="タスク到達可能性", bg=self.bg_color, fg=self.fg_color, font=("MS Gothic", 10, "bold"), width=300)
+        task_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(20, 0), anchor="nw")
+        task_frame.pack_propagate(False) # Enforce width
+        
+        # Canvas for Map (Aligned to Top-Left/NW)
+        self.map_canvas = tk.Canvas(map_frame, bg="white", highlightthickness=1, highlightbackground="black")
+        self.map_canvas.pack(anchor="nw", padx=0, pady=0) 
+
+        # Task List UI
+        self.task_labels = {}
+        task_canvas = tk.Canvas(task_frame, bg=self.bg_color, highlightthickness=0)
+        task_scrollbar = ttk.Scrollbar(task_frame, orient="vertical", command=task_canvas.yview)
+        self.task_list_inner = tk.Frame(task_canvas, bg=self.bg_color)
+        
+        task_canvas.create_window((0, 0), window=self.task_list_inner, anchor="nw")
+        task_canvas.configure(yscrollcommand=task_scrollbar.set)
+        
+        task_canvas.pack(side="left", fill="both", expand=True)
+        task_scrollbar.pack(side="right", fill="y")
+        
+        self.task_list_inner.bind("<Configure>", lambda e: task_canvas.configure(scrollregion=task_canvas.bbox("all")))
+
+        # Initialize Task List
+        for task in self.tasks:
+            lbl = tk.Label(self.task_list_inner, text=f"❓ {task}", bg=self.bg_color, fg="gray", font=("Consolas", 10), justify="left", anchor="w")
+            lbl.pack(fill=tk.X, padx=5, pady=2)
+            self.task_labels[task] = lbl
 
         # Get Map Dimensions
         try:
@@ -416,10 +458,127 @@ class AgentConfigGUI:
         # Bind Click and Drag (Motion)
         self.map_canvas.bind("<Button-1>", lambda event: self._on_map_paint(event, cols, rows, rep))
         self.map_canvas.bind("<B1-Motion>", lambda event: self._on_map_paint(event, cols, rows, rep))
+        
+        # Initial validation
+        self._validate_tasks(rows, cols, rep)
+
+    def _validate_tasks(self, rows, cols, rep):
+        # 0. Find Start Position (Assume first agent)
+        start_pos = None
+        for agent in self.env.sim_agents:
+            start_pos = agent.location
+            break
+        
+        if not start_pos:
+            return
+
+        # 1. BFS to find reachable cells (Flood Fill)
+        # Avoid forbidden zones
+        reachable = set()
+        queue = deque([start_pos])
+        visited = {start_pos}
+        
+        while queue:
+            curr = queue.popleft()
+            reachable.add(curr)
+            
+            cx, cy = curr
+            for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+                nx, ny = cx + dx, cy + dy
+                if 0 <= nx < cols and 0 <= ny < rows:
+                    if (nx, ny) not in visited and (nx, ny) not in self.forbidden_zones:
+                        # Wall check
+                        if 0 <= ny < len(rep) and 0 <= nx < len(rep[ny]):
+                            char = self.strip_ansi(rep[ny][nx]).strip()
+                            # Treat empty space as walkable. 
+                            # Note: In Overcooked, ' ' is floor. 
+                            # Counters etc are obstacles. 
+                            # However, we only care about standing locations.
+                            # ' ' is usually the only walkable tile.
+                            is_walkable = (char == '' or char == ' ')
+                            
+                            if is_walkable:
+                                visited.add((nx, ny))
+                                queue.append((nx, ny))
+        
+        # 2. Check each task
+        # Helper to check if any neighbor of target_char is reachable
+        def is_reachable(target_chars, is_cook_task=False):
+            found_target = False
+            can_reach = False
+            
+            for r in range(rows):
+                for c in range(cols):
+                    if c < len(rep[r]):
+                        char = self.strip_ansi(rep[r][c]).strip()
+                        if char in target_chars:
+                            found_target = True
+                            # Check neighbors
+                            for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+                                nx, ny = c + dx, r + dy
+                                if (nx, ny) in reachable:
+                                    can_reach = True
+                                    break
+                                
+                                # Special exception for 'Cook' tasks:
+                                # Allow standing in forbidden zone if it's adjacent to a reachable safe cell
+                                # AND it's adjacent to the Pot.
+                                if is_cook_task and (nx, ny) in self.forbidden_zones:
+                                    # Check if this forbidden cell is reachable from a safe cell
+                                    is_access_reachable = False
+                                    for ddx, ddy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+                                        nnx, nny = nx + ddx, ny + ddy
+                                        if (nnx, nny) in reachable:
+                                            is_access_reachable = True
+                                            break
+                                    if is_access_reachable:
+                                        can_reach = True
+                                        break
+                    if can_reach: break
+                if can_reach: break
+            
+            return found_target and can_reach
+
+        for task, lbl in self.task_labels.items():
+            possible = False
+            
+            if task.startswith("chop_"):
+                # Needs Ingredient Source AND Cutboard
+                ing_name = task.replace("chop_", "")
+                # Map ingredient names to map chars
+                # T: Tomato, L: Lettuce, O: Onion
+                char_map = {'tomato': 'T', 'lettuce': 'L', 'onion': 'O'}
+                target_char = char_map.get(ing_name)
+                
+                if target_char:
+                    # Check Source Reachability
+                    source_ok = is_reachable([target_char])
+                    # Check Cutboard Reachability
+                    cutboard_ok = is_reachable(['/'])
+                    possible = source_ok and cutboard_ok
+                else:
+                    possible = False # Unknown ingredient
+                    
+            elif task.startswith("cook_"):
+                # Needs Pot ('U')
+                # Apply special exception
+                possible = is_reachable(['U'], is_cook_task=True)
+                
+            elif task.startswith("serve_"):
+                # Needs Delivery ('*')
+                possible = is_reachable(['*'])
+            
+            # Update Label
+            if possible:
+                lbl.config(text=f"✅ {task}", fg="#2E7D32") # Green
+            else:
+                lbl.config(text=f"❌ {task}", fg="#C62828") # Red
 
     def _on_map_paint(self, event, cols, rows, rep):
         c = event.x // self.cell_size
         r = event.y // self.cell_size
+        
+        update_needed = False
         
         if 0 <= c < cols and 0 <= r < rows:
             mode = self.tool_var.get()
@@ -429,12 +588,14 @@ class AgentConfigGUI:
                 if (c, r) not in self.forbidden_zones:
                     self.forbidden_zones.append((c, r))
                     is_forbidden = True
+                    update_needed = True
                 else:
                     is_forbidden = True
             else: # allowed
                 if (c, r) in self.forbidden_zones:
                     self.forbidden_zones.remove((c, r))
                     is_forbidden = False
+                    update_needed = True
                 else:
                     return # Already allowed
             
@@ -449,6 +610,9 @@ class AgentConfigGUI:
                         self.map_canvas.itemconfig(item['id'], fill="red", stipple="gray50")
                     else:
                         self.map_canvas.itemconfig(item['id'], fill="", stipple="")
+        
+        if update_needed:
+            self._validate_tasks(rows, cols, rep)
 
     def show_main_menu(self):
         self._save_current_values()
