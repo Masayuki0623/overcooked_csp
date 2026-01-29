@@ -14,9 +14,11 @@ class TaskAgent:
         self.assigned_serve_loc = None
         self.assigned_counter = None 
         
+        self.forbidden_zones = [] # 進入禁止エリア
+        
         print(f"[TaskAgent] タスクで初期化: {self.task_name}")
 
-    def astar_path(self, env, start, goal):
+    def astar_path(self, env, start, goal, ignore_forbidden_at_goal=False):
         width = env.world_width
         height = env.world_height
         grid = env.to_grid_a
@@ -24,8 +26,19 @@ class TaskAgent:
         def in_bounds(x, y):
             return 0 <= x < width and 0 <= y < height
 
+        def is_forbidden(x, y):
+            return (x, y) in self.forbidden_zones
+
         def walkable(x, y):
-            return in_bounds(x, y) and grid[x][y] == 1
+            if not (in_bounds(x, y) and grid[x][y] == 1):
+                return False
+            # Forbidden Zone Check
+            if is_forbidden(x, y):
+                # Goal Check: if ignore_forbidden_at_goal is True and this IS the goal
+                if ignore_forbidden_at_goal and (x, y) == goal:
+                    return True
+                return False
+            return True
 
         def heuristic(a, b):
             return abs(a[0] - b[0]) + abs(a[1] - b[1])
@@ -60,7 +73,7 @@ class TaskAgent:
                     heapq.heappush(open_set, (f_score[neighbor], neighbor))
         return None
 
-    def move_to(self, env, target_pos):
+    def move_to(self, env, target_pos, allow_forbidden_adjacent=False):
         self_pos = env.self_pos
         dist = abs(self_pos[0] - target_pos[0]) + abs(self_pos[1] - target_pos[1])
         if dist == 1:
@@ -71,27 +84,40 @@ class TaskAgent:
         for dx, dy in [(0,1),(0,-1),(1,0),(-1,0)]:
             nx, ny = target_pos[0]+dx, target_pos[1]+dy
             if 0 <= nx < env.world_width and 0 <= ny < env.world_height and env.to_grid_a[nx][ny] == 1:
+                # Check forbidden, unless special allowance
+                if (nx, ny) in self.forbidden_zones:
+                    if not allow_forbidden_adjacent:
+                         continue
+                    # if allowed, we include it as candidate
                 adjacents.append((nx, ny))
         
         if not adjacents:
-            print(f"  [MoveTo] ターゲット {target_pos} の歩行可能な隣接セルがありません (to_grid_a で確認)")
+            print(f"  [MoveTo] ターゲット {target_pos} の歩行可能な隣接セルがありません")
             return (0,0)
 
         best_path = None
         min_len = float('inf')
         
+        # Sort candidates by distance (heuristic)
+        adjacents.sort(key=lambda p: abs(p[0]-self_pos[0]) + abs(p[1]-self_pos[1]))
+
         for adj in adjacents:
-            path = self.astar_path(env, self_pos, adj)
+            # If allowed forbidden, we may need to pathfind TO a forbidden cell.
+            # astar_path needs to know it's OK to end at 'adj' even if forbidden
+            ignore_flag = allow_forbidden_adjacent and (adj in self.forbidden_zones)
+            
+            path = self.astar_path(env, self_pos, adj, ignore_forbidden_at_goal=ignore_flag)
             if path and len(path) < min_len:
                 min_len = len(path)
                 best_path = path
+                break # Found one (since we sorted, this is likely good enough)
         
         if best_path:
             next_step = best_path[0]
-            print(f"  [MoveTo] 経路が見つかりました。次のステップ: {next_step}")
+            print(f"  [MoveTo] 経路維持: {next_step}")
             return (next_step[0] - self_pos[0], next_step[1] - self_pos[1])
         
-        print(f"  [MoveTo] {target_pos} への経路が見つかりません")
+        print(f"  [MoveTo] {target_pos} への経路が見つかりません (Forbidden Zones考慮済み)")
         return (0, 0)
 
     def __call__(self, env):

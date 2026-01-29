@@ -84,6 +84,7 @@ def init_env_replay(map_name, agent_name, task_name=None, no_reschedule=False, d
             ai.gui_text_input = settings['text_input'] # 将来の使用のために保存
             ai.gui_constraint_input = settings.get('constraint_input', "") # 制約テキストを保存
             ai.active_constraints = settings.get('constraints', []) # 生成された制約リスト
+            ai.forbidden_zones = settings.get('forbidden_zones', []) # 進入禁止エリア
             print("Settings configured:", settings)
         except Exception as e:
             print(f"Failed to configure settings via GUI: {e}")

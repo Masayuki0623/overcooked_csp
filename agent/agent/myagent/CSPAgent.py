@@ -45,6 +45,8 @@ class CSPAgent:
         self.gui_constraint_input = ""
         # 適用する動的制約リスト (JSON format)
         self.active_constraints = []
+        # 進入禁止エリア
+        self.forbidden_zones = []
 
         print("[CSPAgent] 初期化完了 - 現在はランダム行動")
 
@@ -123,6 +125,9 @@ class CSPAgent:
         
         if task_name:
             self.task_agent.task_name = task_name
+            # Ensure forbidden zones are passed to the executor
+            self.task_agent.forbidden_zones = self.forbidden_zones
+            
             action, reason = self.task_agent(env)
             
             # Check completion
@@ -252,6 +257,8 @@ class CSPAgent:
                     for dx,dy in [(0,1),(0,-1),(1,0),(-1,0)]:
                         nx,ny=x+dx,y+dy
                         if 0<=nx<width and 0<=ny<height and grid[nx][ny]==1:
+                            if hasattr(self, 'forbidden_zones') and (nx, ny) in self.forbidden_zones:
+                                continue
                             out.append((nx,ny))
                 return list(set(out))
             
@@ -285,7 +292,8 @@ class CSPAgent:
             if not counters: return None
             start_pos = get_nearest(pot_pos, counters)
             
-            d = self.astar_distance(env, start_pos, pot_pos)
+            # Allow interacting with pot even if standing in forbidden zone
+            d = self.astar_distance(env, start_pos, pot_pos, allow_forbidden_adjacent=False)
             if d is None: return None
             return int(d + 2)
 
@@ -397,6 +405,7 @@ class CSPAgent:
                         'dur':dur,'weight':self._task_weight('cook'),
                         'res_candidates': [('pot', r) for r in resources['pots']],
                     })
+
             dur = self._task_duration_frames(env, 'serve', soup_name, order_idx)
             if dur is not None:
                 tasks.append({
@@ -927,7 +936,7 @@ class CSPAgent:
                     assignments[order_idx] = counter
         return assignments
 
-    def astar_distance(self, env, start, goal):
+    def astar_distance(self, env, start, goal, allow_forbidden_adjacent=False):
         import heapq
         width = env.world_width
         height = env.world_height
@@ -936,21 +945,36 @@ class CSPAgent:
         def in_bounds(x, y):
             return 0 <= x < width and 0 <= y < height
 
-        def walkable(x, y):
+        def is_forbidden(x, y):
+            if hasattr(self, 'forbidden_zones'):
+                return (x, y) in self.forbidden_zones
+            return False
+
+        def walkable_primitive(x, y):
             return in_bounds(x, y) and grid[x][y] == 1
 
         original_goal = goal
-        if not walkable(goal[0], goal[1]):
+        # ゴール地点の決定（立ち位置）
+        if not walkable_primitive(goal[0], goal[1]):
             adjacents = []
             for dx, dy in [(0,1),(0,-1),(1,0),(-1,0)]:
                 nx, ny = goal[0]+dx, goal[1]+dy
-                if walkable(nx, ny):
-                    adjacents.append((nx, ny))
+                if walkable_primitive(nx, ny):
+                     # Forbidden Zone チェック
+                    if not is_forbidden(nx, ny):
+                        adjacents.append((nx, ny))
+                    elif allow_forbidden_adjacent:
+                         # 特例: 立ち入り禁止だが目的地としてならOK
+                         adjacents.append((nx, ny))
             
             if not adjacents:
                 return None
             
             goal = min(adjacents, key=lambda p: abs(p[0]-start[0]) + abs(p[1]-start[1]))
+        else:
+             # Goal自体がWalkableなら、そこがForbiddenでないかチェック
+             if is_forbidden(goal[0], goal[1]) and not allow_forbidden_adjacent:
+                 return None
 
         def heuristic(a, b):
             return abs(a[0] - b[0]) + abs(a[1] - b[1])
@@ -967,8 +991,16 @@ class CSPAgent:
             cx, cy = current
             for dx, dy in [(0,1),(0,-1),(1,0),(-1,0)]:
                 nx, ny = cx+dx, cy+dy
-                if not walkable(nx, ny):
+                
+                if not walkable_primitive(nx, ny):
                     continue
+
+                # Forbidden Check for Path
+                if is_forbidden(nx, ny):
+                    is_dest = (nx, ny) == goal
+                    if not (is_dest and allow_forbidden_adjacent):
+                        continue
+                
                 neighbor = (nx, ny)
                 tentative_g = g_score[current] + 1
                 if neighbor not in g_score or tentative_g < g_score[neighbor]:
