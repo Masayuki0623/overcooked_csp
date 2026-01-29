@@ -37,6 +37,7 @@ class AgentConfigGUI:
         self.text_input_value = ""
         self.constraint_input_value = ""
         self.generated_constraints = []
+        self.forbidden_zones = []  # List of (x, y) tuples
         self.tasks = self._get_tasks_from_env()
         self.vars_dict = None
         self.image_cache = [] # To keep references to images alive
@@ -211,6 +212,244 @@ class AgentConfigGUI:
     def _show_not_implemented(self):
         messagebox.showinfo("未実装", "この機能は将来のアップデートで追加される予定です。")
 
+    def show_forbidden_area_config(self):
+        self._save_current_values()
+        self.clear_frame()
+        self.image_cache = []
+
+        screen_height = self.root.winfo_screenheight()
+        target_height = min(750, screen_height - 100) 
+        self.center_window(self.root, 900, target_height) 
+
+        self.current_frame = ttk.Frame(self.main_frame)
+        self.current_frame.pack(fill=tk.BOTH, expand=True)
+
+        # --- Header ---
+        header = ttk.Frame(self.current_frame)
+        header.pack(fill=tk.X, pady=5)
+        
+        btn_back = tk.Button(header, text="⬅ 戻る", font=(self.font_family, 10, "bold"),
+                             bg=self.accent_color, command=self.show_main_menu, relief="flat", padx=10)
+        btn_back.pack(side=tk.LEFT, padx=10)
+        
+        ttk.Label(header, text="ゾーン設定 (進入禁止エリア)", font=(self.font_family, 14, "bold")).pack(side=tk.LEFT, padx=20)
+        
+        # --- Tool Palette ---
+        tool_frame = tk.Frame(self.current_frame, bg=self.bg_color, pady=5)
+        tool_frame.pack(fill=tk.X, padx=20)
+        
+        self.tool_var = tk.StringVar(value="forbidden")
+        
+        lbl_tool = tk.Label(tool_frame, text="ペン選択:", bg=self.bg_color, font=self.normal_font)
+        lbl_tool.pack(side=tk.LEFT)
+        
+        # Radio buttons for tools
+        rb_forbidden = tk.Radiobutton(tool_frame, text="■ 進入禁止 (薄赤)", variable=self.tool_var, value="forbidden",
+                                      bg=self.bg_color, fg="#D32F2F", selectcolor=self.bg_color, font=(self.font_family, 11, "bold"))
+        rb_forbidden.pack(side=tk.LEFT, padx=15)
+        
+        rb_allowed = tk.Radiobutton(tool_frame, text="□ 進入可能 (白・解除)", variable=self.tool_var, value="allowed",
+                                    bg=self.bg_color, fg="#333333", selectcolor=self.bg_color, font=(self.font_family, 11, "bold"))
+        rb_allowed.pack(side=tk.LEFT, padx=15)
+        
+        tk.Label(tool_frame, text="※ドラッグで連続塗りつぶし可能", bg=self.bg_color, fg="#555", font=("MS Gothic", 9)).pack(side=tk.LEFT, padx=20)
+
+        # --- Content ---
+        content_frame = tk.Frame(self.current_frame, bg=self.bg_color)
+        content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+
+        # Canvas for Map
+        self.map_canvas = tk.Canvas(content_frame, bg="white", highlightthickness=1, highlightbackground="black")
+        self.map_canvas.pack(anchor="center", expand=True) 
+
+        # Get Map Dimensions
+        try:
+            world = self.env.world
+            # 明示的に表示を更新して rep を生成させる
+            if hasattr(world, 'update_display'):
+                world.update_display()
+            rows = world.height
+            cols = world.width
+            rep = world.rep 
+        except Exception as e:
+            world = None
+            rows = 0
+            cols = 0
+            rep = []
+            messagebox.showerror("エラー", f"マップ情報の取得に失敗しました: {e}")
+            return
+
+        if not rep or len(rep) != rows:
+             messagebox.showerror("エラー", f"マップデータが無効です。")
+             return
+
+        # Calculate cell size
+        max_canvas_w = 600
+        max_canvas_h = 500
+        
+        if cols > 0 and rows > 0:
+            cell_w = max_canvas_w // cols
+            cell_h = max_canvas_h // rows
+            self.cell_size = min(cell_w, cell_h, 60)
+        else:
+            self.cell_size = 30
+        
+        canvas_width = cols * self.cell_size
+        canvas_height = rows * self.cell_size
+        
+        self.map_canvas.config(width=canvas_width, height=canvas_height)
+        
+        # Color mapping
+        color_map = {
+            ' ': 'white',   # Floor
+            '-': '#D7CCC8', # Counter (color only if no image)
+            '/': '#FFE082', # Cutboard
+            '*': '#C5E1A5', # Delivery
+            'U': '#B0BEC5', # Pot
+            'T': '#FFAB91', # Tomato Src
+            'L': '#A5D6A7', # Lettuce Src
+            'O': '#FFE082', # Onion Src
+            'P': '#EEEEEE', # Plate Src
+            'B': '#BCAAA4'  # Bin
+        }
+        
+        # Tile Image Mapping
+        tile_files = {
+            '/': 'cutboard.png',
+            '*': 'delivery.png',
+            'U': 'pot.png',
+            'T': 'FreshTomatoTile.png',
+            'L': 'FreshLettuceTile.png',
+            'O': 'FreshOnionTile.png',
+            'P': 'PlateTile.png',
+            'B': 'bin.png'
+        }
+
+        # Preload and resize images
+        self.tile_images = {} 
+        self.overlay_image = None
+        
+        if HAS_PIL:
+            # 1. Load tile images
+            for char, filename in tile_files.items():
+                filepath = self.graphics_path / filename
+                if filepath.exists():
+                    try:
+                        pil_img = Image.open(filepath).convert("RGBA")
+                        pil_img = pil_img.resize((self.cell_size, self.cell_size), Image.LANCZOS)
+                        ph = ImageTk.PhotoImage(pil_img)
+                        self.tile_images[char] = ph
+                        self.image_cache.append(ph)
+                    except Exception as e:
+                        print(f"Failed to load image for {char}: {e}")
+            
+            # 2. Create overlay image (Red with alpha)
+            try:
+                # 80/255 alpha ~ 30% opacity
+                overlay = Image.new('RGBA', (self.cell_size, self.cell_size), (255, 0, 0, 80)) 
+                self.overlay_image = ImageTk.PhotoImage(overlay)
+                self.image_cache.append(self.overlay_image)
+            except Exception as e:
+                print(f"Failed to create overlay: {e}")
+
+        # Draw Grid
+        self.overlay_ids = {} 
+        
+        import re
+        ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+
+        for r in range(rows):
+            for c in range(cols):
+                if c < len(rep[r]):
+                    raw_char = rep[r][c]
+                    char = ansi_escape.sub('', str(raw_char)).strip()
+                    if not char: char = ' '
+                    if len(char) > 1: char = char[0]
+                else:
+                    char = ' '
+
+                x1 = c * self.cell_size
+                y1 = r * self.cell_size
+                x2 = x1 + self.cell_size
+                y2 = y1 + self.cell_size
+                
+                # 1. Base Layer (Background Color)
+                base_color = color_map.get(char, 'white')
+                self.map_canvas.create_rectangle(x1, y1, x2, y2, fill=base_color, outline="")
+
+                # 2. Image Layer
+                if char in self.tile_images:
+                    self.map_canvas.create_image(x1 + self.cell_size//2, y1 + self.cell_size//2, image=self.tile_images[char])
+                elif char != ' ' and char not in tile_files:
+                    # If no image but not floor, maybe draw text as fallback (e.g. Counter)
+                     if char == '-':
+                         # Counter usually looks better with just color, but maybe add a line
+                         self.map_canvas.create_line(x1, y2, x2, y2, fill="#8D6E63", width=2)
+                     elif char not in [' ']:
+                         self.map_canvas.create_text((x1+x2)/2, (y1+y2)/2, text=char, font=("Consolas", 10, "bold"), fill="#555")
+
+                # 3. Forbidden Overlay Layer (Interactive)
+                is_forbidden = (c, r) in self.forbidden_zones
+                
+                if self.overlay_image: 
+                    state = 'normal' if is_forbidden else 'hidden'
+                    ov_id = self.map_canvas.create_image(x1 + self.cell_size//2, y1 + self.cell_size//2, 
+                                                         image=self.overlay_image, state=state)
+                    self.overlay_ids[(r, c)] = {'type': 'image', 'id': ov_id}
+                    
+                    # Invisible rect for hit testing
+                    self.map_canvas.create_rectangle(x1, y1, x2, y2, fill="", outline="#BDBDBD")
+                else:
+                    if is_forbidden:
+                        fill_val = "red"
+                        stipple_val = "gray50"
+                    else:
+                        fill_val = ""
+                        stipple_val = ""
+                    
+                    rect_id = self.map_canvas.create_rectangle(x1, y1, x2, y2, 
+                                                               fill=fill_val, 
+                                                               stipple=stipple_val,
+                                                               outline="#BDBDBD")
+                    self.overlay_ids[(r, c)] = {'type': 'rect', 'id': rect_id}
+
+        # Bind Click and Drag (Motion)
+        self.map_canvas.bind("<Button-1>", lambda event: self._on_map_paint(event, cols, rows, rep))
+        self.map_canvas.bind("<B1-Motion>", lambda event: self._on_map_paint(event, cols, rows, rep))
+
+    def _on_map_paint(self, event, cols, rows, rep):
+        c = event.x // self.cell_size
+        r = event.y // self.cell_size
+        
+        if 0 <= c < cols and 0 <= r < rows:
+            mode = self.tool_var.get()
+            is_forbidden = False
+            
+            if mode == "forbidden":
+                if (c, r) not in self.forbidden_zones:
+                    self.forbidden_zones.append((c, r))
+                    is_forbidden = True
+                else:
+                    is_forbidden = True
+            else: # allowed
+                if (c, r) in self.forbidden_zones:
+                    self.forbidden_zones.remove((c, r))
+                    is_forbidden = False
+                else:
+                    return # Already allowed
+            
+            # Update Visual
+            item = self.overlay_ids.get((r, c))
+            if item:
+                if item['type'] == 'image':
+                     state = 'normal' if is_forbidden else 'hidden'
+                     self.map_canvas.itemconfig(item['id'], state=state)
+                else:
+                    if is_forbidden:
+                        self.map_canvas.itemconfig(item['id'], fill="red", stipple="gray50")
+                    else:
+                        self.map_canvas.itemconfig(item['id'], fill="", stipple="")
+
     def show_main_menu(self):
         self._save_current_values()
         # Clean up main_frame completely to rebuild with scrollbar
@@ -294,9 +533,9 @@ class AgentConfigGUI:
         btn_w.pack(pady=5, fill=tk.X)
 
         # Future Setting 1
-        btn_f1 = tk.Button(right_panel, text="⚙ 詳細設定 A (未実装)", 
+        btn_f1 = tk.Button(right_panel, text="🚫 進入禁止エリア設定", 
                           font=btn_font, bg=self.accent_color, fg=self.fg_color,
-                          command=self._show_not_implemented, relief="flat", padx=10, pady=5)
+                          command=self.show_forbidden_area_config, relief="flat", padx=10, pady=5)
         btn_f1.pack(pady=5, fill=tk.X)
 
         # Future Setting 2
@@ -504,5 +743,6 @@ def configure_agent_settings(env):
         'weights': gui.weights,
         'text_input': gui.text_input_value,
         'constraint_input': gui.constraint_input_value,
-        'constraints': gui.generated_constraints
+        'constraints': gui.generated_constraints,
+        'forbidden_zones': gui.forbidden_zones
     }
