@@ -50,7 +50,7 @@
 特定のエージェントでゲームを実行するには、`agent/agent/play_main.py` スクリプトを使用します。
 
 ```bash
-python agent/agent/play_main.py --map <MAP_NAME> --agent <AGENT_NAME>
+python agent/agent/play_main.py --map <MAP_NAME> --agent <AGENT_NAME> --no_reschedule
 ```
 
 ### 引数
@@ -66,7 +66,7 @@ python agent/agent/play_main.py --map <MAP_NAME> --agent <AGENT_NAME>
 
 **CSP Agent** で ring マップを実行する場合：
 ```bash
-python agent/agent/play_main.py --map ring --agent CSP
+python agent/agent/play_main.py --map ring --agent CSP --no_reschedule
 ```
 
 ### AIによる優先度自動生成 (CSP Agent)
