@@ -180,7 +180,14 @@ class EnvState:
         for obj in self.world_all:
             if obj.collidable: self.to_grid[obj.location[0]][obj.location[1]] = 0
         self.to_grid_a = deepcopy(self.to_grid)
-        for agent in self.agents[:self.agent_idx] + self.agents[self.agent_idx + 1:]:
+        
+        if isinstance(self.agent_idx, int):
+            others = self.agents[:self.agent_idx] + self.agents[self.agent_idx + 1:]
+        else:
+            me_set = set(self.agent_idx)
+            others = [a for i, a in enumerate(self.agents) if i not in me_set]
+            
+        for agent in others:
             self.to_grid_a[agent.location[0]][agent.location[1]] = 0
 
         # reachable map
@@ -196,11 +203,16 @@ class EnvState:
 
     @property
     def self_pos(self):
+        if isinstance(self.agent_idx, (list, tuple)):
+            # Fallback for multi-agent case: return first agent's pos or (0,0)
+            return self.agents[self.agent_idx[0]].location if self.agents else (0,0)
         return self.agents[self.agent_idx].location
 
     @property
     def hold(self) -> Object | None:
         # output: object held by agent
+        if isinstance(self.agent_idx, (list, tuple)):
+            return None
         return self.agents[self.agent_idx].holding
 
     def get_pos_by_obj_gs(

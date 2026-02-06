@@ -9,11 +9,12 @@ class CSPAgent:
     """
     CSP(制約充足問題)ベースのエージェント
     """
-    def __init__(self, speed=2.5, replay=None, no_reschedule=False):
+    def __init__(self, speed=2.5, replay=None, no_reschedule=False, num_agents=1):
         self.speed = speed
         self.replay = replay
         self.no_reschedule = no_reschedule
         self.initialized = False
+        self.num_agents = num_agents
         
         # CSP関連の変数
         self.variables = []  
@@ -34,10 +35,13 @@ class CSPAgent:
         self.w_serve = 5
         
         # 実行状態管理
-        self.current_task_idx = 0
-        self.holding_state = None 
+        self.current_task_idx = [0] * num_agents
+        self.schedules = [[] for _ in range(num_agents)]
         
-        self.task_agent = TaskAgent()
+        # TaskAgentをエージェント人数分用意
+        self.task_agents = [TaskAgent() for _ in range(num_agents)]
+        # Legacy support (accessor for first agent)
+        self.task_agent = self.task_agents[0]
         
         # 優先度重み（GUI等で設定）
         self.priority_weights = {}
@@ -48,7 +52,7 @@ class CSPAgent:
         # 進入禁止エリア
         self.forbidden_zones = []
 
-        print("[CSPAgent] 初期化完了 - 現在はランダム行動")
+        print(f"[CSPAgent] 初期化完了 - Agents: {num_agents}")
 
     def __call__(self, env):
         """
@@ -66,84 +70,133 @@ class CSPAgent:
 
         added = current_task_ids - self.prev_task_ids
         removed = self.prev_task_ids - current_task_ids
-
-        # 変化があった場合、または初回の場合
-        if added or removed or not self.initialized:
-            # no_rescheduleが有効で、既に初期化済みなら再計算しない
-            if self.no_reschedule and self.initialized:
-                pass
-            else:
-                if self.initialized: # 初回以外なら差分を表示
-                    print(f"\n[タスク更新] 時間: {env.time}")
-                    if added:
-                        print(f"  (+) 追加: {added}")
-                    if removed:
-                        print(f"  (-) 削除: {removed}")
-                    print("  -> スケジュール再計算中...")
-
-                # 簡易CSPスケジューリング（選択問題：A解釈）
-                try:
-                    start_time = time.time()
-                    self.schedule = self.solve_csp_scheduling(env, orders=current_orders)
-                    elapsed_time = time.time() - start_time
-                    print(f"[CSPAgent] スケジューリング時間: {elapsed_time:.4f} 秒")
-                    
-                    self._print_schedule(self.schedule)
-                    
-                    # スケジュールが再生成されたのでインデックスをリセット
-                    self.current_task_idx = 0
-                except Exception as e:
-                    print(f"[CSPAgent] CSPスケジュール中に例外: {e}")
-                    import traceback
-                    traceback.print_exc()
-                
-                self.prev_task_ids = current_task_ids
-                self.initialized = True
-
-        # スケジュール実行
-        if not hasattr(self, 'schedule') or not self.schedule or self.current_task_idx >= len(self.schedule):
-            return (0, 0), "タスクなし"
-
-        task = self.schedule[self.current_task_idx]
-        tid = task['id']
-        verb, obj, order_idx = tid
-        res = task['res'] 
-
-        # Construct Task Name
-        task_name = None
-        if verb == 'chop':
-            task_name = f"chop_{obj}"
-            self.task_agent.assigned_counter = task.get('assigned_counter')
-        elif verb == 'cook':
-            parts = obj.replace(' soup', '').split('-')
-            task_name = f"cook_{'_'.join(parts)}"
-            self.task_agent.assigned_counter = None
-        elif verb == 'serve':
-            parts = obj.replace(' soup', '').split('-')
-            task_name = f"serve_{'_'.join(parts)}"
-            self.task_agent.assigned_counter = None
         
-        if task_name:
-            self.task_agent.task_name = task_name
-            # Ensure forbidden zones are passed to the executor
-            self.task_agent.forbidden_zones = self.forbidden_zones
-            
-            action, reason = self.task_agent(env)
-            
-            # Check completion
-            if "Done" in reason or "done" in reason or "完了" in reason:
-                print(f"[CSPAgent] タスク {task_name} 完了。次へ移動。")
-                self.current_task_idx += 1
-                # Reset assignments
-                self.task_agent.assigned_cutboard = None
-                self.task_agent.assigned_pot = None
-                self.task_agent.assigned_plate = None
-                self.task_agent.assigned_serve_loc = None
-                self.task_agent.assigned_counter = None
-            
-            return action, reason
+        # Check if we should reschedule
+        should_reschedule = False
+        if not self.initialized:
+            should_reschedule = True
+        elif (added or removed) and not self.no_reschedule:
+             should_reschedule = True
+             print(f"\n[タスク更新] 時間: {env.time} Added:{len(added)} Removed:{len(removed)}")
 
-        return (0,0), "アイドル"
+        # Reschedule if needed
+        if should_reschedule:
+            try:
+                start_time = time.time()
+                # Solve for multiple agents
+                full_schedule = self.solve_csp_scheduling(env, orders=current_orders)
+                
+                # Split schedule by agent
+                if full_schedule and isinstance(full_schedule, list) and len(full_schedule) > 0 and isinstance(full_schedule[0], list):
+                    self.schedules = full_schedule
+                else:
+                    self.schedules = [[] for _ in range(self.num_agents)]
+                    if full_schedule: # Flat list fallback
+                        for task in full_schedule:
+                            agent_idx = task.get('agent_idx', 0)
+                            if 0 <= agent_idx < self.num_agents:
+                                self.schedules[agent_idx].append(task)
+                
+                elapsed_time = time.time() - start_time
+                print(f"[CSPAgent] スケジューリング完了: {elapsed_time:.4f} 秒, Agents: {self.num_agents}")
+                self._print_schedule_multi(self.schedules)
+                
+                # Reset indices
+                self.current_task_idx = [0] * self.num_agents
+                # Sync forbidden zones to all executors
+                for ta in self.task_agents:
+                    ta.forbidden_zones = self.forbidden_zones
+
+            except Exception as e:
+                print(f"[CSPAgent] CSPスケジュール中に例外: {e}")
+                import traceback
+                traceback.print_exc()
+            
+            self.prev_task_ids = current_task_ids
+            self.initialized = True
+
+        # Execute steps for ALL agents
+        actions = []
+        
+        # env.agent_idx comes from GamePlay: list of AI indices e.g. [0, 1]
+        # We need to map our local agent index 0..K to real world index
+        real_indices = env.agent_idx if isinstance(env.agent_idx, list) else [env.agent_idx]
+        
+        # Ensure we don't exceed what we expected
+        limit = min(self.num_agents, len(real_indices))
+        
+        from copy import copy
+        
+        for i in range(limit):
+            real_idx = real_indices[i]
+            
+            # Create a view for this agent
+            # Ideally we clone envstate to modify agent_idx
+            # Since EnvState is simple, we can just tweak it if we accept shallow copy risks,
+            # but safer to create new EnvState or copy.
+            # EnvState is in agent.executor.low.
+            # We can just change agent_idx on a shallow copy of the object wrapper.
+            
+            env_view = copy(env) 
+            env_view.agent_idx = real_idx # Set integer ID for TaskAgent
+            
+            # Get current task for this agent
+            my_sched = self.schedules[i] if i < len(self.schedules) else []
+            curr_idx = self.current_task_idx[i]
+            
+            action = (0,0)
+            reason = "Idle"
+            
+            if curr_idx < len(my_sched):
+                task = my_sched[curr_idx]
+                tid = task['id']
+                verb, obj, order_idx = tid
+                
+                # Setup TaskAgent
+                ta = self.task_agents[i]
+                
+                # Determine Task Name
+                task_name = None
+                if verb == 'chop':
+                    task_name = f"chop_{obj}"
+                    ta.assigned_counter = task.get('assigned_counter')
+                elif verb == 'cook':
+                    parts = obj.replace(' soup', '').split('-')
+                    task_name = f"cook_{'_'.join(parts)}"
+                    ta.assigned_counter = None
+                elif verb == 'serve':
+                    parts = obj.replace(' soup', '').split('-')
+                    task_name = f"serve_{'_'.join(parts)}"
+                    ta.assigned_counter = None
+                
+                if task_name:
+                    ta.task_name = task_name
+                    # Forbidden zones already synced
+                    action, reason = ta(env_view)
+                    
+                    if "done" in reason.lower() or "完了" in reason:
+                        print(f"[CSPAgent-{i}] タスク {task_name} 完了")
+                        self.current_task_idx[i] += 1
+                        ta.assigned_cutboard = None
+                        ta.assigned_pot = None
+                        ta.assigned_plate = None
+                        ta.assigned_serve_loc = None
+                        ta.assigned_counter = None
+            
+            actions.append(action)
+            
+        return actions, "Multi-Agent Step"
+
+    def _print_schedule_multi(self, schedules):
+        print("\n=== CSP Multi-Agent Schedule ===")
+        for i, sched in enumerate(schedules):
+            print(f"--- Agent {i} ---")
+            for item in sched:
+                 tid = item['id']; start=item['start']; end=item['end']
+                 verb,obj,order = tid
+                 print(f"  {verb} {obj} ({order+1}): {start}-{end} Res:{item.get('res')}")
+        print("===============================\n")
+
 
     # ============ OR-Tools: 0-1選択問題（予算内で重み最大化） ============ 
     def solve_csp_knapsack_with_ortools(self, env):
@@ -418,19 +471,145 @@ class CSPAgent:
             order_idx += 1
         return orders
 
+    def _detect_bottlenecks(self, env):
+        width, height = env.world_width, env.world_height
+        grid = env.to_grid
+        bottlenecks = set()
+        
+        # 1. Identify narrow passage tiles
+        for x in range(width):
+            for y in range(height):
+                if grid[x][y] == 0: continue # Wall
+                
+                # Check neighbors (Wall=0, Walkable=1)
+                n_u = grid[x][y-1] == 0 if y > 0 else True
+                n_d = grid[x][y+1] == 0 if y < height-1 else True
+                n_l = grid[x-1][y] == 0 if x > 0 else True
+                n_r = grid[x+1][y] == 0 if x < width-1 else True
+                
+                is_narrow_h = n_u and n_d # Walls above and below -> Horizontal Passage
+                is_narrow_v = n_l and n_r # Walls left and right -> Vertical Passage
+                
+                if is_narrow_h or is_narrow_v:
+                    bottlenecks.add((x, y))
+
+        # 2. Group into zones
+        visited = set()
+        zones = {}
+        zone_id = 0
+        
+        for bn in bottlenecks:
+            if bn in visited: continue
+            q = [bn]
+            visited.add(bn)
+            current_zone = []
+            while q:
+                curr = q.pop(0)
+                current_zone.append(curr)
+                cx, cy = curr
+                for dx, dy in [(0,1),(0,-1),(1,0),(-1,0)]:
+                    nx, ny = cx+dx, cy+dy
+                    neigh = (nx, ny)
+                    if neigh in bottlenecks and neigh not in visited:
+                        visited.add(neigh)
+                        q.append(neigh)
+            
+            # Filter? Maybe keep only if length > 1? Single tile door is also a bottleneck.
+            zones[zone_id] = current_zone
+            zone_id += 1
+            
+        tile_to_zone = {}
+        for zid, tiles in zones.items():
+            for t in tiles:
+                tile_to_zone[t] = zid
+                
+        return tile_to_zone, zones
+
+    def astar_path(self, env, start, goal, allow_forbidden_adjacent=False):
+        import heapq
+        width = env.world_width
+        height = env.world_height
+        grid = env.to_grid
+
+        def in_bounds(x, y):
+            return 0 <= x < width and 0 <= y < height
+        def is_forbidden(x, y):
+            if hasattr(self, 'forbidden_zones'): return (x, y) in self.forbidden_zones
+            return False
+        def walkable_primitive(x, y):
+            return in_bounds(x, y) and grid[x][y] == 1
+
+        # Check Goal
+        final_goal = goal
+        if not walkable_primitive(goal[0], goal[1]):
+            adjacents = []
+            for dx, dy in [(0,1),(0,-1),(1,0),(-1,0)]:
+                nx, ny = goal[0]+dx, goal[1]+dy
+                if walkable_primitive(nx, ny):
+                    if not is_forbidden(nx, ny): adjacents.append((nx, ny))
+                    elif allow_forbidden_adjacent: adjacents.append((nx, ny))
+            if not adjacents: return None, None
+            final_goal = min(adjacents, key=lambda p: abs(p[0]-start[0]) + abs(p[1]-start[1]))
+        else:
+             if is_forbidden(goal[0], goal[1]) and not allow_forbidden_adjacent: return None, None
+        
+        def heuristic(a, b):
+            return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+        open_set = []
+        heapq.heappush(open_set, (0, start))
+        g_score = {start: 0}
+        f_score = {start: heuristic(start, final_goal)}
+        came_from = {}
+
+        while open_set:
+            _, current = heapq.heappop(open_set)
+            if current == final_goal:
+                path = []
+                curr = current
+                while curr in came_from:
+                    path.append(curr)
+                    curr = came_from[curr]
+                path.append(start)
+                path.reverse()
+                return g_score[current], path
+
+            cx, cy = current
+            for dx, dy in [(0,1),(0,-1),(1,0),(-1,0)]:
+                nx, ny = cx+dx, cy+dy
+                if not walkable_primitive(nx, ny): continue
+                if is_forbidden(nx, ny):
+                    is_dest = (nx, ny) == final_goal
+                    if not (is_dest and allow_forbidden_adjacent): continue
+                
+                neighbor = (nx, ny)
+                tentative_g = g_score[current] + 1
+                if neighbor not in g_score or tentative_g < g_score[neighbor]:
+                    came_from[neighbor] = current
+                    g_score[neighbor] = tentative_g
+                    f_score[neighbor] = tentative_g + heuristic(neighbor, final_goal)
+                    heapq.heappush(open_set, (f_score[neighbor], neighbor))
+        return None, None
+
     def solve_csp_scheduling(self, env, orders):
         """
-        OR-Tools CP-SAT を用いたスケジューリング（移動コスト込み）。
-        Circuit制約を用いて順序依存のセットアップ時間（移動時間）を正確にモデル化する。
+        OR-Tools CP-SAT を用いたスケジューリング（Multi-Agent TSP対応）。
+        Circuit制約を用いて複数エージェントの経路とタスク順序を同時最適化する。
+        Bottleneck (Narrow Passage) Detection included.
         """
-        print(f"[CSPAgent] CSPスケジューリング開始 ({len(orders)} 注文)...")
+        num_agents = getattr(self, 'num_agents', 1)
+        print(f"[CSPAgent] CSPスケジューリング開始 ({len(orders)} 注文, {num_agents} エージェント)...")
         model = cp_model.CpModel()
         
-        # 1. タスクのリスト化とリソース位置の固定
+        # 0. Bottleneck Detection
+        tile_to_zone, zones = self._detect_bottlenecks(env)
+        print(f"[CSPAgent] 検出されたボトルネックゾーン数: {len(zones)}")
+
+        # 1. タスクのリスト化
         tasks = []
         for o in orders:
             for t in o['tasks']:
-                t['order_obj'] = o # 親注文への参照（便利のため）
+                t['order_obj'] = o
                 tasks.append(t)
         
         num_tasks = len(tasks)
@@ -438,35 +617,39 @@ class CSPAgent:
             print("[CSPAgent] スケジュール対象タスクがありません。")
             return []
 
-        # 現在のエージェント位置（初期位置）
+        # エージェント位置の取得 (Multiple Agents)
+        agent_positions = []
         if hasattr(env, 'sim_agents'):
-            agent_pos = env.sim_agents[0].location
+            agent_positions = [a.location for a in env.sim_agents]
         elif hasattr(env, 'agents'):
-            agent_pos = env.agents[0].location
-        else:
-            # Fallback (should not happen in standard gym_cooking envs)
-            agent_pos = (0, 0)
+            agent_positions = [a.location for a in env.agents]
         
-        # リソース位置の特定と固定 (Fixed Position)
+        # 位置情報不足時の補完
+        while len(agent_positions) < num_agents:
+            agent_positions.append((0, 0))
+        agent_positions = agent_positions[:num_agents]
+
+        # リソース位置の特定
         resources = self._get_resources(env)
         
-        def get_nearest(start_pos, candidates):
-            if not candidates: return start_pos # Fallback
-            return min(candidates, key=lambda p: abs(p[0]-start_pos[0]) + abs(p[1]-start_pos[1]))
+        def get_nearest(start_pos_list, candidates):
+            ref_pos = start_pos_list[0] 
+            if not candidates: return ref_pos
+            return min(candidates, key=lambda p: abs(p[0]-ref_pos[0]) + abs(p[1]-ref_pos[1]))
 
+        # タスクのリソース割り当て (Location Fixing)
         for t in tasks:
             verb = t['verb']
             obj = t['obj']
             order_idx = t['order']
             
             if verb == 'chop':
-                # 食材の位置から一番近いまな板を選ぶ
                 tile_map = {"lettuce": "FreshLettuceTile", "onion": "FreshOnionTile", "tomato": "FreshTomatoTile"}
                 ing_pos_list = env.get_pos_by_obj_gs(gs=tile_map.get(obj, ""))
-                ing_pos = ing_pos_list[0] if ing_pos_list else agent_pos
+                ing_pos = ing_pos_list[0] if ing_pos_list else agent_positions[0]
                 
                 cutboards = resources['cutboards']
-                best_cb = get_nearest(ing_pos, cutboards)
+                best_cb = get_nearest([ing_pos], cutboards)
                 
                 t['start_pos'] = best_cb
                 t['end_pos'] = best_cb
@@ -474,366 +657,209 @@ class CSPAgent:
                 
             elif verb == 'cook':
                 pots = resources['pots']
-                # 注文インデックスに基づく鍋割り当て（簡易）
-                pot = pots[order_idx % len(pots)] if pots else agent_pos
+                pot = pots[order_idx % len(pots)] if pots else agent_positions[0]
                 t['start_pos'] = pot
                 t['end_pos'] = pot
                 t['fixed_res'] = ('pot', pot)
                 
             elif verb == 'serve':
                 pots = resources['pots']
-                pot = pots[order_idx % len(pots)] if pots else agent_pos
+                pot = pots[order_idx % len(pots)] if pots else agent_positions[0]
                 delivery = resources['delivery']
                 
                 t['start_pos'] = pot
                 t['end_pos'] = delivery
-                t['fixed_res'] = ('pot', pot) # ServeもPotリソース扱いにしておく
+                t['fixed_res'] = ('pot', pot)
 
-        # 2. 距離行列の作成 (A* distance)
-        all_nodes = list(range(num_tasks + 1))
-        start_node = num_tasks # ダミーノード
+        # 2. 距離行列とパスの計算
+        real_nodes = list(range(num_tasks))
+        depot_nodes = list(range(num_tasks, num_tasks + num_agents))
+        all_nodes = real_nodes + depot_nodes
         
-        dist_matrix = {} # (from_idx, to_idx) -> distance
-        print("[CSPAgent] 距離行列を計算中...")
-        
-        # キャッシュ付きA*
-        dist_cache = {}
-        def get_dist(p1, p2):
-            if (p1, p2) in dist_cache: return dist_cache[(p1, p2)]
-            d = self.astar_distance(env, p1, p2)
-            if d is None: d = 1000
-            dist_cache[(p1, p2)] = d
-            return d
+        dist_matrix = {} 
+        path_cache = {} # (i,j) -> list of coords
 
+        print("[CSPAgent] 距離行列とパスを計算中...")
         for i in all_nodes:
             for j in all_nodes:
                 if i == j:
                     dist_matrix[(i,j)] = 0
                     continue
-                # From Node
-                if i == start_node:
-                    pos_i = agent_pos
+                
+                if i in depot_nodes:
+                    agent_idx = i - num_tasks
+                    pos_i = agent_positions[agent_idx]
                 else:
                     pos_i = tasks[i]['end_pos']
-                # To Node
-                if j == start_node:
+                
+                if j in depot_nodes:
                     dist_matrix[(i,j)] = 0
                 else:
                     pos_j = tasks[j]['start_pos']
-                    dist = get_dist(pos_i, pos_j)
+                    dist, path = self.astar_path(env, pos_i, pos_j)
+                    if dist is None: dist = 1000
                     dist_matrix[(i,j)] = dist
+                    if path:
+                        path_cache[(i,j)] = path
 
-        # Debug: Check distances between task types
-        print("--- 距離行列サンプル ---")
-        sample_chop = next((i for i, t in enumerate(tasks) if t['verb'] == 'chop'), None)
-        sample_cook = next((i for i, t in enumerate(tasks) if t['verb'] == 'cook'), None)
-        if sample_chop is not None and sample_cook is not None:
-            d1 = dist_matrix.get((sample_chop, sample_cook), -1)
-            d2 = dist_matrix.get((sample_cook, sample_chop), -1)
-            p1 = tasks[sample_chop]['end_pos']
-            p2 = tasks[sample_cook]['start_pos']
-            print(f"Chop({sample_chop} @ {p1}) -> Cook({sample_cook} @ {p2}): {d1}")
-            print(f"Cook({sample_cook} @ {p2}) -> Chop({sample_chop} @ {p1}): {d2}")
-        print("------------------------")
-
-        # 3. 変数と制約の定義
+        # 3. 変数と制約
         horizon = 10000 
-
         starts = {}
         ends = {}
-        intervals = {}
         
-        # タスクごとのInterval作成
-        for i in range(num_tasks):
+        # Real Tasks
+        for i in real_nodes:
             t = tasks[i]
-            dur = int(t['dur']) # これは作業自体の正味時間（移動含まない）
-            
-            s_var = model.NewIntVar(0, horizon, f'start_{t["id"]}')
-            e_var = model.NewIntVar(0, horizon, f'end_{t["id"]}')
-            interval = model.NewIntervalVar(s_var, dur, e_var, f'interval_{t["id"]}')
-            
-            starts[i] = s_var
-            ends[i] = e_var
-            intervals[i] = interval
-        
-        # Startノード用のダミー変数（Circuit用）
-        starts[start_node] = model.NewIntVar(0, 0, 'start_dummy')
-        ends[start_node] = model.NewIntVar(0, 0, 'end_dummy')
+            dur = int(t['dur'])
+            starts[i] = model.NewIntVar(0, horizon, f'start_{i}')
+            ends[i] = model.NewIntVar(0, horizon, f'end_{i}')
+            model.NewIntervalVar(starts[i], dur, ends[i], f'interval_{i}')
 
-        # Circuit用のArc変数
+        # Depot Nodes
+        for i in depot_nodes:
+            starts[i] = model.NewIntVar(0, 0, f'start_depot_{i}')
+            ends[i] = model.NewIntVar(0, 0, f'end_depot_{i}')
+
+        # Arcs for Circuit
         arcs = []
-        lit_map = {} # (i, j) -> literal
+        lit_map = {}
         
+        # Bottleneck Usage Intervals
+        # zone_id -> list of interval vars
+        bottleneck_usage = {z: [] for z in zones}
+
         for i in all_nodes:
             for j in all_nodes:
                 if i == j: continue
+                
+                if i in depot_nodes and j in depot_nodes:
+                    current_agent = i - num_tasks
+                    next_agent_target = (current_agent + 1) % num_agents
+                    expected_next_depot = num_tasks + next_agent_target
+                    if j != expected_next_depot:
+                        continue 
                 
                 lit = model.NewBoolVar(f'arc_{i}_{j}')
                 arcs.append((i, j, lit))
                 lit_map[(i, j)] = lit
                 
-                # 遷移制約: i -> j ならば start[j] >= end[i] + distance
-                if j != start_node: # Startノードに戻るときは制約不要
+                if j not in depot_nodes:
                     dist = dist_matrix[(i, j)]
                     model.Add(starts[j] >= ends[i] + dist).OnlyEnforceIf(lit)
-                
-                # 最初のタスク（Start -> j）の場合
-                if i == start_node:
-                    dist = dist_matrix[(i, j)]
-                    model.Add(starts[j] >= dist).OnlyEnforceIf(lit)
+                    
+                    # Passage Resource Constraints
+                    if (i, j) in path_cache:
+                        path = path_cache[(i, j)]
+                        visited_zones_intervals = {} # zone_id -> (first_index, last_index)
 
-        # 一筆書き制約 (TSP)
+                        for k, pos in enumerate(path):
+                            if pos in tile_to_zone:
+                                zid = tile_to_zone[pos]
+                                if zid not in visited_zones_intervals:
+                                    visited_zones_intervals[zid] = [k, k]
+                                else:
+                                    visited_zones_intervals[zid][1] = k
+                        
+                        for zid, (start_k, end_k) in visited_zones_intervals.items():
+                            start_time_offset = start_k * self.frames_per_action
+                            duration = (end_k - start_k + 1) * self.frames_per_action
+                            
+                            start_iv = model.NewIntVar(0, horizon, f'bn_start_{i}_{j}_{zid}')
+                            end_iv = model.NewIntVar(0, horizon, f'bn_end_{i}_{j}_{zid}')
+                            
+                            model.Add(start_iv == ends[i] + start_time_offset).OnlyEnforceIf(lit)
+                            model.Add(end_iv == start_iv + duration).OnlyEnforceIf(lit)
+                            
+                            iv = model.NewOptionalIntervalVar(start_iv, duration, end_iv, lit, f'bn_iv_{i}_{j}_{zid}')
+                            bottleneck_usage[zid].append(iv)
+                            
         model.AddCircuit(arcs)
         
-        # Helper: Group vars by Order ID / TID
-        vars_by_order = {} 
-        vars_by_tid = {}   
-        
-        for i in range(num_tasks):
-            t = tasks[i]
-            tid = t['id']
-            order_idx = t['order']
-            if order_idx not in vars_by_order: vars_by_order[order_idx] = []
-            
-            v_obj = {'start': starts[i], 'end': ends[i], 'task': t, 'interval': intervals[i]}
-            vars_by_order[order_idx].append(v_obj)
-            vars_by_tid[tid] = v_obj
-            
-            # Legacy compatibility (for dynamic constraints)
-            # tasks_vars used to map tid -> dict
-            # We can reuse vars_by_tid as tasks_vars equivalent if we rename it later or use it directly.
+        # Add NoOverlap for Bottlenecks
+        for zid, iv_list in bottleneck_usage.items():
+            if len(iv_list) > 1:
+                model.AddNoOverlap(iv_list)
 
-        # 標準的な順序制約 (Chop -> Cook -> Serve)
-        for i in range(num_tasks):
+        # Resource Constraints (Overlap) - Cooking/Cutting
+        vars_by_order = {} 
+        for i in real_nodes:
+            t = tasks[i]
+            if t['order'] not in vars_by_order: vars_by_order[t['order']] = []
+            vars_by_order[t['order']].append({'start': starts[i], 'end': ends[i], 'task': t})
+            
+        for i in real_nodes:
             t = tasks[i]
             verb = t['verb']
             if verb == 'cook':
-                order_vars = vars_by_order.get(t['order'], [])
-                chops = [v for v in order_vars if v['task']['verb'] == 'chop']
+                chops = [v for v in vars_by_order.get(t['order'], []) if v['task']['verb'] == 'chop']
                 for c in chops:
                     model.Add(starts[i] >= c['end'])
             elif verb == 'serve':
-                order_vars = vars_by_order.get(t['order'], [])
-                cooks = [v for v in order_vars if v['task']['verb'] == 'cook']
+                cooks = [v for v in vars_by_order.get(t['order'], []) if v['task']['verb'] == 'cook']
                 for c in cooks:
                     model.Add(starts[i] >= c['end'])
-                    model.Add(starts[i] >= c['end'] + 150)
+                    model.Add(starts[i] >= c['end'] + 150) 
 
-
-
-
-        print(f"[CSPAgent] スケジュール対象タスク数: {num_tasks}")
-        
-        # Helper: Group vars by Order ID / TID
-        vars_by_order = {} 
-        vars_by_tid = {}   
-        
-        for i in range(num_tasks):
-            t = tasks[i]
-            tid = t['id']
-            order_idx = t['order']
-            if order_idx not in vars_by_order: vars_by_order[order_idx] = []
-            
-            v_obj = {'start': starts[i], 'end': ends[i], 'task': t, 'interval': intervals[i]}
-            vars_by_order[order_idx].append(v_obj)
-            vars_by_tid[tid] = v_obj
-
-        # 標準的な順序制約 (Chop -> Cook -> Serve)
-        for i in range(num_tasks):
-            t = tasks[i]
-            verb = t['verb']
-            if verb == 'cook':
-                order_vars = vars_by_order.get(t['order'], [])
-                chops = [v for v in order_vars if v['task']['verb'] == 'chop']
-                for c in chops:
-                    model.Add(starts[i] >= c['end'])
-            elif verb == 'serve':
-                order_vars = vars_by_order.get(t['order'], [])
-                cooks = [v for v in order_vars if v['task']['verb'] == 'cook']
-                for c in cooks:
-                    model.Add(starts[i] >= c['end'])
-                    model.Add(starts[i] >= c['end'] + 150)
-
-        # 鍋の占有制約 (Pot Usage Constraint)
-        # Cook開始からServe完了まで、その鍋は使用中となる
-        # 同じ鍋を使う注文同士は、この期間が重なってはならない
-        pot_usage_intervals = {} # pot_loc -> list of interval_vars
-        
-        for order_idx, tasks_list in vars_by_order.items():
-            cooks = [v for v in tasks_list if v['task']['verb'] == 'cook']
-            serves = [v for v in tasks_list if v['task']['verb'] == 'serve']
-            
+        pot_usage_intervals = {}
+        for order_idx, v_list in vars_by_order.items():
+            cooks = [v for v in v_list if v['task']['verb'] == 'cook']
+            serves = [v for v in v_list if v['task']['verb'] == 'serve']
             if cooks and serves:
-                cook_task = cooks[0]
-                serve_task = serves[0]
-                
-                # この注文が使う鍋の位置
-                # fixed_res = ('pot', (x, y))
-                pot_res = cook_task['task'].get('fixed_res')
+                c, s = cooks[0], serves[0]
+                pot_res = c['task'].get('fixed_res')
                 if pot_res and pot_res[0] == 'pot':
                     pot_loc = pot_res[1]
+                    if pot_loc not in pot_usage_intervals: pot_usage_intervals[pot_loc] = []
                     
-                    if pot_loc not in pot_usage_intervals:
-                        pot_usage_intervals[pot_loc] = []
-                    
-                    # 占有期間: Cook開始 -> Serve終了
-                    # IntervalVarを作成するには、Start, Size, Endの変数が必要
-                    # Sizeは定数ではない（Serve開始が遅れる可能性があるため）
-                    # なので、StartとEndを指定してSizeを推論させる、あるいはStart, Size, Endの関係式を持つIntervalを作る
-                    
-                    p_start = cook_task['start']
-                    p_end = serve_task['end']
-                    p_size = model.NewIntVar(0, horizon, f'pot_usage_dur_{order_idx}')
-                    
-                    # IntervalVar(start, size, end, name)
-                    # p_size = p_end - p_start
-                    model.Add(p_size == p_end - p_start)
-                    
-                    p_interval = model.NewIntervalVar(p_start, p_size, p_end, f'pot_usage_{order_idx}')
-                    pot_usage_intervals[pot_loc].append(p_interval)
+                    p_size = model.NewIntVar(0, horizon, f'size_pot_{order_idx}')
+                    model.Add(p_size == s['end'] - c['start'])
+                    p_iv = model.NewIntervalVar(c['start'], p_size, s['end'], f'iv_pot_{order_idx}')
+                    pot_usage_intervals[pot_loc].append(p_iv)
 
-        # 各鍋について、占有期間の重複を禁止
-        for pot_loc, intervals_list in pot_usage_intervals.items():
+        for intervals_list in pot_usage_intervals.values():
             if len(intervals_list) > 1:
                 model.AddNoOverlap(intervals_list)
-                print(f"[CSPAgent] 鍋 {pot_loc} の重複禁止制約を追加 ({len(intervals_list)} 注文)")
 
-        # 動的制約 (Dynamic Constraints)
-        if hasattr(self, 'active_constraints') and self.active_constraints:
-            print(f"[CSPAgent] 動的制約を適用中: {len(self.active_constraints)}件")
-            for constr in self.active_constraints:
-                c_type = constr.get('type')
-                
-                if c_type == 'order_sequential':
-                    mode = constr.get('mode', 'pipeline')
-                    sorted_orders = sorted(vars_by_order.keys())
-                    
-                    for k in range(len(sorted_orders) - 1):
-                        curr_o = sorted_orders[k]
-                        next_o = sorted_orders[k+1]
-                        
-                        curr_tasks_v = vars_by_order[curr_o]
-                        next_tasks_v = vars_by_order[next_o]
-                        
-                        if mode == 'strict':
-                            for v_next in next_tasks_v:
-                                for v_curr in curr_tasks_v:
-                                    model.Add(v_next['start'] >= v_curr['end'])
-                        elif mode == 'pipeline':
-                            for verb in ['chop', 'cook', 'serve']:
-                                curr_verb_tasks = [v for v in curr_tasks_v if v['task']['verb'] == verb]
-                                next_verb_tasks = [v for v in next_tasks_v if v['task']['verb'] == verb]
-                                for v_next in next_verb_tasks:
-                                    for v_curr in curr_verb_tasks:
-                                        model.Add(v_next['start'] >= v_curr['end'])
-                            
-                elif c_type == 'precedence':
-                    before_subs = constr.get('before', [])
-                    after_subs = constr.get('after', [])
-                    
-                    before_ends = []
-                    after_starts = []
-                    
-                    for tid, v in vars_by_tid.items():
-                        full_name = f"{tid[0]}_{tid[1]}"
-                        for sub in before_subs:
-                            if sub in full_name:
-                                before_ends.append(v['end'])
-                                break
-                        for sub in after_subs:
-                            if sub in full_name:
-                                after_starts.append(v['start'])
-                                break
-                    
-                    for be in before_ends:
-                        for ast in after_starts:
-                            model.Add(ast >= be)
-
-        # Makespan 最小化
         makespan = model.NewIntVar(0, horizon, 'makespan')
-        task_ends = [ends[i] for i in range(num_tasks)]
-        if task_ends:
-            model.AddMaxEquality(makespan, task_ends)
-        else:
-            model.Add(makespan == 0)
+        if real_nodes:
+            model.AddMaxEquality(makespan, [ends[i] for i in real_nodes])
         model.Minimize(makespan)
 
         solver = cp_model.CpSolver()
         status = solver.Solve(model)
-        print(f"[CSPAgent] ソルバー状態: {solver.StatusName(status)}")
-
-        schedule = []
+        
+        schedule = [[] for _ in range(num_agents)] 
+        
         if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-            print(f"[CSPAgent] 最適Makespan(移動込み): {solver.ObjectiveValue()}")
-            
-            for i in range(num_tasks):
-                t = tasks[i]
-                start_val = solver.Value(starts[i])
-                end_val = solver.Value(ends[i])
-                
-                schedule.append({
-                    'id': t['id'],
-                    'start': start_val,
-                    'end': end_val,
-                    'res': t.get('fixed_res'),
-                    'assigned_counter': t.get('assigned_counter')
-                })
-            
-            schedule.sort(key=lambda x: x['start'])
-            
-            # デバッグ: 順序と移動の表示
-            print("--- 推定順序と移動時間 (詳細) ---")
-            current_node = start_node
-            visited_count = 0
-            
-            # Start node "end time" is effectively 0 for the first task calculation
-            last_end_time = 0 
-            
-            while visited_count < num_tasks:
-                found_next = False
-                for j in all_nodes:
-                    if current_node == j: continue
-                    lit = lit_map.get((current_node, j))
-                    if lit is not None and solver.Value(lit) == 1:
-                        dist = dist_matrix[(current_node, j)]
-                        
-                        # 座標情報の取得
-                        if current_node == start_node:
-                            prev_pos = agent_pos
-                            prev_end_time = 0
-                        else:
-                            prev_pos = tasks[current_node]['end_pos']
-                            prev_end_time = solver.Value(ends[current_node])
-                            
-                        if j == start_node:
-                            next_pos = agent_pos # ゴール（初期位置に戻る想定）
-                            next_start_time = solver.ObjectiveValue() # Makespan
-                        else:
-                            next_pos = tasks[j]['start_pos']
-                            next_start_time = solver.Value(starts[j])
-                        
-                        actual_gap = next_start_time - prev_end_time
-                        
-                        if j != start_node:
-                            task_name = f"{tasks[j]['verb']} {tasks[j]['obj']}"
-                            print(f" -> {task_name}")
-                            print(f"    移動: {prev_pos} -> {next_pos} (距離: {dist})")
-                            print(f"    時間: 前完了={prev_end_time} + 移動={dist} <= 次開始={next_start_time} (実ギャップ: {actual_gap})")
-                            
-                            if actual_gap < dist:
-                                print("    [WARNING] 移動時間が不足しています！制約違反の可能性があります。")
+            print(f"[CSPAgent] 最適Makespan: {solver.ObjectiveValue()}")
+            for agent_idx in range(num_agents):
+                curr = num_tasks + agent_idx 
+                while True:
+                    next_node = None
+                    for j in all_nodes:
+                        if curr == j: continue
+                        if solver.Value(lit_map[(curr, j)]) == 1:
+                            next_node = j
+                            break
+                    if next_node is None: break 
+                    if next_node in depot_nodes: break 
+                    
+                    t = tasks[next_node]
+                    schedule[agent_idx].append({
+                        'id': t['id'],
+                        'start': solver.Value(starts[next_node]),
+                        'end': solver.Value(ends[next_node]),
+                        'res': t.get('fixed_res'),
+                        'agent_idx': agent_idx
+                    })
+                    curr = next_node
 
-                        current_node = j
-                        found_next = True
-                        visited_count += 1
-                        break
-                if not found_next:
-                    break
-            print("---------------------------------")
-            
+            for s in schedule:
+                s.sort(key=lambda x: x['start'])
+                
         else:
-            print(f"[CSPAgent] 解が見つかりませんでした。")
-            
+            print("[CSPAgent] 解が見つかりませんでした (Infeasible/Timeout)")
+        
         return schedule
 
     def solve_csp_selection(self, env, orders=None):

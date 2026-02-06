@@ -33,17 +33,21 @@ from copy import deepcopy as dcopy
 
 
 class GamePlay(Game):
-    def __init__(self, env, replay: Replay, agent_set: AgentSetting, debug_mode: bool = False):
+    def __init__(self, env, replay: Replay, agent_set: AgentSetting, debug_mode: bool = False, num_ai=1, num_human=1):
         Game.__init__(self, env, play=True)
         self.replay = replay
         self.agent_set = agent_set
         self.debug_mode = debug_mode
+        self.num_ai = num_ai
+        self.num_human = num_human
 
         # fps of human and ai
         self.fps = 10
         self.fps_ai = agent_set.speed
 
-        self.idx_human = 1
+        self.ai_indices = list(range(num_ai))
+        self.human_indices = list(range(num_ai, num_ai + num_human))
+
         self.ai = get_agent(self.agent_set, self.replay)
         self.predictor = HumanPredictor(env)
 
@@ -58,15 +62,17 @@ class GamePlay(Game):
             self._q_control.put(('Quit', {}))
 
         elif event.type == pygame.KEYDOWN:
-            if event.key in KeyToTuple.keys():
-                # Control
-                action_dict = {agent.name: (0, 0) for agent in self.sim_agents}
+            # Human 1 (Arrows)
+            if self.num_human >= 1 and event.key in KeyToTuple.keys():
                 action = KeyToTuple[event.key]
-                action_dict[self.current_agent.name] = action
                 self._q_env.put(
-                    ('Action', {"agent": "human", "action": action}))
-                self._q_ai.put(
-                    ('Action', {"agent": "human", "action": action}))
+                    ('Action', {"agent": "human", "idx": 0, "action": action}))
+            
+            # Human 2 (WASD)
+            if self.num_human >= 2 and event.key in KeyToTuple2.keys():
+                action = KeyToTuple2[event.key]
+                self._q_env.put(
+                    ('Action', {"agent": "human", "idx": 1, "action": action}))
 
             if pygame.key.name(event.key) == "space":
                 self._q_env.put(('Pause', {}))
@@ -81,7 +87,6 @@ class GamePlay(Game):
 
     def _run_env(self):
         seconds_per_step = 1 / self.fps
-        idx_human = self.idx_human
         paused = 0
         chat_in, chat_out = "", ""
         last_t = time.time()
@@ -91,7 +96,7 @@ class GamePlay(Game):
         info = self.env.get_ai_info()
         e = EnvState(world=info['world'],
                      agents=info['sim_agents'],
-                     agent_idx=1 - idx_human,
+                     agent_idx=self.ai_indices, # Pass list of AI indices
                      order=info['order_scheduler'],
                      event_history=info['event_history'],
                      time=info['current_time'],
@@ -104,9 +109,26 @@ class GamePlay(Game):
                 event_type, args = event
                 if event_type == 'Action':
                     if args['agent'] == "human":
-                        action_dict[self.sim_agents[idx_human].name] = args['action']
-                    elif idx_human == 1:
-                        action_dict[self.sim_agents[0].name] = args['action']
+                        # Human Action
+                        h_idx = args.get('idx', 0)
+                        if h_idx < len(self.human_indices):
+                            real_idx = self.human_indices[h_idx]
+                            if real_idx < len(self.sim_agents):
+                                action_dict[self.sim_agents[real_idx].name] = args['action']
+                    elif args['agent'] == "ai":
+                        # AI Action (Expects dict or list)
+                        ai_actions = args['action'] # {agent_name: action} OR list or single action
+                        if isinstance(ai_actions, dict):
+                            for name, act in ai_actions.items():
+                                action_dict[name] = act
+                        elif isinstance(ai_actions, (list, tuple)) and len(ai_actions) == self.num_ai:
+                            for i, act in enumerate(ai_actions):
+                                real_idx = self.ai_indices[i]
+                                action_dict[self.sim_agents[real_idx].name] = act
+                        else:
+                            # Fallback for single AI (legacy)
+                            if self.num_ai == 1:
+                                action_dict[self.sim_agents[self.ai_indices[0]].name] = ai_actions
                 elif event_type == 'Pause':
                     paused += 1
                 elif event_type == 'Continue':
@@ -132,24 +154,26 @@ class GamePlay(Game):
                 info = self.env.get_ai_info()
                 e = EnvState(world=info['world'],
                              agents=info['sim_agents'],
-                             agent_idx=0,
+                             agent_idx=self.ai_indices,
                              order=info['order_scheduler'],
                              event_history=info['event_history'],
                              time=info['current_time'],
                              chg_grid=info['chg_grid'])
                 
-                # Human Prediction
-                task_name, cost, all_costs = self.predictor.predict(e, self.idx_human)
-                #print(f"[Human Prediction] Task: {task_name}, Remaining Cost: {cost}")
-                if all_costs:
-                    # Sort by cost
-                    all_costs.sort(key=lambda x: x[1])
-                    # Print top 5 or all
-                    costs_str = ", ".join([f"{t}: {c}" for t, c in all_costs])
-                    #print(f"   All costs: {costs_str}")
+                # Human Prediction (Only for 1st human for now?)
+                if self.human_indices:
+                     # Predict based on first human?
+                     pass
 
-                if action_dict[self.sim_agents[0].name] is not None:
-                    self._q_ai.put(('Env', {"EnvState": dcopy(e)}))
+                # Check if ANY AI action was processed? 
+                # Actually, in _run_ai, the AI sleeps and thinks. 
+                # We should send EnvState if we want continuous updates or just when ready.
+                # Use simplified logic: Always send EnvState? 
+                # The original code sent it "if action_dict[self.sim_agents[0].name] is not None"
+                # implying lock-step or something.
+                # Let's just send it.
+                self._q_ai.put(('Env', {"EnvState": dcopy(e)}))
+                
                 action_dict = {agent.name: None for agent in self.sim_agents}
 
             sleep_time = max(seconds_per_step - (time.time() - last_t), 0)
