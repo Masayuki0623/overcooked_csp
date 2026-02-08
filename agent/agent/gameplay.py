@@ -38,31 +38,21 @@ class GamePlay(Game):
         self.replay = replay
         self.agent_set = agent_set
         self.debug_mode = debug_mode
-<<<<<<< HEAD
         self.num_ai = num_ai
         self.num_human = num_human
-=======
-        self.num_agents = len(self.sim_agents)
-        self.is_ai_only = self.num_agents == 1
->>>>>>> 772c947667af749a6c0f9e5238fd9b70c9daf028
+        self.is_ai_only = (num_human == 0)
 
         # fps of human and ai
         self.fps = 10
         self.fps_ai = agent_set.speed
 
-<<<<<<< HEAD
         self.ai_indices = list(range(num_ai))
         self.human_indices = list(range(num_ai, num_ai + num_human))
 
         self.ai = get_agent(self.agent_set, self.replay)
-        self.predictor = HumanPredictor(env)
-=======
-        self.idx_human = 1 if not self.is_ai_only else -1
-        self.ai = None
         self.predictor = None
-        if not self.is_ai_only:
+        if num_human > 0:
             self.predictor = HumanPredictor(env)
->>>>>>> 772c947667af749a6c0f9e5238fd9b70c9daf028
 
         # concurrent control variables
         self._q_control = queue.Queue()  # receive
@@ -74,16 +64,9 @@ class GamePlay(Game):
         if event.type == pygame.QUIT:
             self._q_control.put(('Quit', {}))
 
-<<<<<<< HEAD
         elif event.type == pygame.KEYDOWN:
             # Human 1 (Arrows)
             if self.num_human >= 1 and event.key in KeyToTuple.keys():
-=======
-        elif event.type == pygame.KEYDOWN and not self.is_ai_only:
-            if event.key in KeyToTuple.keys():
-                # Control
-                action_dict = {agent.name: (0, 0) for agent in self.sim_agents}
->>>>>>> 772c947667af749a6c0f9e5238fd9b70c9daf028
                 action = KeyToTuple[event.key]
                 self._q_env.put(
                     ('Action', {"agent": "human", "idx": 0, "action": action}))
@@ -115,16 +98,9 @@ class GamePlay(Game):
         self.on_render(paused=paused)
         info = self.env.get_ai_info()
         
-        # Determine agent_idx for AI
-        ai_idx = 0 if self.is_ai_only else (1 - idx_human)
-
         e = EnvState(world=info['world'],
                      agents=info['sim_agents'],
-<<<<<<< HEAD
                      agent_idx=self.ai_indices, # Pass list of AI indices
-=======
-                     agent_idx=ai_idx,
->>>>>>> 772c947667af749a6c0f9e5238fd9b70c9daf028
                      order=info['order_scheduler'],
                      event_history=info['event_history'],
                      time=info['current_time'],
@@ -136,7 +112,6 @@ class GamePlay(Game):
                 event = self._q_env.get_nowait()
                 event_type, args = event
                 if event_type == 'Action':
-<<<<<<< HEAD
                     if args['agent'] == "human":
                         # Human Action
                         h_idx = args.get('idx', 0)
@@ -158,12 +133,6 @@ class GamePlay(Game):
                             # Fallback for single AI (legacy)
                             if self.num_ai == 1:
                                 action_dict[self.sim_agents[self.ai_indices[0]].name] = ai_actions
-=======
-                    if args['agent'] == "human" and not self.is_ai_only:
-                        action_dict[self.sim_agents[idx_human].name] = args['action']
-                    elif args['agent'] == "ai":
-                        action_dict[self.sim_agents[ai_idx].name] = args['action']
->>>>>>> 772c947667af749a6c0f9e5238fd9b70c9daf028
                 elif event_type == 'Pause':
                     paused += 1
                 elif event_type == 'Continue':
@@ -189,21 +158,18 @@ class GamePlay(Game):
                 info = self.env.get_ai_info()
                 e = EnvState(world=info['world'],
                              agents=info['sim_agents'],
-<<<<<<< HEAD
                              agent_idx=self.ai_indices,
-=======
-                             agent_idx=ai_idx,
->>>>>>> 772c947667af749a6c0f9e5238fd9b70c9daf028
                              order=info['order_scheduler'],
                              event_history=info['event_history'],
                              time=info['current_time'],
                              chg_grid=info['chg_grid'])
                 
-<<<<<<< HEAD
                 # Human Prediction (Only for 1st human for now?)
-                if self.human_indices:
+                if self.human_indices and self.predictor:
                      # Predict based on first human?
-                     pass
+                    task_name, cost, all_costs = self.predictor.predict(e, self.human_indices[0])
+                    if all_costs:
+                        all_costs.sort(key=lambda x: x[1])
 
                 # Check if ANY AI action was processed? 
                 # Actually, in _run_ai, the AI sleeps and thinks. 
@@ -213,17 +179,7 @@ class GamePlay(Game):
                 # implying lock-step or something.
                 # Let's just send it.
                 self._q_ai.put(('Env', {"EnvState": dcopy(e)}))
-                
-=======
-                if not self.is_ai_only and self.predictor:
-                    task_name, cost, all_costs = self.predictor.predict(e, self.idx_human)
-                    if all_costs:
-                        all_costs.sort(key=lambda x: x[1])
-                        costs_str = ", ".join([f"{t}: {c}" for t, c in all_costs])
 
-                if action_dict[self.sim_agents[ai_idx].name] is not None:
-                    self._q_ai.put(('Env', {"EnvState": dcopy(e)}))
->>>>>>> 772c947667af749a6c0f9e5238fd9b70c9daf028
                 action_dict = {agent.name: None for agent in self.sim_agents}
 
             sleep_time = max(seconds_per_step - (time.time() - last_t), 0)

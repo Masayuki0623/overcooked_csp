@@ -117,6 +117,12 @@ class TaskAgent:
             print(f"  [MoveTo] 経路維持: {next_step}")
             return (next_step[0] - self_pos[0], next_step[1] - self_pos[1])
         
+        # 経路が見つからない場合、ターゲットがForbidden Zone内にあるか確認して
+        # 特例として隣接まで行けるように再試行
+        if not allow_forbidden_adjacent and target_pos in self.forbidden_zones:
+             print(f"  [MoveTo] ターゲット {target_pos} は立入禁止区域です。隣接移動を試みます。")
+             return self.move_to(env, target_pos, allow_forbidden_adjacent=True)
+
         print(f"  [MoveTo] {target_pos} への経路が見つかりません (Forbidden Zones考慮済み)")
         return (0, 0)
 

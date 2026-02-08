@@ -52,12 +52,23 @@ class CSPAgent:
         # 進入禁止エリア
         self.forbidden_zones = []
 
+        # --- Cache for Precomputed Map Data ---
+        self.map_initialized = False
+        self.dist_cache = {}    # (p1, p2) -> distance
+        self.path_info = {}     # start -> {end: parent}
+        self.tile_to_zone_cache = None
+        self.zones_cache = None
+
         print(f"[CSPAgent] 初期化完了 - Agents: {num_agents}")
 
     def __call__(self, env):
         """
         環境から呼ばれるメイン関数
         """
+        if not self.map_initialized:
+            self._compute_static_map_data(env)
+            self.map_initialized = True
+
         # 常にタスクリストを構築して変化をチェック
         current_orders = self._build_order_tasks(env)
         current_task_ids = set()
@@ -144,44 +155,92 @@ class CSPAgent:
             my_sched = self.schedules[i] if i < len(self.schedules) else []
             curr_idx = self.current_task_idx[i]
             
+            print(f"[DEBUG-CSP] Agent {i} (Real {real_idx}): Step {curr_idx}/{len(my_sched)}")
+
             action = (0,0)
             reason = "Idle"
+            
+            # Setup TaskAgent (Pre-fetch for debugging info)
+            ta = self.task_agents[i]
+
+            # DEBUG POS
+            pos = ta.last_pos if hasattr(ta, 'last_pos') else "?"
+            curr_pos = env_view.self_pos
+            print(f"  [DEBUG-POS] Prev: {pos}, Curr: {curr_pos}")
+            if hasattr(ta, 'last_pos') and ta.last_pos == curr_pos:
+                print(f"  [DEBUG-POS] STUCK! Grid around {curr_pos}:")
+                cx, cy = curr_pos
+                w, h = env_view.world_width, env_view.world_height
+                grid = env_view.to_grid
+                for dy in [-1,0,1]:
+                    row = []
+                    for dx in [-1,0,1]:
+                        nx, ny = cx+dx, cy+dy
+                        val = grid[nx][ny] if 0<=nx<w and 0<=ny<h else 'X'
+                        row.append(str(val))
+                    print(f"    {' '.join(row)}")
+            ta.last_pos = curr_pos
             
             if curr_idx < len(my_sched):
                 task = my_sched[curr_idx]
                 tid = task['id']
                 verb, obj, order_idx = tid
                 
-                # Setup TaskAgent
-                ta = self.task_agents[i]
-                
+                print(f"  [DEBUG-CSP] Task Info: {tid}, Res: {task.get('res')}, Start/End: {task.get('start_pos')}/{task.get('end_pos')}")
+
+                res = task.get('res') # CSP assigned resource
+
                 # Determine Task Name
                 task_name = None
                 if verb == 'chop':
                     task_name = f"chop_{obj}"
                     ta.assigned_counter = task.get('assigned_counter')
+                    if res and res[0] == 'cutboard':
+                        ta.assigned_cutboard = res[1]
                 elif verb == 'cook':
                     parts = obj.replace(' soup', '').split('-')
                     task_name = f"cook_{'_'.join(parts)}"
                     ta.assigned_counter = None
+                    if res and res[0] == 'pot':
+                        ta.assigned_pot = res[1]
                 elif verb == 'serve':
                     parts = obj.replace(' soup', '').split('-')
                     task_name = f"serve_{'_'.join(parts)}"
                     ta.assigned_counter = None
+                    if res and res[0] == 'pot':
+                        ta.assigned_pot = res[1]
+                    ta.assigned_serve_loc = task.get('end_pos')
+                    
+                    # 皿の場所指定（もしTask情報になければリソースから取得して割り当てる）
+                    resources = self._get_resources(env)
+                    if resources.get('plate'):
+                        # CSPモデル上は皿の位置を固定リソースとして扱っている場合が多い
+                        # ここでは簡易的にリソースの最初の皿、またはTaskAgentの探索に任せるが
+                        # 明示的に渡すことで安定させる
+                        ta.assigned_plate = resources['plate']
                 
                 if task_name:
+                    print(f"  [DEBUG-CSP] Calling TaskAgent: {task_name}")
+                    print(f"    CB={ta.assigned_cutboard}, Pot={ta.assigned_pot}, Plate={ta.assigned_plate}, Serve={ta.assigned_serve_loc}")
+
                     ta.task_name = task_name
                     # Forbidden zones already synced
                     action, reason = ta(env_view)
                     
+                    print(f"  [DEBUG-CSP] TaskAgent Result: {action}, Reason='{reason}'")
+
                     if "done" in reason.lower() or "完了" in reason:
-                        print(f"[CSPAgent-{i}] タスク {task_name} 完了")
+                        print(f"[CSPAgent-{i}] タスク {task_name} 完了 -> 次へ")
                         self.current_task_idx[i] += 1
                         ta.assigned_cutboard = None
                         ta.assigned_pot = None
                         ta.assigned_plate = None
                         ta.assigned_serve_loc = None
                         ta.assigned_counter = None
+            else:
+                print(f"  [DEBUG-CSP] Schedule Finished or Empty")
+            
+            actions.append(action)
             
             actions.append(action)
             
@@ -471,6 +530,129 @@ class CSPAgent:
             order_idx += 1
         return orders
 
+    def _compute_static_map_data(self, env):
+        """
+        環境の静的な地図情報（距離テーブル、ボトルネック）を事前計算する。
+        """
+        print("[CSPAgent] マップ情報を事前計算中（APSP & Bottlenecks）...")
+        start_t = time.time()
+        
+        width, height = env.world_width, env.world_height
+        grid = env.to_grid
+
+        # 1. 有効な座標のリストアップ
+        valid_points = []
+        for x in range(width):
+            for y in range(height):
+                if grid[x][y] == 1:
+                    valid_points.append((x, y))
+
+        # 2. 全点対最短経路 (BFS from each point)
+        # マップサイズが小さい(Overcookedは通常10x10程度)ので全点BFSで十分高速
+        # 距離だけでなく、パス復元用のparent情報や、経路上のボトルネック通過情報もキャッシュ可能だが
+        # ここでは距離テーブルをメインに作成
+        
+        self.dist_cache = {}
+        # 今回はCSP内で使う「距離」だけあればよく、パス本体が必要なのはボトルネック制約のため。
+        # ボトルネック制約を高速に適用するためには、(i, j)移動時に通過するZoneのリストがあればベスト。
+        
+        # まずボトルネックを特定
+        self.tile_to_zone_cache, self.zones_cache = self._detect_bottlenecks(env)
+        
+        # パス構築用のヘルパー
+        def get_neighbors(p):
+            x, y = p
+            ns = []
+            for dx, dy in [(0,1),(0,-1),(1,0),(-1,0)]:
+                nx, ny = x+dx, y+dy
+                if 0 <= nx < width and 0 <= ny < height and grid[nx][ny] == 1:
+                    ns.append((nx, ny))
+            return ns
+
+        # 全点BFS
+        # dist_matrix: self.dist_cache[(start, end)] = distance
+        # path_zones: self.path_zones_cache[(start, end)] = list of zone_ids passed
+        
+        self.path_zones_cache = {} 
+
+        for start_node in valid_points:
+            # BFS Initialization
+            q = [start_node]
+            visited = {start_node: 0}
+            parent = {start_node: None}
+            
+            while q:
+                curr = q.pop(0)
+                d = visited[curr]
+                
+                # 自分までの距離を保存
+                self.dist_cache[(start_node, curr)] = d
+                
+                if curr != start_node:
+                    # パス復元して通過ゾーンを記録（※メモリ節約のため、ゾーン通過時のみ記録しても良い）
+                    # ここでは一旦、実際にパスを逆走してゾーンを回収する
+                    # 頻出する重要な場所（鍋、まな板）へのパスだけキャッシュするのが賢いが、
+                    # 全点これだと重いかもしれない。しかしマップは狭いので試行。
+                    
+                    if curr in valid_points: # 常にTrue
+                        # Reconstruct path
+                        path = []
+                        temp = curr
+                        while temp is not None:
+                            path.append(temp)
+                            temp = parent[temp]
+                        path.reverse() # start -> end
+                        
+                        # Extract zones
+                        zones_in_path = []
+                        last_zone = None
+                        zone_intervals = {} # zone_id -> (start_idx, end_idx) relative to path start time?
+                                            # No, simple list of zones for now to check overlap?
+                                            # CSP needs precise timing.
+                                            # We need: for this (Start, End) pair, which bottlenecks are used at what distance offset?
+                        
+                        # キャッシュ構造: (start, end) -> [(zone_id, dist_from_start, duration), ...]
+                        # duration は 連続してそのゾーンにいる長さ
+                        
+                        usage_list = []
+                        # path[0] is start (t=0)
+                        # path[k] is at t=k
+                        
+                        current_z = None
+                        z_start_k = -1
+                        
+                        for k, pos in enumerate(path):
+                            z = self.tile_to_zone_cache.get(pos)
+                            
+                            if z != current_z:
+                                # Switch occurred
+                                if current_z is not None:
+                                    # Zone ended at k-1
+                                    duration = (k - 1) - z_start_k + 1
+                                    usage_list.append((current_z, z_start_k, duration))
+                                
+                                current_z = z
+                                z_start_k = k
+                        
+                        # Loop finish check
+                        if current_z is not None:
+                            duration = (len(path) - 1) - z_start_k + 1
+                            usage_list.append((current_z, z_start_k, duration))
+                            
+                        if usage_list:
+                            self.path_zones_cache[(start_node, curr)] = usage_list
+
+                # Neighbors
+                for n in get_neighbors(curr):
+                    if n not in visited:
+                        visited[n] = d + 1
+                        parent[n] = curr
+                        q.append(n)
+        
+        elapsed = time.time() - start_t
+        print(f"[CSPAgent] 静的データ計算完了: {elapsed:.4f}秒, 地点数={len(valid_points)}")
+
+
     def _detect_bottlenecks(self, env):
         width, height = env.world_width, env.world_height
         grid = env.to_grid
@@ -601,9 +783,16 @@ class CSPAgent:
         print(f"[CSPAgent] CSPスケジューリング開始 ({len(orders)} 注文, {num_agents} エージェント)...")
         model = cp_model.CpModel()
         
-        # 0. Bottleneck Detection
-        tile_to_zone, zones = self._detect_bottlenecks(env)
-        print(f"[CSPAgent] 検出されたボトルネックゾーン数: {len(zones)}")
+        # 0. Bottleneck Detection (Use Cached)
+        # self.tile_to_zone_cache, self.zones_cache は _compute_static_map_data で計算済
+        # 初回呼び出し前に必ず _compute_static_map_data が呼ばれている前提
+        if not self.map_initialized:
+             self._compute_static_map_data(env)
+             self.map_initialized = True
+             
+        tile_to_zone = self.tile_to_zone_cache
+        zones = self.zones_cache
+        # print(f"[CSPAgent] 検出されたボトルネックゾーン数: {len(zones)}")
 
         # 1. タスクのリスト化
         tasks = []
@@ -671,15 +860,15 @@ class CSPAgent:
                 t['end_pos'] = delivery
                 t['fixed_res'] = ('pot', pot)
 
-        # 2. 距離行列とパスの計算
+        # 2. 距離行列とパスの計算 (Use Cache)
         real_nodes = list(range(num_tasks))
         depot_nodes = list(range(num_tasks, num_tasks + num_agents))
         all_nodes = real_nodes + depot_nodes
         
         dist_matrix = {} 
-        path_cache = {} # (i,j) -> list of coords
+        path_zone_usage = {} # (i,j) -> list of usage tuples
 
-        print("[CSPAgent] 距離行列とパスを計算中...")
+        # print("[CSPAgent] 距離行列とパスを計算中...")
         for i in all_nodes:
             for j in all_nodes:
                 if i == j:
@@ -693,14 +882,25 @@ class CSPAgent:
                     pos_i = tasks[i]['end_pos']
                 
                 if j in depot_nodes:
+                    # Closing loop: cost 0
                     dist_matrix[(i,j)] = 0
                 else:
                     pos_j = tasks[j]['start_pos']
-                    dist, path = self.astar_path(env, pos_i, pos_j)
-                    if dist is None: dist = 1000
-                    dist_matrix[(i,j)] = dist
-                    if path:
-                        path_cache[(i,j)] = path
+                    
+                    # Use Cache
+                    if (pos_i, pos_j) in self.dist_cache:
+                        dist = self.dist_cache[(pos_i, pos_j)]
+                        dist_matrix[(i,j)] = dist
+                        
+                        # Retrieve cached zone usage
+                        if (pos_i, pos_j) in self.path_zones_cache:
+                             path_zone_usage[(i,j)] = self.path_zones_cache[(pos_i, pos_j)]
+                    else:
+                        # Fallback (e.g. initial pos_i might be (0,0) wall or off-grid?)
+                        # Or if forbidden zones blocked BFS?
+                        # For safety, use dynamic A* or Manhattan default
+                        manhattan = abs(pos_i[0]-pos_j[0]) + abs(pos_i[1]-pos_j[1])
+                        dist_matrix[(i,j)] = manhattan * 2 # Penalty
 
         # 3. 変数と制約
         horizon = 10000 
@@ -747,31 +947,23 @@ class CSPAgent:
                     dist = dist_matrix[(i, j)]
                     model.Add(starts[j] >= ends[i] + dist).OnlyEnforceIf(lit)
                     
-                    # Passage Resource Constraints
-                    if (i, j) in path_cache:
-                        path = path_cache[(i, j)]
-                        visited_zones_intervals = {} # zone_id -> (first_index, last_index)
-
-                        for k, pos in enumerate(path):
-                            if pos in tile_to_zone:
-                                zid = tile_to_zone[pos]
-                                if zid not in visited_zones_intervals:
-                                    visited_zones_intervals[zid] = [k, k]
-                                else:
-                                    visited_zones_intervals[zid][1] = k
-                        
-                        for zid, (start_k, end_k) in visited_zones_intervals.items():
-                            start_time_offset = start_k * self.frames_per_action
-                            duration = (end_k - start_k + 1) * self.frames_per_action
+                    # Passage Resource Constraints (From Cache)
+                    if (i, j) in path_zone_usage:
+                         usages = path_zone_usage[(i, j)]
+                         for zone_id, start_offset, duration in usages:
+                             
+                            start_time_offset = start_offset * self.frames_per_action
+                            dur_frames = duration * self.frames_per_action
                             
-                            start_iv = model.NewIntVar(0, horizon, f'bn_start_{i}_{j}_{zid}')
-                            end_iv = model.NewIntVar(0, horizon, f'bn_end_{i}_{j}_{zid}')
+                            start_iv = model.NewIntVar(0, horizon, f'bn_start_{i}_{j}_{zone_id}_{start_offset}')
+                            end_iv = model.NewIntVar(0, horizon, f'bn_end_{i}_{j}_{zone_id}_{start_offset}')
                             
+                            # start_iv = ends[i] + start_time_offset
                             model.Add(start_iv == ends[i] + start_time_offset).OnlyEnforceIf(lit)
-                            model.Add(end_iv == start_iv + duration).OnlyEnforceIf(lit)
+                            model.Add(end_iv == start_iv + dur_frames).OnlyEnforceIf(lit)
                             
-                            iv = model.NewOptionalIntervalVar(start_iv, duration, end_iv, lit, f'bn_iv_{i}_{j}_{zid}')
-                            bottleneck_usage[zid].append(iv)
+                            iv = model.NewOptionalIntervalVar(start_iv, dur_frames, end_iv, lit, f'bn_iv_{i}_{j}_{zone_id}_{start_offset}')
+                            bottleneck_usage[zone_id].append(iv)
                             
         model.AddCircuit(arcs)
         
@@ -850,6 +1042,8 @@ class CSPAgent:
                         'start': solver.Value(starts[next_node]),
                         'end': solver.Value(ends[next_node]),
                         'res': t.get('fixed_res'),
+                        'start_pos': t.get('start_pos'),
+                        'end_pos': t.get('end_pos'),
                         'agent_idx': agent_idx
                     })
                     curr = next_node
