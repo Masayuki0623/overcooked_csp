@@ -12,6 +12,7 @@
 - **TSP Solver Agent** (`TSPSolver`): 調理タスクをTSPとしてモデル化し、効率的な経路を見つけます。
 - **Greedy Agent** (`Greedy`): 注文を完了するために単純な貪欲法を使用します。
 - **Random Agent** (`Random`): ランダムな行動をとります。
+- **RL Agent** (`RL`): PPOを使用した強化学習エージェント。可視化トレーニング (`agent/train_visual.py`) が可能です。
 
 また、オリジナルのエージェントもサポートしています：
 - **HLA**: Hierarchical Language Agent（LLMのセットアップが必要です）。
@@ -102,6 +103,36 @@ python agent/agent/play_main.py --map partition --agent TSPSolver
 **Greedy Agent** で quick マップを実行する場合：
 ```bash
 python agent/agent/play_main.py --map quick --agent Greedy
+```
+
+### 強化学習 (RL) エージェントの利用
+
+強化学習エージェントを使用するには、追加のライブラリのインストールが必要です。
+
+```bash
+pip install stable-baselines3[extra] shimmy>=0.2.1
+```
+
+#### 学習の実行
+
+**可視化モード（推奨）**:
+学習の進捗を目視で確認できます。ウインドウが開き、エージェントが学習していく様子をリアルタイムで観察可能です。
+```bash
+python agent/train_visual.py
+```
+> ※ 学習が進むとコンソールに `Reward: Chopped needed Onion (+5.0)` などのログが表示されます。Qテーブル（正確にはニューラルネットワークの重み）が更新されていることを確認できます。
+
+**バックグラウンドモード**:
+高速に学習を行いたい場合に使用します（可視化なし）。
+```bash
+python agent/train_rl.py
+```
+
+#### 学習済みモデルでの実行
+
+学習したモデルを使用してゲームをプレイする場合：
+```bash
+python agent/agent/play_main.py --map ring --agent RL
 ```
 
 ## プロジェクト構成

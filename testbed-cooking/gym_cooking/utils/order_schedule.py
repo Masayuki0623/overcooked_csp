@@ -79,8 +79,17 @@ class OrderScheduler:
                 self.reward -= ORDER_EXPIRE_PUNISH
         self.current_orders = current_orders
 
-        while len(self.current_orders) < self.max_num_orders:
-            self.current_orders.append(self.new_order())
+        # Restrict order generation: Do NOT refill orders if we want a finite set
+        # Original code:
+        # while len(self.current_orders) < self.max_num_orders:
+        #    self.current_orders.append(self.new_order())
+        
+        # Modified for "First 3 orders only" logic
+        # Behavior: If we still have orders to serve from the conceptual "total pool", add them?
+        # User request: "Give first 3 orders only. When finished, remove. Do not add new ones."
+        # This implies we initialize with 3, and never call new_order() again in update loop.
+        
+        pass 
 
     def consume_reward(self):
         # temp = self.reward

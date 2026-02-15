@@ -44,7 +44,25 @@ class GamePlay(Game):
         self.fps_ai = agent_set.speed
 
         self.idx_human = 1
-        self.ai = get_agent(self.agent_set, self.replay)
+        # self.ai = get_agent(self.agent_set, self.replay) # ここでaiを生成してしまうと、play_mainで生成したaiが上書きされてしまう。
+        # 修正: 外から注入するか、play_mainで設定したgame.aiを使うようにする。
+        # 現在のコードでは play_main で game.ai = ai しているので、ここでは None にしても良いが
+        # get_agentが呼ばれるとエラーになるので、play_main側で agent_set.mode に対応していない場合に備える必要がある
+        # 一旦、ここでAI生成はスキップし、play_mainでセットされるのを待つか、
+        # もしくは play_main.py 側で GamePlay の初期化直後に self.ai を上書きしているので
+        # __init__ 内での self.ai の初期化でエラーが出ないようにする。
+        
+        # 簡易修正: get_agent を try-except で囲むか、RLの場合はスキップ
+        if agent_set.mode == 'RL':
+             from agent.myagent.RLAgent import RLAgent
+             self.ai = RLAgent(agent_set.speed, replay)
+        else:
+             try:
+                self.ai = get_agent(self.agent_set, self.replay)
+             except KeyError:
+                # RLや他、get_agentのmappingにない場合はとりあえずNone (play_mainで上書きされることを期待)
+                self.ai = None
+        
         self.predictor = HumanPredictor(env)
 
         # concurrent control variables

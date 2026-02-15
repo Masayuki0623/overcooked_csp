@@ -588,8 +588,19 @@ class OvercookedEnvironment(gym.Env):
             order_onehot = np.array([int(e in order.full_name)
                                     for e in ALL_FOOD_ENTITIES])
             current_orders.append((order_onehot, restTime / timeLimit))
-        current_orders_np = np.concatenate(
-            [np.concatenate([order_onehot, np.array([t])]) for order_onehot, t in current_orders])
+        
+        if len(current_orders) > 0:
+            current_orders_np = np.concatenate(
+                [np.concatenate([order_onehot, np.array([t])]) for order_onehot, t in current_orders])
+        else:
+            # Empty orders
+            # Create a zero array that matches the expected shape if there were orders?
+            # Or just an empty array?
+            # The original code expected at least one array.
+            # If no orders, maybe create a placeholder or empty list.
+            # Assuming downstream code can handle empty or we just need something avoiding error.
+            # Let's create an empty array with shape (0,)
+            current_orders_np = np.array([])
 
         '''result = {
             'gridsquare': gridsquare_map,

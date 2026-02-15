@@ -40,3 +40,7 @@ agent/agent/replay/*
 # API Keys
 google_api_key.txt
 openai_api_key.txt
+
+# RL Models
+agent/agent/myagent/rl_models/
+*.zip

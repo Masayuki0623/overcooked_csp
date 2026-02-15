@@ -16,6 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from agent.myagent.GreedyAgent import GreedyAgent  # 追加
 from agent.myagent.CSPAgent import CSPAgent  # 追加
+from agent.myagent.RLAgent import RLAgent # 追加
 
 
 
@@ -28,7 +29,7 @@ def parse_arguments():
     )
     parser.add_argument(
         "--agent", type=str,
-        choices=['HLA', 'SMOA', 'FMOA', 'NEA','Random', 'TSPSolver', 'Greedy', 'CSP', 'Task'], default='TSPSolver'  # CSP, Taskを追加
+        choices=['HLA', 'SMOA', 'FMOA', 'NEA','Random', 'TSPSolver', 'Greedy', 'CSP', 'Task', 'RL'], default='TSPSolver'  # CSP, Task, RLを追加
     )
     parser.add_argument(
         "--task", type=str, default=None, help="Task to execute for TaskAgent (e.g. chop_tomato)"
@@ -91,6 +92,8 @@ def init_env_replay(map_name, agent_name, task_name=None, no_reschedule=False, d
     elif agent_name == "Task":
         from agent.myagent.TaskAgent import TaskAgent
         ai = TaskAgent(agent_set.speed, replay, task_name=task_name)
+    elif agent_name == "RL":
+        ai = RLAgent(agent_set.speed, replay=replay)
     else:
         ai = get_agent(agent_set, replay)
     game = GamePlay(env, replay, agent_set, debug_mode=debug_mode)
