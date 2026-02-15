@@ -50,9 +50,9 @@ class Game:
             (self.container_scale * np.asarray(self.holding_size)).astype(int))
         # self.font = pygame.font.SysFont('arialttf', 10)
 
-        self.small_font = pygame.font.SysFont('Times', 20)
-        self.font = pygame.font.SysFont('Times', 40)
-        self.large_font = pygame.font.SysFont('Times', 100)
+        self.small_font = pygame.font.SysFont('Times', 12)
+        self.font = pygame.font.SysFont('Times', 16)
+        self.large_font = pygame.font.SysFont('Times', 40)
 
         self.__plot_elements = []
 
@@ -129,14 +129,10 @@ class Game:
         for o in objs['chopping']:
             self.draw_chopping_object(o)
 
-        # Draw current orders
-        self.draw_current_orders()
-
-        # Draw soup hint
-        self.draw_soup_hint()
-
-        # Draw current time
-        self.draw_current_time()
+        # UI elements disabled for RL training - only show game
+        # self.draw_current_orders()
+        # self.draw_soup_hint()
+        # self.draw_current_time()
 
         if debug_info:
             self.draw_debug_overlay(debug_info)
@@ -361,15 +357,8 @@ class Game:
         self.draw_bar((idx + 0.1) * self.tile_size[0], (self.world.height + 1) * self.tile_size[1],
                       int(self.tile_size[0] * 0.9 * t / MAX_ORDER_LENGTH_SECONDS), self.tile_size[1] // 5, color)
 
-        name = obj.full_name
-        name = name.replace(
-            "CookedLettuce-CookedOnion-CookedTomato-Plate", "David")
-        name = name.replace("CookedLettuce-CookedOnion-Plate", "Alice")
-        name = name.replace("CookedLettuce-CookedTomato-Plate", "Bob")
-        name = name.replace("CookedOnion-CookedTomato-Plate", "Cathy")
-        pos = self.scaled_location(obj_loc)
-        self.put_text(self.small_font, name, (40, 40, 100),
-                      (pos[0] + self.tile_size[0] * 0.2, pos[1]))
+        # Order name display removed for cleaner UI
+        pass
 
     def draw_soup_hint(self):
         if self.world.arglist.user_recipy:
@@ -399,8 +388,9 @@ class Game:
         pass
 
     def draw_current_time(self):
-        # time_render = f"Time: {self.env.current_time: .1f}/{60: .1f}"
-        time_render = f"Time: {self.env.current_time: .1f}/{self.env.arglist.max_num_timesteps: .1f}"
+        # Use step counter (self.env.t) instead of current_time
+        current_step = self.env.t if hasattr(self.env, 't') else 0
+        time_render = f"Step: {current_step}/1024"
         self.put_text(self.small_font, time_render, (220, 70, 1),
                       ((self.world.width - 2.0) * self.tile_size[0], (self.world.height + 1.6) * self.tile_size[1]))
 

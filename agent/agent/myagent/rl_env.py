@@ -4,6 +4,9 @@ from gymnasium import spaces
 import numpy as np
 from gym_cooking.utils.core import *
 
+# Global counter for environment IDs
+_env_id_counter = 0
+
 class KitchenGym(gym.Env):
     """
     Wrapper for gym_cooking environment to make it compatible with Stable Baselines3 (Gymnasium).
@@ -14,6 +17,11 @@ class KitchenGym(gym.Env):
     def __init__(self, env):
         super(KitchenGym, self).__init__()
         self.env = env
+        
+        # Assign unique environment ID
+        global _env_id_counter
+        self.env_id = _env_id_counter
+        _env_id_counter += 1
         
         # Ensure env is reset to populate world properties
         if not hasattr(env, 'world') or env.world is None:
@@ -81,13 +89,53 @@ class KitchenGym(gym.Env):
         # For new1_rl.txt level file order: FullSoup, TomatoLettuceSoup, OnionTomatoSoup
         # Recipe indices after load: 0=FullSoup, 1=TomatoLettuceSoup, 2=OnionTomatoSoup
         self.fixed_recipe_list = [0, 1, 2] * 34  # Repeat to fill 100+ entries
+        
+        # Episode statistics for debugging
+        self._init_episode_stats()
+        self.total_episodes = 0
+
+    def _init_episode_stats(self):
+        """Initialize/reset episode statistics."""
+        self.episode_stats = {
+            'total_reward': 0.0,
+            'pickup_fresh': 0,
+            'pickup_chopped': 0,
+            'pickup_plate': 0,
+            'drop_cutboard': 0,
+            'drop_counter': 0,
+            'drop_pot': 0,
+            'chop_step': 0,
+            'chop_complete': 0,
+            'cook': 0,
+            'merge': 0,
+            'assemble': 0,
+            'deliver': 0,
+            'order_complete': 0,
+            'invalid_action': 0,
+            # Detailed penalty categories
+            'penalty_single_ingredient_pot': 0,  # 単一材料でPot
+            'penalty_raw_to_pot': 0,             # 生材料をPot
+            'penalty_invalid_recipe': 0,         # 無効なレシピ組み合わせ
+            'penalty_chopped_to_cutboard': 0,    # カット済みをまな板に
+            'penalty_fresh_to_counter': 0,       # 生をカウンターに
+            'penalty_empty_plate_deliver': 0,    # 空プレートをDeliver
+            'penalty_wrong_dish_deliver': 0,     # 間違った料理をDeliver
+            'penalty_plate_too_early': 0,        # 準備前にプレート取得
+            'penalty_unneeded_ingredient': 0,    # 不要な材料
+            'penalties': 0,
+        }
 
     def reset(self, seed=None, options=None):
         if seed is not None:
             # gymnasium uses seeding slightly differently
             # self.env.seed(seed) 
             pass
-            
+        
+        # Print episode stats before reset (if not first episode)
+        if hasattr(self, 'episode_stats') and hasattr(self, 'current_step') and self.current_step > 0:
+            self._print_episode_stats()
+        
+        self._init_episode_stats()
         self.env.reset()
         
         # Apply fixed recipe list after reset
@@ -98,13 +146,39 @@ class KitchenGym(gym.Env):
         self.current_step = 0
         
         # Process observation
-        state = self.env.get_current_state() # Currently returns a complex structure? 
-        # Actually need to check what get_current_state returns exactly.
-        # Based on code read:
-        # gridsquare_map dictionary.
+        state = self.env.get_current_state()
         
         obs = self._process_obs(state)
         return obs, {}
+
+    def _print_episode_stats(self):
+        """Print episode statistics summary."""
+        self.total_episodes += 1
+        stats = self.episode_stats
+        print(f"\n{'='*60}")
+        print(f"[Env {self.env_id}] Episode {self.total_episodes} Summary (Steps: {self.current_step})")
+        print(f"{'='*60}")
+        print(f"  Total Reward: {stats['total_reward']:.2f}")
+        print(f"  --- Pickups ---")
+        print(f"    Fresh: {stats['pickup_fresh']}, Chopped: {stats['pickup_chopped']}, Plate: {stats['pickup_plate']}")
+        print(f"  --- Drops ---")
+        print(f"    Cutboard: {stats['drop_cutboard']}, Counter: {stats['drop_counter']}, Pot: {stats['drop_pot']}")
+        print(f"  --- Actions ---")
+        print(f"    Chop Steps: {stats['chop_step']}, Chop Complete: {stats['chop_complete']}")
+        print(f"    Cook: {stats['cook']}, Merge: {stats['merge']}, Assemble: {stats['assemble']}")
+        print(f"  --- Results ---")
+        print(f"    Deliver: {stats['deliver']}, Orders Complete: {stats['order_complete']}")
+        print(f"  --- Penalties (Total: {stats['penalties']}) ---")
+        print(f"    Invalid Actions: {stats['invalid_action']}")
+        print(f"    Single Ingr->Pot: {stats['penalty_single_ingredient_pot']}, Invalid Recipe: {stats['penalty_invalid_recipe']}")
+        print(f"    Fresh->Counter: {stats['penalty_fresh_to_counter']}, Chopped->Cutboard: {stats['penalty_chopped_to_cutboard']}")
+        print(f"    Empty Plate Deliver: {stats['penalty_empty_plate_deliver']}, Wrong Dish: {stats['penalty_wrong_dish_deliver']}")
+        print(f"    Plate Too Early: {stats['penalty_plate_too_early']}, Unneeded Ingr: {stats['penalty_unneeded_ingredient']}")
+        print(f"{'='*60}\n")
+
+    def _log(self, message):
+        """Log message with environment ID prefix."""
+        print(f"[Env {self.env_id}] {message}")
 
     def step(self, action):
         self.current_step += 1
@@ -283,7 +357,8 @@ class KitchenGym(gym.Env):
                 # Cook: +5.0 for starting cooking
                 elif 'Cook' in e_str:
                     step_reward += 5.0
-                    print(f"Reward: Started Cooking (+5.0)")
+                    self.episode_stats['cook'] += 1
+                    self._log(f"Reward: Started Cooking (+5.0)")
                     
                 # Assemble/Merge: reward for combining ingredients
                 elif 'Assemble' in e_str or 'Merge' in e_str:
@@ -302,29 +377,34 @@ class KitchenGym(gym.Env):
                         if 'Tomato' in e_str:
                             merged_ingredients.add('Tomato')
                         
-                        # Check if FullSoup prep already exists
-                        if full_soup_prep_exists and len(merged_ingredients) == 2:
-                            # Penalty: unnecessary 2-ingredient merge when FullSoup prep exists
-                            step_reward -= 1.0
-                            print(f"Penalty: Unnecessary merge when FullSoup prep exists (-1.0)")
-                        elif merged_ingredients in valid_2_ingredient_merges or len(merged_ingredients) == 3:
-                            # Valid merge for current orders
+                        # All 2-ingredient combinations are valid:
+                        # OnionLettuceSoup, TomatoLettuceSoup, OnionTomatoSoup
+                        # 3-ingredient (FullSoup) is now INVALID for this recipe set
+                        if len(merged_ingredients) == 3:
+                            # 3 ingredients = invalid for current recipes
+                            step_reward -= 3.0
+                            self.episode_stats['penalty_invalid_recipe'] += 1
+                            self.episode_stats['penalties'] += 1
+                            self._log(f"Penalty: Invalid 3-ingredient merge (-3.0)")
+                        elif len(merged_ingredients) == 2:
+                            # All 2-ingredient merges are valid
                             step_reward += 2.0
-                            print(f"Reward: Valid merge {merged_ingredients} (+2.0)")
+                            self.episode_stats['merge'] += 1
+                            self._log(f"Reward: Valid merge {merged_ingredients} (+2.0)")
                         else:
-                            # Invalid merge (not needed for any order)
-                            step_reward -= 1.0
-                            print(f"Penalty: Invalid merge {merged_ingredients} (-1.0)")
+                            # Single ingredient - no merge reward
+                            pass
                     elif 'Cooked' in e_str or 'Soup' in e_str or 'Salad' in e_str:
                         # Reward for assembling cooked food onto plate
                         step_reward += 3.0
-                        print(f"Reward: Assembled food onto plate (+3.0)")
+                        self.episode_stats['assemble'] += 1
+                        self._log(f"Reward: Assembled food onto plate (+3.0)")
                     # else: no reward for other assembles
                     
                 # Deliver: +15.0 (additional to order completion bonus)
                 elif 'Deliver' in e_str:
                     step_reward += 15.0
-                    print(f"Reward: Delivered dish (+15.0)")
+                    self._log(f"Reward: Delivered dish (+15.0)")
                     
                 # Pickup and Drop are handled below with state tracking
         
@@ -335,31 +415,39 @@ class KitchenGym(gym.Env):
             if 'Onion' in holding_after and 'Fresh' in holding_after:
                 # Fresh Onion pickup - always reward (fixed items, no infinite supply)
                 step_reward += 0.5
-                print(f"Reward: Picked up FreshOnion (+0.5)")
+                self.episode_stats['pickup_fresh'] += 1
+                self._log(f"Reward: Picked up FreshOnion (+0.5)")
                     
             elif 'Lettuce' in holding_after and 'Fresh' in holding_after:
                 # Fresh Lettuce pickup - always reward (fixed items, no infinite supply)
                 step_reward += 0.5
-                print(f"Reward: Picked up FreshLettuce (+0.5)")
+                self.episode_stats['pickup_fresh'] += 1
+                self._log(f"Reward: Picked up FreshLettuce (+0.5)")
                     
             elif 'Tomato' in holding_after and 'Fresh' in holding_after:
                 # Fresh Tomato pickup - always reward (fixed items, no infinite supply)
                 step_reward += 0.5
-                print(f"Reward: Picked up FreshTomato (+0.5)")
+                self.episode_stats['pickup_fresh'] += 1
+                self._log(f"Reward: Picked up FreshTomato (+0.5)")
                     
             elif 'Chopped' in holding_after:
-                # Chopped ingredient pickup - always useful for assembly
-                step_reward += 0.5
-                print(f"Reward: Picked up Chopped ingredient (+0.5)")
+                # Chopped ingredient pickup - IMPORTANT for progression!
+                # Check if picked from cutboard (high reward) vs counter
+                step_reward += 3.0  # Increased from 0.5 to encourage this action
+                self.episode_stats['pickup_chopped'] += 1
+                self._log(f"Reward: Picked up Chopped ingredient (+3.0)")
                 
             elif 'Plate' in holding_after:
                 # Plate pickup - only reward if cooking/cooked/chopped exists
                 if cooking_or_cooked_exists:
                     step_reward += 0.5
-                    print(f"Reward: Picked up Plate (ready to serve) (+0.5)")
+                    self.episode_stats['pickup_plate'] += 1
+                    self._log(f"Reward: Picked up Plate (ready to serve) (+0.5)")
                 else:
-                    step_reward -= 0.5
-                    print(f"Penalty: Picked up Plate (nothing ready) (-0.5)")
+                    step_reward -= 1.0
+                    self.episode_stats['penalty_plate_too_early'] += 1
+                    self.episode_stats['penalties'] += 1
+                    self._log(f"Penalty: Picked up Plate too early (nothing ready) (-1.0)")
 
         # === DROP REWARDS/PENALTIES ===
         # Detect drop: holding_before != 'None' and holding_after == 'None'
@@ -390,26 +478,56 @@ class KitchenGym(gym.Env):
                         
                         if needed:
                             step_reward += 0.5
-                            print(f"Reward: Placed needed {holding_before} on Cutboard (+0.5)")
+                            self.episode_stats['drop_cutboard'] += 1
+                            self._log(f"Reward: Placed needed {holding_before} on Cutboard (+0.5)")
                         else:
                             # Penalty for placing unneeded ingredient on cutboard
                             step_reward -= 0.5
-                            print(f"Penalty: Placed unneeded {holding_before} on Cutboard (-0.5)")
+                            self.episode_stats['penalties'] += 1
+                            self._log(f"Penalty: Placed unneeded {holding_before} on Cutboard (-0.5)")
                     else:
-                        # Penalty for placing fresh ingredient elsewhere
-                        step_reward -= 0.5
-                        print(f"Penalty: Placed {holding_before} on non-Cutboard (-0.5)")
+                        # Penalty for placing fresh ingredient elsewhere (counter)
+                        step_reward -= 1.0
+                        self.episode_stats['penalty_fresh_to_counter'] += 1
+                        self.episode_stats['penalties'] += 1
+                        self._log(f"Penalty: Placed {holding_before} on counter instead of cutboard (-1.0)")
                 
                 # Chopped ingredient placement
                 elif is_chopped:
                     if is_pot:
-                        # Reward for putting chopped ingredient in pot
-                        step_reward += 1.0
-                        print(f"Reward: Put {holding_before} in Pot (+1.0)")
+                        # Check what's being put in pot and validate recipe
+                        # Count ingredients in what we're holding
+                        held_has_onion = 'Onion' in holding_before
+                        held_has_lettuce = 'Lettuce' in holding_before
+                        held_has_tomato = 'Tomato' in holding_before
+                        ingredient_count = sum([held_has_onion, held_has_lettuce, held_has_tomato])
+                        
+                        # Valid recipes: OnionLettuceSoup(OL), TomatoLettuceSoup(TL), OnionTomatoSoup(OT)
+                        # Invalid: FullSoup(3 ingredients), any single ingredient
+                        
+                        if ingredient_count == 1:
+                            # Single ingredient to pot - PENALTY
+                            step_reward -= 3.0
+                            self.episode_stats['penalty_single_ingredient_pot'] += 1
+                            self.episode_stats['penalties'] += 1
+                            self._log(f"Penalty: Put single ingredient {holding_before} in Pot (-3.0)")
+                        elif ingredient_count == 2:
+                            # All 2-ingredient combinations are valid now
+                            step_reward += 5.0
+                            self.episode_stats['drop_pot'] += 1
+                            self._log(f"Reward: Put valid {holding_before} in Pot (+5.0)")
+                        else:
+                            # 3 ingredients = FullSoup - INVALID for current recipes
+                            step_reward -= 3.0
+                            self.episode_stats['penalty_invalid_recipe'] += 1
+                            self.episode_stats['penalties'] += 1
+                            self._log(f"Penalty: Invalid 3-ingredient in Pot (-3.0)")
                     elif is_cutboard:
                         # Penalty for placing chopped ingredient on cutboard
-                        step_reward -= 0.5
-                        print(f"Penalty: Placed {holding_before} on Cutboard (-0.5)")
+                        step_reward -= 1.0
+                        self.episode_stats['penalty_chopped_to_cutboard'] += 1
+                        self.episode_stats['penalties'] += 1
+                        self._log(f"Penalty: Placed {holding_before} on Cutboard (-1.0)")
                     else:
                         # Placing chopped ingredient on counter
                         # Check what's already on the target counter
@@ -451,40 +569,65 @@ class KitchenGym(gym.Env):
                                         # Could pick this up and merge, but placing separately
                                         # Penalty: should merge instead
                                         step_reward -= 0.5
-                                        print(f"Penalty: Placed ChoppedOnion on empty counter when merge available (-0.5)")
+                                        self.episode_stats['penalties'] += 1
+                                        self._log(f"Penalty: Placed ChoppedOnion on empty counter when merge available (-0.5)")
                                     else:
                                         # No merge available, placing is OK
                                         step_reward += 0.5
-                                        print(f"Reward: Placed ChoppedOnion on counter (+0.5)")
+                                        self.episode_stats['drop_counter'] += 1
+                                        self._log(f"Reward: Placed ChoppedOnion on counter (+0.5)")
                                 elif held_has_lettuce:
                                     if chopped_tomato_on_counter > 0 or chopped_onion_on_counter > 0:
                                         step_reward -= 0.5
-                                        print(f"Penalty: Placed ChoppedLettuce on empty counter when merge available (-0.5)")
+                                        self.episode_stats['penalties'] += 1
+                                        self._log(f"Penalty: Placed ChoppedLettuce on empty counter when merge available (-0.5)")
                                     else:
                                         step_reward += 0.5
-                                        print(f"Reward: Placed ChoppedLettuce on counter (+0.5)")
+                                        self.episode_stats['drop_counter'] += 1
+                                        self._log(f"Reward: Placed ChoppedLettuce on counter (+0.5)")
                                 elif held_has_tomato:
                                     if chopped_onion_on_counter > 0 or chopped_lettuce_on_counter > 0:
                                         step_reward -= 0.5
-                                        print(f"Penalty: Placed ChoppedTomato on empty counter when merge available (-0.5)")
+                                        self.episode_stats['penalties'] += 1
+                                        self._log(f"Penalty: Placed ChoppedTomato on empty counter when merge available (-0.5)")
                                     else:
                                         step_reward += 0.5
-                                        print(f"Reward: Placed ChoppedTomato on counter (+0.5)")
+                                        self.episode_stats['drop_counter'] += 1
+                                        self._log(f"Reward: Placed ChoppedTomato on counter (+0.5)")
                             else:
                                 # Merged ingredients being placed - generally OK
                                 step_reward += 0.5
-                                print(f"Reward: Placed merged ingredients on counter (+0.5)")
+                                self.episode_stats['drop_counter'] += 1
+                                self._log(f"Reward: Placed merged ingredients on counter (+0.5)")
                 
                 # Plate placement (with or without food)
                 elif is_plate:
                     if is_delivery:
-                        # Delivery handled by event, but add small bonus
-                        step_reward += 5.0
-                        print(f"Reward: Placed dish on Delivery (+5.0)")
+                        # Check what's on the plate
+                        plate_has_food = ('Soup' in holding_before or 'Cooked' in holding_before or 
+                                         'Salad' in holding_before or 'Chopped' in holding_before)
+                        
+                        if not plate_has_food:
+                            # Empty plate to delivery - BIG PENALTY
+                            step_reward -= 5.0
+                            self.episode_stats['penalty_empty_plate_deliver'] += 1
+                            self.episode_stats['penalties'] += 1
+                            self._log(f"Penalty: Delivered empty Plate (-5.0)")
+                        elif 'Cooking' in holding_before:
+                            # Uncooked food to delivery - PENALTY
+                            step_reward -= 3.0
+                            self.episode_stats['penalty_wrong_dish_deliver'] += 1
+                            self.episode_stats['penalties'] += 1
+                            self._log(f"Penalty: Delivered uncooked food (-3.0)")
+                        else:
+                            # Valid delivery
+                            step_reward += 5.0
+                            self.episode_stats['deliver'] += 1
+                            self._log(f"Reward: Placed dish on Delivery (+5.0)")
                     elif not cooking_or_cooked_exists:
                         # Reward for putting down unneeded plate (cancels pickup penalty)
                         step_reward += 0.5
-                        print(f"Reward: Put down unneeded Plate (+0.5)")
+                        self._log(f"Reward: Put down unneeded Plate (+0.5)")
                     # Other plate placements (when food is ready) are neutral
 
         # === CHOPPING REWARDS ===
@@ -502,15 +645,18 @@ class KitchenGym(gym.Env):
             if 'Onion' in chop_event_str:
                 if processing_onions <= active_onion_orders:
                     step_reward += 5.0
-                    print(f"Reward: Chopped needed Onion (+5.0)")
+                    self.episode_stats['chop_complete'] += 1
+                    self._log(f"Reward: Chopped needed Onion (+5.0)")
             elif 'Lettuce' in chop_event_str:
                 if processing_lettuce <= active_lettuce_orders:
                     step_reward += 5.0
-                    print(f"Reward: Chopped needed Lettuce (+5.0)")
+                    self.episode_stats['chop_complete'] += 1
+                    self._log(f"Reward: Chopped needed Lettuce (+5.0)")
             elif 'Tomato' in chop_event_str:
                 if processing_tomato <= active_tomato_orders:
                     step_reward += 5.0
-                    print(f"Reward: Chopped needed Tomato (+5.0)")
+                    self.episode_stats['chop_complete'] += 1
+                    self._log(f"Reward: Chopped needed Tomato (+5.0)")
 
         # Reward for actively chopping on cutboard (each step of chopping)
         if holding_after == 'None' and real_action != (0, 0):
@@ -524,39 +670,63 @@ class KitchenGym(gym.Env):
                         # Give reward for each chopping step on needed ingredient
                         if 'Onion' in obj_name and processing_onions <= active_onion_orders:
                             step_reward += 0.5
-                            print(f"Reward: Chopping Onion (+0.5)")
+                            self.episode_stats['chop_step'] += 1
+                            self._log(f"Reward: Chopping Onion (+0.5)")
                         elif 'Lettuce' in obj_name and processing_lettuce <= active_lettuce_orders:
                             step_reward += 0.5
-                            print(f"Reward: Chopping Lettuce (+0.5)")
+                            self.episode_stats['chop_step'] += 1
+                            self._log(f"Reward: Chopping Lettuce (+0.5)")
                         elif 'Tomato' in obj_name and processing_tomato <= active_tomato_orders:
                             step_reward += 0.5
-                            print(f"Reward: Chopping Tomato (+0.5)")
+                            self.episode_stats['chop_step'] += 1
+                            self._log(f"Reward: Chopping Tomato (+0.5)")
 
         # === PENALTIES ===
         # Invalid Action Penalty (bumping into walls/objects)
         if my_action != (0, 0):
             if pos_before == pos_after and holding_before == holding_after and not agent_event_occurred:
                 step_reward -= 0.1
-                print(f"Penalty: Invalid action (-0.1)")
+                self.episode_stats['invalid_action'] += 1
+                self._log(f"Penalty: Invalid action (-0.1)")
+
+        # === IDLE RESOURCE PENALTY ===
+        # Penalize for leaving ANY item on cutboard (should pick it up or continue chopping)
+        items_on_cutboard = 0
+        for gs in self.env.world.objects.get('Cutboard', []):
+            if gs.holding is not None:
+                items_on_cutboard += 1
+        
+        if items_on_cutboard > 0:
+            idle_penalty = items_on_cutboard * 0.02  # Small penalty per item on cutboard
+            step_reward -= idle_penalty
+            # Don't log every step, too noisy
 
         # === ORDER COMPLETION REWARDS ===
         if diff_success > 0:
             step_reward += 20.0  # Reward for completing an order
             self.last_successful_orders = current_successful
-            print(f"Reward: Order completed! (+20.0)")
+            self.episode_stats['order_complete'] += 1
+            self._log(f"Reward: Order completed! (+20.0)")
             
         # Check termination for first 3 orders
         terminated = False
         if current_successful >= self.max_orders:
             terminated = True
             step_reward += 50.0  # Bonus for completing all orders
-            print(f"Reward: All {self.max_orders} orders completed! (+50.0)")
+            self._log(f"Reward: All {self.max_orders} orders completed! (+50.0)")
             
         truncated = False
         if self.current_step >= 1000:
             truncated = True
         if 'time_limit' in info: 
             truncated = True
+
+        # Update episode statistics
+        self.episode_stats['total_reward'] += step_reward
+        
+        # Print episode stats when episode ends
+        if terminated or truncated:
+            self._print_episode_stats()
 
         obs = self._process_obs(state)
         
