@@ -2,6 +2,7 @@
 import sys
 import os
 import time
+import argparse
 import pygame
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv
@@ -36,15 +37,21 @@ SAVE_DIR = "agent/agent/myagent/rl_models"
 GRID_COLS = 4
 GRID_ROWS = 2
 
+# Render modes
+RENDER_ALL = 'all'      # Render all environments every frame
+RENDER_SKIP = 'skip'    # Render every N frames
+RENDER_NONE = 'none'    # No rendering
+
 class MultiEnvRenderCallback(BaseCallback):
     """Callback to render all 8 environments in a grid layout."""
     
-    def __init__(self, games, fps=0, render_every=10, vec_env=None):
+    def __init__(self, games, fps=0, render_every=10, vec_env=None, render_mode='all'):
         super().__init__(verbose=0)
         self.games = games  # List of Game instances, one per env
         self.fps = fps
         self.render_every = render_every
         self.vec_env = vec_env
+        self.render_mode = render_mode  # 'all', 'skip', or 'none'
         self.clock = pygame.time.Clock()
         self.ent_coef_start = 1.0   # 100% exploration at start
         self.ent_coef_end = 0.05    # 10% exploration at end
@@ -54,6 +61,11 @@ class MultiEnvRenderCallback(BaseCallback):
         self.last_eta_update = 0  # Last time ETA was updated
         self.cached_eta_str = "ETA: calculating..."  # Cached ETA string
         self.cached_elapsed_str = "Elapsed: 0m 0s"  # Cached elapsed string
+        
+        # Skip window creation if no rendering
+        if render_mode == RENDER_NONE:
+            self.main_screen = None
+            return
         
         # Calculate window size based on single game size
         # Each game renders to its own surface
@@ -90,13 +102,26 @@ class MultiEnvRenderCallback(BaseCallback):
         current_ent_coef = self.ent_coef_end + (self.ent_coef_start - self.ent_coef_end) * current_progress
         self.model.ent_coef = current_ent_coef
         
+        # No rendering mode - just return
+        if self.render_mode == RENDER_NONE:
+            return True
+        
         # Process Pygame events
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return False
         
-        # Only render every N steps for speed
-        if self.step_count % self.render_every != 0:
+        # Determine rendering based on mode
+        if self.render_mode == RENDER_ALL:
+            # Render all environments every frame
+            should_render = True
+            full_render = True
+        else:  # RENDER_SKIP
+            # Render env 0 every frame, others every N frames
+            should_render = True
+            full_render = (self.step_count % self.render_every == 0)
+        
+        if not should_render:
             return True
         
         # Clear screen
@@ -139,11 +164,12 @@ class MultiEnvRenderCallback(BaseCallback):
             
             env_stats.append({'step': env_step, 'reward': env_reward, 'penalties': env_penalties})
             
-            # Render to game's own screen
-            try:
-                game.on_render()
-            except TypeError:
-                game.on_render(paused=False, chat="", replay=False)
+            # Render env 0 every frame, others only on full_render
+            if i == 0 or full_render:
+                try:
+                    game.on_render()
+                except TypeError:
+                    game.on_render(paused=False, chat="", replay=False)
             
             # Calculate position in grid
             col = i % GRID_COLS
@@ -243,13 +269,27 @@ class MultiEnvRenderCallback(BaseCallback):
         return True
 
 def main():
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Train PPO agent with visual rendering')
+    parser.add_argument('--render', choices=[RENDER_ALL, RENDER_SKIP, RENDER_NONE], 
+                        default=RENDER_ALL,
+                        help='Rendering mode: all=every frame, skip=every N frames, none=no rendering')
+    parser.add_argument('--render-every', type=int, default=100,
+                        help='Frames to skip between renders (only used with --render=skip)')
+    args = parser.parse_args()
+    
+    render_mode = args.render
+    render_every = args.render_every
+    
     if not os.path.exists(SAVE_DIR):
         os.makedirs(SAVE_DIR)
         
     print(f"Initializing Environment: {MAP_NAME} with {NUM_ENVS} parallel environments")
+    print(f"Render mode: {render_mode}" + (f" (every {render_every} frames)" if render_mode == RENDER_SKIP else ""))
     
-    # Init Pygame
-    pygame.init()
+    # Init Pygame only if rendering is needed
+    if render_mode != RENDER_NONE:
+        pygame.init()
     
     # Factory function to create environments
     def make_env():
@@ -267,22 +307,22 @@ def main():
     # Create vectorized environment with 8 parallel environments
     env = DummyVecEnv([make_env() for _ in range(NUM_ENVS)])
     
-    # Create Game instances for each environment (for visualization)
-    # Use play=False so each Game creates a Surface instead of display.set_mode
+    # Create Game instances for visualization (only if rendering)
     games = []
-    for i in range(NUM_ENVS):
-        vis_arglist = MapSetting(**MAP_CONFIG)
-        vis_arglist.max_num_timesteps = 1000
-        vis_arglist.max_num_orders = 3
-        vis_raw_env = OvercookedEnvironment(vis_arglist)
-        vis_raw_env.reset()
-        FIXED_RECIPE_LIST = [0, 1, 2] * 34
-        vis_raw_env.order_scheduler.assign_rand_recipe_list(FIXED_RECIPE_LIST)
-        
-        # Create Game with play=False to use Surface instead of display
-        game = Game(vis_raw_env, play=False)
-        game.on_init()
-        games.append(game)
+    if render_mode != RENDER_NONE:
+        for i in range(NUM_ENVS):
+            vis_arglist = MapSetting(**MAP_CONFIG)
+            vis_arglist.max_num_timesteps = 1000
+            vis_arglist.max_num_orders = 3
+            vis_raw_env = OvercookedEnvironment(vis_arglist)
+            vis_raw_env.reset()
+            FIXED_RECIPE_LIST = [0, 1, 2] * 34
+            vis_raw_env.order_scheduler.assign_rand_recipe_list(FIXED_RECIPE_LIST)
+            
+            # Create Game with play=False to use Surface instead of display
+            game = Game(vis_raw_env, play=False)
+            game.on_init()
+            games.append(game)
     
     print("Initializing PPO...")
     
@@ -314,11 +354,18 @@ def main():
     )
     
     # Use multi-env render callback to show all 8 environments
-    # render_every=1: Update display every step
+    # render_every: Frames between renders (only for skip mode)
     # fps=0: No FPS limit (maximum speed)
-    callback = MultiEnvRenderCallback(games, fps=0, render_every=1, vec_env=env) 
+    callback = MultiEnvRenderCallback(
+        games, fps=0, render_every=render_every, vec_env=env, render_mode=render_mode
+    ) 
     
-    print(f"Starting training with {NUM_ENVS} parallel envs (2x4 grid), 1024 steps per update...")
+    mode_desc = {
+        RENDER_ALL: "rendering all frames",
+        RENDER_SKIP: f"rendering every {render_every} frames",
+        RENDER_NONE: "no rendering (fastest)"
+    }
+    print(f"Starting training with {NUM_ENVS} parallel envs, {mode_desc[render_mode]}...")
     
     try:
         model.learn(total_timesteps=TRAIN_STEPS, callback=callback)
@@ -329,7 +376,8 @@ def main():
     model.save(final_path)
     print(f"Model saved to {final_path}")
     
-    pygame.quit()
+    if render_mode != RENDER_NONE:
+        pygame.quit()
 
 if __name__ == "__main__":
     main()
