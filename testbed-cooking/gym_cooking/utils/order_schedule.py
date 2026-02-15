@@ -75,8 +75,13 @@ class OrderScheduler:
                 current_orders.append(
                     (order, restTime - passed_time, timeLimit, bonus))
             else:
-                self.failed_orders += 1
-                self.reward -= ORDER_EXPIRE_PUNISH
+                # Order expired - but keep it with reset time for RL training
+                # Instead of removing, reset the timer to allow continued training
+                current_orders.append(
+                    (order, timeLimit, timeLimit, bonus))  # Reset timer
+                # Optionally still count as failed (commented out for RL)
+                # self.failed_orders += 1
+                # self.reward -= ORDER_EXPIRE_PUNISH
         self.current_orders = current_orders
 
         # Restrict order generation: Do NOT refill orders if we want a finite set

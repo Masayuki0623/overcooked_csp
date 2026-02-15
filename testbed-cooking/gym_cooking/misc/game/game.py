@@ -70,6 +70,13 @@ class Game:
             self._running = False
 
     def on_render(self, paused=False, chat='', replay=False, debug_info=None):
+        # Refresh references from env (in case of reset)
+        self.world = self.env.world
+        self.sim_agents = self.env.sim_agents
+        self.order_scheduler = self.env.order_scheduler
+        if len(self.sim_agents) > 0:
+            self.current_agent = self.sim_agents[0]
+        
         self.__plot_elements = []
         try:
             self.screen.fill(Color.FLOOR)
@@ -311,15 +318,19 @@ class Game:
         self.draw(path, size, loc)
 
     def draw_current_orders(self):
-        if self.world.arglist.user_recipy and self.order_scheduler is not None:
-            for i, (order, restTime, timeLimit, bonus) in enumerate(self.order_scheduler.current_orders):
+        # Always get fresh references from env to avoid stale references after reset
+        current_order_scheduler = self.env.order_scheduler if hasattr(self.env, 'order_scheduler') else self.order_scheduler
+        current_world = self.env.world if hasattr(self.env, 'world') else self.world
+        
+        if current_world.arglist.user_recipy and current_order_scheduler is not None:
+            for i, (order, restTime, timeLimit, bonus) in enumerate(current_order_scheduler.current_orders):
                 self.draw_current_order(i, copy.deepcopy(order), restTime)
 
         # draw success and failed ones
         self.put_text(self.small_font, "Score", (40, 80, 180),
-                      ((0 + 0.15) * self.tile_size[0], (self.world.height + 1.6) * self.tile_size[1]))
-        self.put_text(self.font, str(self.order_scheduler.reward), (40, 80, 180),
-                      ((0.5 + 0.3) * self.tile_size[0], (self.world.height + 1.4) * self.tile_size[1]))
+                      ((0 + 0.15) * self.tile_size[0], (current_world.height + 1.6) * self.tile_size[1]))
+        self.put_text(self.font, str(current_order_scheduler.reward), (40, 80, 180),
+                      ((0.5 + 0.3) * self.tile_size[0], (current_world.height + 1.4) * self.tile_size[1]))
 
     def draw_current_order(self, idx, obj, t):
         # order

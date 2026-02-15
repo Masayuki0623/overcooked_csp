@@ -25,7 +25,7 @@ from agent.myagent.rl_env import KitchenGym
 from stable_baselines3 import PPO
 
 # Configuration
-MAP_NAME = 'ring'
+MAP_NAME = 'ring_rl'
 MAP_CONFIG = MAP_SETTINGS[MAP_NAME]
 TRAIN_STEPS = 200000
 SAVE_DIR = "agent/agent/myagent/rl_models"
@@ -108,6 +108,16 @@ def main():
     
     # Create Env
     raw_env = OvercookedEnvironment(arglist)
+    raw_env.reset()
+    
+    # Fix the recipes for RL training:
+    # Level file order: FullSoup, TomatoLettuceSoup, OnionTomatoSoup
+    # Index: 0: TomatoLettuceSoup, 1: OnionLettuceSoup, 2: OnionTomatoSoup, 3: FullSoup
+    # Map to recipe indices: FullSoup=0, TomatoLettuceSoup=1, OnionTomatoSoup=2 (based on recipes[] order after load)
+    # Actually recipe index matches position in level file: 0=FullSoup, 1=TomatoLettuceSoup, 2=OnionTomatoSoup
+    FIXED_RECIPE_LIST = [0, 1, 2] * 34  # Repeat to fill 100+ entries
+    raw_env.order_scheduler.assign_rand_recipe_list(FIXED_RECIPE_LIST)
+    
     env = KitchenGym(raw_env)
     
     # Create Game wrapper for rendering

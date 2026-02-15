@@ -16,6 +16,7 @@ def parse_arguments():
 
 MAP_SETTINGS = dict(
     ring=dict(level="new1",),
+    ring_rl=dict(level="new1_rl",),
     bottleneck=dict(level="new3",),
     partition=dict(level="new2"),
     quick=dict(level="new5", max_num_orders=4,),

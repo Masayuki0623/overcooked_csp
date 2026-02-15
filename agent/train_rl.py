@@ -17,8 +17,7 @@ from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.callbacks import CheckpointCallback
 
 # Configuration
-# Focusing on 'ring' map as per context
-MAP_NAME = 'ring'
+MAP_NAME = 'ring_rl'
 MAP_CONFIG = MAP_SETTINGS[MAP_NAME]
 TRAIN_STEPS = 200000
 SAVE_DIR = "agent/agent/myagent/rl_models" # Adjusted path based on structure
