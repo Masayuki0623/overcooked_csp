@@ -20,6 +20,7 @@ MAP_SETTINGS = dict(
     bottleneck=dict(level="new3",),
     partition=dict(level="new2"),
     quick=dict(level="new5", max_num_orders=4,),
+    test=dict(level="new1_rl", max_num_orders=3,),
 )
 
 if __name__ == '__main__':

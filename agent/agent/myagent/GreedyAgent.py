@@ -129,7 +129,7 @@ class GreedyAgent:
         }
         ingredient_tile_pos = env.get_pos_by_obj_gs(gs=tile_map[ingredient])
         cutboard_pos = env.get_pos_by_obj_gs(gs="Cutboard")
-        special_places = [(3,2), (4,2), (5,2)]
+        special_places = [(0,1), (0,2), (0,3)]
         target_place = special_places[order_idx]
 
         def get_adjacent_free(pos_list):
@@ -167,7 +167,7 @@ class GreedyAgent:
     def calc_cook_task_cost_from_pos(self, env, order_idx, from_pos):
         width = env.world_width
         height = env.world_height
-        special_places = [(3,2), (4,2), (5,2)]
+        special_places = [(0,1), (0,2), (0,3)]
         pot_places = [(3,5), (4,5), (5,5)]
         idx_from = self.get_index(*from_pos, width)
         idx_special = self.get_index(*special_places[order_idx], width)
@@ -207,8 +207,8 @@ class GreedyAgent:
         ingredient_tile_pos = env.get_pos_by_obj_gs(gs=tile_map[ingredient])
         cutboard_pos = env.get_pos_by_obj_gs(gs="Cutboard")
         # 注文番号ごとのテーブル・置き場所
-        move_places = [(3,2), (4,2), (5,2)]
-        put_places = [(3,3), (4,3), (5,3)]
+        move_places = [(0,1), (0,2), (0,3)]
+        put_places = [(0,1), (0,2), (0,3)]
         move_place = move_places[order_idx]
         put_place = put_places[order_idx]
 
@@ -442,9 +442,9 @@ class GreedyAgent:
                     print(f"[Debug] move: (0, 0)")
                     return (0, 0), ""
                 # 置きたい場所（put_place）を取得
-                # plan_chop_stepsでput_places = [(3,3), (4,3), (5,3)]としている
+                # plan_chop_stepsでput_places = [(0,1), (0,2), (0,3)]としている
                 order_idx = self.current_plan[self.current_step].get("order_idx", 0) if "order_idx" in self.current_plan[self.current_step] else self.current_order_idx
-                put_places = [(3,3), (4,3), (5,3)]
+                put_places = [(0,1), (0,2), (0,3)]
                 put_place = put_places[order_idx]
                 # put_placeの隣接マスにいれば、その方向にmove
                 dx = put_place[0] - agent_pos[0]

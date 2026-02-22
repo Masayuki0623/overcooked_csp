@@ -144,7 +144,7 @@ class TSPSolverAgent:
         cutboard_pos = env.get_pos_by_obj_gs(gs="Cutboard")
         # print(f"cutboard positions: {cutboard_pos}")
         # 3. 特定の場所
-        special_places = [(2,3), (2,4), (2,5)]
+        special_places = [(0,1), (0,2), (0,3)]
         target_place = special_places[order_idx]
         # print(f"target place for order {order_idx+1}: {target_place}")
 

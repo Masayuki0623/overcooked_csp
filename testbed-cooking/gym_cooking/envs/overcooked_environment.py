@@ -36,6 +36,7 @@ class MapSetting:
     max_num_orders: int = 3         # max number of orders
 
     num_agents: int = 2  # fixed
+    modeltest: bool = False
 
 class OvercookedEnvironment(gym.Env):
     """Environment object for Overcooked."""

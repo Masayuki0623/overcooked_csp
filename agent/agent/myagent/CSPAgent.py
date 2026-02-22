@@ -221,7 +221,7 @@ class CSPAgent:
         cutboards = env.get_pos_by_obj_gs(gs="Cutboard")
         pots = env.get_pos_by_obj_gs(gs="Pot")
         deliveries = env.get_pos_by_obj_gs(gs="Delivery")
-        plates = env.get_pos_by_obj_gs(gs="Plate") 
+        plates = env.get_pos_by_obj_gs(obj="Plate") 
         if not plates:
             plates = env.get_pos_by_obj_gs(gs="PlateTile") 
         counters = env.get_pos_by_obj_gs(gs="Counter")
@@ -245,6 +245,9 @@ class CSPAgent:
         if verb == 'chop':
             tile_map = {"lettuce": "FreshLettuceTile", "onion": "FreshOnionTile", "tomato": "FreshTomatoTile"}
             ing_pos_list = env.get_pos_by_obj_gs(gs=tile_map.get(obj, ""))
+            if not ing_pos_list:
+                obj_map = {"lettuce": "FreshLettuce", "onion": "FreshOnion", "tomato": "FreshTomato"}
+                ing_pos_list = env.get_pos_by_obj_gs(obj=obj_map.get(obj, ""))
             if not ing_pos_list: return None
             ing_pos = ing_pos_list[0] 
 
@@ -294,16 +297,21 @@ class CSPAgent:
 
         elif verb == 'cook':
             pot_pos_list = resources['pots']
-            if not pot_pos_list: return None
+            if not pot_pos_list:
+                print(f"[DEBUG cook] No pots found")
+                return None
             
             pot_pos = pot_pos_list[order_idx % len(pot_pos_list)]
             
             counters = env.get_pos_by_obj_gs(gs="Counter")
-            if not counters: return None
+            if not counters:
+                print(f"[DEBUG cook] No counters found")
+                return None
             start_pos = get_nearest(pot_pos, counters)
             
             # Allow interacting with pot even if standing in forbidden zone
             d = self.astar_distance(env, start_pos, pot_pos, allow_forbidden_adjacent=False)
+            print(f"[DEBUG cook] start_pos={start_pos}, pot_pos={pot_pos}, d={d}")
             if d is None: return None
             return int(d + 2)
 
@@ -312,11 +320,14 @@ class CSPAgent:
             pot_pos_list = resources['pots']
             delivery_pos = resources['delivery']
             
-            if not pot_pos_list: return None
+            if not pot_pos_list:
+                print(f"[DEBUG serve] No pots found")
+                return None
             pot_pos = pot_pos_list[order_idx % len(pot_pos_list)]
             
             d1 = self.astar_distance(env, plate_pos, pot_pos)
             d2 = self.astar_distance(env, pot_pos, delivery_pos)
+            print(f"[DEBUG serve] plate={plate_pos}, pot={pot_pos}, delivery={delivery_pos}, d1={d1}, d2={d2}")
             
             if d1 is None or d2 is None: return None
             return int(d1 + d2 + 3)
@@ -373,7 +384,8 @@ class CSPAgent:
             
             assigned_counter = None
             if counters:
-                assigned_counter = counters[order_idx % len(counters)]
+                special_places = [(0, 1), (0, 2), (0, 3)]
+                assigned_counter = special_places[order_idx % len(special_places)]
 
             ings_cap = [ing.capitalize() for ing in ings_lower]
             
@@ -408,6 +420,7 @@ class CSPAgent:
                 })
             if cook_needed:
                 dur = self._task_duration_frames(env, 'cook', soup_name, order_idx)
+                print(f"[DEBUG] cook {soup_name} order={order_idx}: dur={dur}")
                 if dur is not None:
                     tasks.append({
                         'id': ('cook', soup_name, order_idx),
@@ -417,6 +430,7 @@ class CSPAgent:
                     })
 
             dur = self._task_duration_frames(env, 'serve', soup_name, order_idx)
+            print(f"[DEBUG] serve {soup_name} order={order_idx}: dur={dur}")
             if dur is not None:
                 tasks.append({
                     'id': ('serve', soup_name, order_idx),
@@ -473,6 +487,9 @@ class CSPAgent:
                 # 食材の位置から一番近いまな板を選ぶ
                 tile_map = {"lettuce": "FreshLettuceTile", "onion": "FreshOnionTile", "tomato": "FreshTomatoTile"}
                 ing_pos_list = env.get_pos_by_obj_gs(gs=tile_map.get(obj, ""))
+                if not ing_pos_list:
+                    obj_map = {"lettuce": "FreshLettuce", "onion": "FreshOnion", "tomato": "FreshTomato"}
+                    ing_pos_list = env.get_pos_by_obj_gs(obj=obj_map.get(obj, ""))
                 ing_pos = ing_pos_list[0] if ing_pos_list else agent_pos
                 
                 cutboards = resources['cutboards']
@@ -946,11 +963,75 @@ class CSPAgent:
                     assignments[order_idx] = counter
         return assignments
 
+    def _get_distance_cache_path(self, env):
+        """距離テーブルのキャッシュファイルパスを取得"""
+        import hashlib
+        from pathlib import Path
+        
+        # グリッドのハッシュを計算（マップの一意識別子として）
+        grid = env.to_grid
+        grid_str = str(grid)
+        grid_hash = hashlib.md5(grid_str.encode()).hexdigest()[:8]
+        
+        cache_dir = Path(__file__).parent / "csp" / "distance_cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        
+        return cache_dir / f"dist_table_{env.world_width}x{env.world_height}_{grid_hash}.json"
+
+    def _save_distance_table(self, env):
+        """距離テーブルをJSONファイルに保存"""
+        import json
+        
+        cache_path = self._get_distance_cache_path(env)
+        
+        # キーをJSON互換の形式に変換
+        serializable = {}
+        for (start, goal), dist in self.dist_table.items():
+            key = f"{start[0]},{start[1]}_{goal[0]},{goal[1]}"
+            serializable[key] = dist
+        
+        with open(cache_path, 'w') as f:
+            json.dump(serializable, f)
+        
+        print(f"[CSPAgent] 距離テーブルを保存: {cache_path}")
+
+    def _load_distance_table(self, env):
+        """距離テーブルをJSONファイルからロード"""
+        import json
+        
+        cache_path = self._get_distance_cache_path(env)
+        
+        if not cache_path.exists():
+            return False
+        
+        try:
+            with open(cache_path, 'r') as f:
+                serializable = json.load(f)
+            
+            # キーを元の形式に戻す
+            self.dist_table = {}
+            for key, dist in serializable.items():
+                parts = key.split('_')
+                start = tuple(map(int, parts[0].split(',')))
+                goal = tuple(map(int, parts[1].split(',')))
+                self.dist_table[(start, goal)] = dist
+            
+            print(f"[CSPAgent] 距離テーブルをロード: {cache_path} ({len(self.dist_table)}ペア)")
+            return True
+        except Exception as e:
+            print(f"[CSPAgent] 距離テーブルのロードに失敗: {e}")
+            return False
+
     def _precompute_distances(self, env):
         """
         マップ初期化時に全歩行可能マス間の最短距離をBFSで事前計算。
         forbidden_zonesは考慮しない基本距離テーブルを作成。
+        キャッシュがあればロードし、なければ計算して保存。
         """
+        # キャッシュからロードを試みる
+        if self._load_distance_table(env):
+            return
+        
         import time
         from collections import deque
         
@@ -992,6 +1073,9 @@ class CSPAgent:
         
         elapsed = time.time() - start_time
         print(f"[CSPAgent] 距離テーブル事前計算完了: {len(walkable)}マス, {len(self.dist_table)}ペア, {elapsed:.4f}秒")
+        
+        # ファイルに保存
+        self._save_distance_table(env)
     
     def _get_precomputed_distance(self, start, goal):
         """
@@ -1019,6 +1103,23 @@ class CSPAgent:
         def walkable_primitive(x, y):
             return in_bounds(x, y) and grid[x][y] == 1
 
+        # スタート地点の決定（立ち位置）
+        actual_start = start
+        if not walkable_primitive(start[0], start[1]):
+            start_adjacents = []
+            for dx, dy in [(0,1),(0,-1),(1,0),(-1,0)]:
+                nx, ny = start[0]+dx, start[1]+dy
+                if walkable_primitive(nx, ny):
+                    if not is_forbidden(nx, ny):
+                        start_adjacents.append((nx, ny))
+                    elif allow_forbidden_adjacent:
+                        start_adjacents.append((nx, ny))
+            
+            if not start_adjacents:
+                return None
+            
+            actual_start = min(start_adjacents, key=lambda p: abs(p[0]-goal[0]) + abs(p[1]-goal[1]))
+
         # ゴール地点の決定（立ち位置）
         actual_goal = goal
         if not walkable_primitive(goal[0], goal[1]):
@@ -1034,17 +1135,17 @@ class CSPAgent:
             if not adjacents:
                 return None
             
-            actual_goal = min(adjacents, key=lambda p: abs(p[0]-start[0]) + abs(p[1]-start[1]))
+            actual_goal = min(adjacents, key=lambda p: abs(p[0]-actual_start[0]) + abs(p[1]-actual_start[1]))
         else:
             if is_forbidden(goal[0], goal[1]) and not allow_forbidden_adjacent:
                 return None
         
         # forbidden_zonesがない場合は事前計算テーブルを使用
         if self.dist_table is not None and not (hasattr(self, 'forbidden_zones') and self.forbidden_zones):
-            return self._get_precomputed_distance(start, actual_goal)
+            return self._get_precomputed_distance(actual_start, actual_goal)
         
         # forbidden_zonesがある場合はA*でフォールバック計算
-        return self._astar_with_forbidden(env, start, actual_goal, allow_forbidden_adjacent)
+        return self._astar_with_forbidden(env, actual_start, actual_goal, allow_forbidden_adjacent)
     
     def _astar_with_forbidden(self, env, start, goal, allow_forbidden_adjacent=False):
         """
@@ -1141,7 +1242,7 @@ class CSPAgent:
             "tomato": "FreshTomatoTile"
         }
 
-        special_places = [(2,3), (2,4), (2,5)]
+        special_places = [(0,1), (0,2), (0,3)]
         pot_places = [(3,5), (4,5), (5,5)]
         plate_pos = (6,6)
         delivery_pos = (6,3)
@@ -1151,6 +1252,9 @@ class CSPAgent:
             for verb, obj in tasks:
                 if verb == 'chop':
                     ing_pos = env.get_pos_by_obj_gs(gs=tile_map[obj])
+                    if not ing_pos:
+                        obj_map = {"lettuce": "FreshLettuce", "onion": "FreshOnion", "tomato": "FreshTomato"}
+                        ing_pos = env.get_pos_by_obj_gs(obj=obj_map[obj])
                     cutboard_pos = env.get_pos_by_obj_gs(gs="Cutboard")
                     ing_adj = get_adjacent_walkables(ing_pos)
                     cut_adj = get_adjacent_walkables(cutboard_pos)

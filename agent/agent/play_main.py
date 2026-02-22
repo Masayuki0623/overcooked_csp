@@ -25,7 +25,7 @@ def parse_arguments():
 
     parser.add_argument(
         "--map", type=str,
-        choices=['ring', 'bottleneck', 'partition', 'quick'], default='ring'
+        choices=['ring', 'bottleneck', 'partition', 'quick', 'test'], default='ring'
     )
     parser.add_argument(
         "--agent", type=str,
@@ -40,12 +40,20 @@ def parse_arguments():
     parser.add_argument(
         "--debug", action='store_true', help="Enable debug mode with overlay"
     )
+    parser.add_argument(
+        "--modeltest", action='store_true', help="Use specific exact 3 soups and do not generate new orders."
+    )
+    parser.add_argument(
+        "--benchmarktest", action='store_true', help="Run benchmark test."
+    )
 
     return parser.parse_args()
 
 
-def init_env_replay(map_name, agent_name, task_name=None, no_reschedule=False, debug_mode=False):
-    map_set = MapSetting(**MAP_SETTINGS[map_name])
+def init_env_replay(map_name, agent_name, task_name=None, no_reschedule=False, debug_mode=False, modeltest=False):
+    map_set_dict = MAP_SETTINGS[map_name].copy()
+    map_set_dict['modeltest'] = modeltest
+    map_set = MapSetting(**map_set_dict)
     # agent_set = AgentSetting(agent_name, speed=2.5 if map_name != 'quick' else 3.5)
     agent_set = AgentSetting(agent_name, speed=10)
     replay = Replay()
@@ -109,7 +117,7 @@ if __name__ == '__main__':
     arglist = parse_arguments()
 
     # initialize replay
-    game, env, replay = init_env_replay(arglist.map, arglist.agent, arglist.task, arglist.no_reschedule, arglist.debug)
+    game, env, replay = init_env_replay(arglist.map, arglist.agent, arglist.task, arglist.no_reschedule, arglist.debug, arglist.modeltest)
 
     try:
         # play

@@ -16,8 +16,26 @@ class OrderScheduler:
         self.max_num_orders = arglist.max_num_orders
 
         self.current_orders = []
-        for _ in range(self.max_num_orders):
-            self.current_orders.append(self.new_order())
+        if getattr(self.arglist, 'modeltest', False):
+            self.max_num_orders = 3
+            valid_names = ['OnionLettuceSoup', 'TomatoLettuceSoup', 'OnionTomatoSoup']
+            self.modeltest_recipes = []
+            for r in self.recipes:
+                name_found = False
+                for v in valid_names:
+                    if v in str(type(r.final_task)) or v in getattr(r, 'name', '') or v in r.final_task.full_name.replace(' ', ''):
+                        name_found = True
+                if name_found:
+                    self.modeltest_recipes.append(r)
+            if not self.modeltest_recipes:
+                self.modeltest_recipes = self.recipes[:3]
+
+            for r in self.modeltest_recipes:
+                goal_obj = copy.deepcopy(r.final_task)
+                self.current_orders.append((goal_obj, r.length, r.length, r.bonus))
+        else:
+            for _ in range(self.max_num_orders):
+                self.current_orders.append(self.new_order())
 
         self.reward = 0
         self.successful_orders = 0
@@ -28,8 +46,13 @@ class OrderScheduler:
         self.rand_recipe_idx = 0
 
         self.current_orders = []
-        for _ in range(self.max_num_orders):
-            self.current_orders.append(self.new_order())
+        if getattr(self.arglist, 'modeltest', False):
+            for r in getattr(self, 'modeltest_recipes', self.recipes[:3]):
+                goal_obj = copy.deepcopy(r.final_task)
+                self.current_orders.append((goal_obj, r.length, r.length, r.bonus))
+        else:
+            for _ in range(self.max_num_orders):
+                self.current_orders.append(self.new_order())
 
     def __copy__(self):
         new = OrderScheduler(self.arglist, copy.copy(self.recipes))
@@ -75,28 +98,16 @@ class OrderScheduler:
                 current_orders.append(
                     (order, restTime - passed_time, timeLimit, bonus))
             else:
-                # Order expired - but keep it with reset time for RL training
-                # Instead of removing, reset the timer to allow continued training
-                current_orders.append(
-                    (order, timeLimit, timeLimit, bonus))  # Reset timer
-                # Optionally still count as failed (commented out for RL)
-                # self.failed_orders += 1
-                # self.reward -= ORDER_EXPIRE_PUNISH
+                self.failed_orders += 1
+                self.reward -= ORDER_EXPIRE_PUNISH
         self.current_orders = current_orders
 
-        # Restrict order generation: Do NOT refill orders if we want a finite set
-        # Original code:
-        # while len(self.current_orders) < self.max_num_orders:
-        #    self.current_orders.append(self.new_order())
-        
-        # Modified for "First 3 orders only" logic
-        # Behavior: If we still have orders to serve from the conceptual "total pool", add them?
-        # User request: "Give first 3 orders only. When finished, remove. Do not add new ones."
-        # This implies we initialize with 3, and never call new_order() again in update loop.
-        
-        pass 
+        # add new orders
+        if not getattr(self.arglist, 'modeltest', False):
+            while len(self.current_orders) < self.max_num_orders:
+                self.current_orders.append(self.new_order())
 
     def consume_reward(self):
-        # temp = self.reward
-        # self.reward = 0
-        return 0
+        temp = self.reward
+        self.reward = 0
+        return temp

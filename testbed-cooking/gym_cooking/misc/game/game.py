@@ -130,9 +130,9 @@ class Game:
             self.draw_chopping_object(o)
 
         # UI elements disabled for RL training - only show game
-        # self.draw_current_orders()
-        # self.draw_soup_hint()
-        # self.draw_current_time()
+        self.draw_current_orders()
+        self.draw_soup_hint()
+        self.draw_current_time()
 
         if debug_info:
             self.draw_debug_overlay(debug_info)
@@ -318,7 +318,7 @@ class Game:
         current_order_scheduler = self.env.order_scheduler if hasattr(self.env, 'order_scheduler') else self.order_scheduler
         current_world = self.env.world if hasattr(self.env, 'world') else self.world
         
-        if current_world.arglist.user_recipy and current_order_scheduler is not None:
+        if current_order_scheduler is not None:
             for i, (order, restTime, timeLimit, bonus) in enumerate(current_order_scheduler.current_orders):
                 self.draw_current_order(i, copy.deepcopy(order), restTime)
 
