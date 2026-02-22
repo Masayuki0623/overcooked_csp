@@ -17,6 +17,7 @@ from agent.TSP.TSPSolverAgent import TSPSolverAgent  # 追加
 from agent.myagent.GreedyAgent import GreedyAgent  # 追加
 from agent.myagent.CSPAgent import CSPAgent  # 追加
 from agent.myagent.TaskAgent import TaskAgent  # 追加
+from agent.myagent.CSPA_Agent import CSP_A_Agent
 def request_client(mode, llm, data):
     if mode in ['L1l']:
         return mix_L(mode, data)
@@ -1037,6 +1038,7 @@ def get_agent(sett: AgentSetting, replay: Replay):
         "TSPSolver": TSPSolverAgent,  # 追加
         "Greedy": GreedyAgent,  # 追加
         "CSP": CSPAgent,  # 追加
+        "CSP_A": CSP_A_Agent,
         "Task": TaskAgent, # 追加
     }
     if sett.mode == "Random":

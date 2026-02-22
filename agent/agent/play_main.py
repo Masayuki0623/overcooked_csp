@@ -29,7 +29,7 @@ def parse_arguments():
     )
     parser.add_argument(
         "--agent", type=str,
-        choices=['HLA', 'SMOA', 'FMOA', 'NEA','Random', 'TSPSolver', 'Greedy', 'CSP', 'Task', 'RL'], default='TSPSolver'  # CSP, Task, RLを追加
+        choices=['HLA', 'SMOA', 'FMOA', 'NEA','Random', 'TSPSolver', 'Greedy', 'CSP', 'Task', 'RL', 'CSP_A'], default='TSPSolver'  # CSP, Task, RLを追加
     )
     parser.add_argument(
         "--task", type=str, default=None, help="Task to execute for TaskAgent (e.g. chop_tomato)"
