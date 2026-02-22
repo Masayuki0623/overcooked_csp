@@ -47,6 +47,10 @@ class CSPAgent:
         self.active_constraints = []
         # 進入禁止エリア
         self.forbidden_zones = []
+        
+        # 事前計算済み距離テーブル
+        self.dist_table = None
+        self.dist_table_env_id = None  # 環境が変わったかチェック用
 
         print("[CSPAgent] 初期化完了 - 現在はランダム行動")
 
@@ -54,6 +58,12 @@ class CSPAgent:
         """
         環境から呼ばれるメイン関数
         """
+        # 距離テーブルの事前計算（初回または環境が変わった場合）
+        env_id = id(env)
+        if self.dist_table is None or self.dist_table_env_id != env_id:
+            self._precompute_distances(env)
+            self.dist_table_env_id = env_id
+        
         # 常にタスクリストを構築して変化をチェック
         current_orders = self._build_order_tasks(env)
         current_task_ids = set()
@@ -936,7 +946,110 @@ class CSPAgent:
                     assignments[order_idx] = counter
         return assignments
 
+    def _precompute_distances(self, env):
+        """
+        マップ初期化時に全歩行可能マス間の最短距離をBFSで事前計算。
+        forbidden_zonesは考慮しない基本距離テーブルを作成。
+        """
+        import time
+        from collections import deque
+        
+        start_time = time.time()
+        
+        width = env.world_width
+        height = env.world_height
+        grid = env.to_grid
+        
+        # 歩行可能マスを列挙
+        walkable = []
+        for x in range(width):
+            for y in range(height):
+                if grid[x][y] == 1:
+                    walkable.append((x, y))
+        
+        # 全ペア距離テーブル
+        self.dist_table = {}
+        
+        # 各歩行可能マスから他のすべての歩行可能マスへのBFS
+        for start in walkable:
+            distances = {start: 0}
+            queue = deque([start])
+            
+            while queue:
+                cx, cy = queue.popleft()
+                current_dist = distances[(cx, cy)]
+                
+                for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+                    nx, ny = cx + dx, cy + dy
+                    if 0 <= nx < width and 0 <= ny < height:
+                        if grid[nx][ny] == 1 and (nx, ny) not in distances:
+                            distances[(nx, ny)] = current_dist + 1
+                            queue.append((nx, ny))
+            
+            # テーブルに格納
+            for goal, dist in distances.items():
+                self.dist_table[(start, goal)] = dist
+        
+        elapsed = time.time() - start_time
+        print(f"[CSPAgent] 距離テーブル事前計算完了: {len(walkable)}マス, {len(self.dist_table)}ペア, {elapsed:.4f}秒")
+    
+    def _get_precomputed_distance(self, start, goal):
+        """
+        事前計算テーブルからO(1)で距離を取得。
+        """
+        return self.dist_table.get((start, goal), None)
+
     def astar_distance(self, env, start, goal, allow_forbidden_adjacent=False):
+        """
+        事前計算テーブルを使用した高速距離取得。
+        forbidden_zonesがある場合はフォールバックでA*を使用。
+        """
+        width = env.world_width
+        height = env.world_height
+        grid = env.to_grid
+
+        def in_bounds(x, y):
+            return 0 <= x < width and 0 <= y < height
+
+        def is_forbidden(x, y):
+            if hasattr(self, 'forbidden_zones') and self.forbidden_zones:
+                return (x, y) in self.forbidden_zones
+            return False
+
+        def walkable_primitive(x, y):
+            return in_bounds(x, y) and grid[x][y] == 1
+
+        # ゴール地点の決定（立ち位置）
+        actual_goal = goal
+        if not walkable_primitive(goal[0], goal[1]):
+            adjacents = []
+            for dx, dy in [(0,1),(0,-1),(1,0),(-1,0)]:
+                nx, ny = goal[0]+dx, goal[1]+dy
+                if walkable_primitive(nx, ny):
+                    if not is_forbidden(nx, ny):
+                        adjacents.append((nx, ny))
+                    elif allow_forbidden_adjacent:
+                        adjacents.append((nx, ny))
+            
+            if not adjacents:
+                return None
+            
+            actual_goal = min(adjacents, key=lambda p: abs(p[0]-start[0]) + abs(p[1]-start[1]))
+        else:
+            if is_forbidden(goal[0], goal[1]) and not allow_forbidden_adjacent:
+                return None
+        
+        # forbidden_zonesがない場合は事前計算テーブルを使用
+        if self.dist_table is not None and not (hasattr(self, 'forbidden_zones') and self.forbidden_zones):
+            return self._get_precomputed_distance(start, actual_goal)
+        
+        # forbidden_zonesがある場合はA*でフォールバック計算
+        return self._astar_with_forbidden(env, start, actual_goal, allow_forbidden_adjacent)
+    
+    def _astar_with_forbidden(self, env, start, goal, allow_forbidden_adjacent=False):
+        """
+        forbidden_zonesを考慮したA*探索（フォールバック用）
+        """
         import heapq
         width = env.world_width
         height = env.world_height
@@ -946,35 +1059,12 @@ class CSPAgent:
             return 0 <= x < width and 0 <= y < height
 
         def is_forbidden(x, y):
-            if hasattr(self, 'forbidden_zones'):
+            if hasattr(self, 'forbidden_zones') and self.forbidden_zones:
                 return (x, y) in self.forbidden_zones
             return False
 
         def walkable_primitive(x, y):
             return in_bounds(x, y) and grid[x][y] == 1
-
-        original_goal = goal
-        # ゴール地点の決定（立ち位置）
-        if not walkable_primitive(goal[0], goal[1]):
-            adjacents = []
-            for dx, dy in [(0,1),(0,-1),(1,0),(-1,0)]:
-                nx, ny = goal[0]+dx, goal[1]+dy
-                if walkable_primitive(nx, ny):
-                     # Forbidden Zone チェック
-                    if not is_forbidden(nx, ny):
-                        adjacents.append((nx, ny))
-                    elif allow_forbidden_adjacent:
-                         # 特例: 立ち入り禁止だが目的地としてならOK
-                         adjacents.append((nx, ny))
-            
-            if not adjacents:
-                return None
-            
-            goal = min(adjacents, key=lambda p: abs(p[0]-start[0]) + abs(p[1]-start[1]))
-        else:
-             # Goal自体がWalkableなら、そこがForbiddenでないかチェック
-             if is_forbidden(goal[0], goal[1]) and not allow_forbidden_adjacent:
-                 return None
 
         def heuristic(a, b):
             return abs(a[0] - b[0]) + abs(a[1] - b[1])
@@ -995,7 +1085,6 @@ class CSPAgent:
                 if not walkable_primitive(nx, ny):
                     continue
 
-                # Forbidden Check for Path
                 if is_forbidden(nx, ny):
                     is_dest = (nx, ny) == goal
                     if not (is_dest and allow_forbidden_adjacent):
