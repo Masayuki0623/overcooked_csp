@@ -9,7 +9,7 @@ class CSPAgent:
     """
     CSP(制約充足問題)ベースのエージェント
     """
-    def __init__(self, speed=2.5, replay=None, no_reschedule=False):
+    def __init__(self, speed=10, replay=None, no_reschedule=False):
         self.speed = speed
         self.replay = replay
         self.no_reschedule = no_reschedule
@@ -630,25 +630,6 @@ class CSPAgent:
             # tasks_vars used to map tid -> dict
             # We can reuse vars_by_tid as tasks_vars equivalent if we rename it later or use it directly.
 
-        # 標準的な順序制約 (Chop -> Cook -> Serve)
-        for i in range(num_tasks):
-            t = tasks[i]
-            verb = t['verb']
-            if verb == 'cook':
-                order_vars = vars_by_order.get(t['order'], [])
-                chops = [v for v in order_vars if v['task']['verb'] == 'chop']
-                for c in chops:
-                    model.Add(starts[i] >= c['end'])
-            elif verb == 'serve':
-                order_vars = vars_by_order.get(t['order'], [])
-                cooks = [v for v in order_vars if v['task']['verb'] == 'cook']
-                for c in cooks:
-                    model.Add(starts[i] >= c['end'])
-                    model.Add(starts[i] >= c['end'] + 150)
-
-
-
-
         print(f"[CSPAgent] スケジュール対象タスク数: {num_tasks}")
         
         # Helper: Group vars by Order ID / TID
@@ -665,6 +646,8 @@ class CSPAgent:
             vars_by_order[order_idx].append(v_obj)
             vars_by_tid[tid] = v_obj
 
+        import gym_cooking.utils.config as config
+
         # 標準的な順序制約 (Chop -> Cook -> Serve)
         for i in range(num_tasks):
             t = tasks[i]
@@ -678,8 +661,7 @@ class CSPAgent:
                 order_vars = vars_by_order.get(t['order'], [])
                 cooks = [v for v in order_vars if v['task']['verb'] == 'cook']
                 for c in cooks:
-                    model.Add(starts[i] >= c['end'])
-                    model.Add(starts[i] >= c['end'] + 150)
+                    model.Add(starts[i] >= c['end'] + int(config.COOKING_TIME_SECONDS * 10))
 
         # 鍋の占有制約 (Pot Usage Constraint)
         # Cook開始からServe完了まで、その鍋は使用中となる

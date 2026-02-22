@@ -2,7 +2,7 @@ import heapq
 from gym_cooking.utils.core import mergeable
 
 class TaskAgent:
-    def __init__(self, speed=2.5, replay=None, task_name=None):
+    def __init__(self, speed=1, replay=None, task_name=None):
         self.speed = speed
         self.replay = replay
         self.task_name = task_name
