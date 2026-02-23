@@ -9,7 +9,7 @@ class CSPAgent:
     """
     CSP(制約充足問題)ベースのエージェント
     """
-    def __init__(self, speed=10, replay=None, no_reschedule=False):
+    def __init__(self, speed=1, replay=None, no_reschedule=False):
         self.speed = speed
         self.replay = replay
         self.no_reschedule = no_reschedule

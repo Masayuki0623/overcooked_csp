@@ -738,7 +738,7 @@ class AgentConfigGUI:
         cons_frame = tk.LabelFrame(self.current_frame, text=" AI 制約生成 ", bg=self.bg_color, fg=self.fg_color, font=self.header_font)
         cons_frame.pack(pady=5, padx=20, fill=tk.X)
         
-        tk.Label(cons_frame, text="制約指示 (例: 'トマトを切る作業は同時に行わないで'):", bg=self.bg_color, fg=self.fg_color, font=self.normal_font).pack(anchor="w", padx=10)
+        tk.Label(cons_frame, text="意思表明-->制約生成", bg=self.bg_color, fg=self.fg_color, font=self.normal_font).pack(anchor="w", padx=10)
         self.constraint_var = tk.StringVar(value=self.constraint_input_value)
         c_entry = tk.Entry(cons_frame, textvariable=self.constraint_var, font=self.normal_font)
         c_entry.pack(fill=tk.X, padx=10, pady=2, ipady=3)
