@@ -9,10 +9,11 @@ class CSPAgent:
     """
     CSP(制約充足問題)ベースのエージェント
     """
-    def __init__(self, speed=2.5, replay=None, no_reschedule=False):
+    def __init__(self, speed=2.5, replay=None, no_reschedule=False, sc_2agent=False):
         self.speed = speed
         self.replay = replay
         self.no_reschedule = no_reschedule
+        self.sc_2agent = sc_2agent
         self.initialized = False
         
         # CSP関連の変数
@@ -34,10 +35,12 @@ class CSPAgent:
         self.w_serve = 5
         
         # 実行状態管理
-        self.current_task_idx = 0
+        self.current_task_idx = {0: 0, 1: 0} if self.sc_2agent else 0
         self.holding_state = None 
         
         self.task_agent = TaskAgent()
+        if self.sc_2agent:
+            self.task_agents = {0: TaskAgent(), 1: TaskAgent()}
         
         # 優先度重み（GUI等で設定）
         self.priority_weights = {}
@@ -89,7 +92,7 @@ class CSPAgent:
                     self._print_schedule(self.schedule)
                     
                     # スケジュールが再生成されたのでインデックスをリセット
-                    self.current_task_idx = 0
+                    self.current_task_idx = {0: 0, 1: 0} if self.sc_2agent else 0
                 except Exception as e:
                     print(f"[CSPAgent] CSPスケジュール中に例外: {e}")
                     import traceback
@@ -99,46 +102,103 @@ class CSPAgent:
                 self.initialized = True
 
         # スケジュール実行
-        if not hasattr(self, 'schedule') or not self.schedule or self.current_task_idx >= len(self.schedule):
-            return (0, 0), "タスクなし"
+        if not self.sc_2agent:
+            if not hasattr(self, 'schedule') or not self.schedule or self.current_task_idx >= len(self.schedule):
+                return (0, 0), "タスクなし"
 
-        task = self.schedule[self.current_task_idx]
-        tid = task['id']
-        verb, obj, order_idx = tid
-        res = task['res'] 
+            task = self.schedule[self.current_task_idx]
+            tid = task['id']
+            verb, obj, order_idx = tid
+            res = task['res'] 
 
-        # Construct Task Name
-        task_name = None
-        if verb == 'chop':
-            task_name = f"chop_{obj}"
-            self.task_agent.assigned_counter = task.get('assigned_counter')
-        elif verb == 'cook':
-            parts = obj.replace(' soup', '').split('-')
-            task_name = f"cook_{'_'.join(parts)}"
-            self.task_agent.assigned_counter = None
-        elif verb == 'serve':
-            parts = obj.replace(' soup', '').split('-')
-            task_name = f"serve_{'_'.join(parts)}"
-            self.task_agent.assigned_counter = None
-        
-        if task_name:
-            self.task_agent.task_name = task_name
-            action, reason = self.task_agent(env)
-            
-            # Check completion
-            if "Done" in reason or "done" in reason or "完了" in reason:
-                print(f"[CSPAgent] タスク {task_name} 完了。次へ移動。")
-                self.current_task_idx += 1
-                # Reset assignments
-                self.task_agent.assigned_cutboard = None
-                self.task_agent.assigned_pot = None
-                self.task_agent.assigned_plate = None
-                self.task_agent.assigned_serve_loc = None
+            # Construct Task Name
+            task_name = None
+            if verb == 'chop':
+                task_name = f"chop_{obj}"
+                self.task_agent.assigned_counter = task.get('assigned_counter')
+            elif verb == 'cook':
+                parts = obj.replace(' soup', '').split('-')
+                task_name = f"cook_{'_'.join(parts)}"
+                self.task_agent.assigned_counter = None
+            elif verb == 'serve':
+                parts = obj.replace(' soup', '').split('-')
+                task_name = f"serve_{'_'.join(parts)}"
                 self.task_agent.assigned_counter = None
             
-            return action, reason
+            if task_name:
+                self.task_agent.task_name = task_name
+                action, reason = self.task_agent(env)
+                
+                # Check completion
+                if "Done" in reason or "done" in reason or "完了" in reason:
+                    print(f"[CSPAgent] タスク {task_name} 完了。次へ移動。")
+                    self.current_task_idx += 1
+                    # Reset assignments
+                    self.task_agent.assigned_cutboard = None
+                    self.task_agent.assigned_pot = None
+                    self.task_agent.assigned_plate = None
+                    self.task_agent.assigned_serve_loc = None
+                    self.task_agent.assigned_counter = None
+                
+                return action, reason
 
-        return (0,0), "アイドル"
+            return (0,0), "アイドル"
+        else:
+            if not hasattr(self, 'schedule_per_agent') or not self.schedule_per_agent:
+                return {"ai_0": (0, 0), "ai_1": (0, 0)}, "タスクなし"
+            
+            actions = {}
+            reasons = []
+            for agent_idx in [0, 1]:
+                sc = self.schedule_per_agent.get(agent_idx, [])
+                t_idx = self.current_task_idx[agent_idx]
+                if t_idx >= len(sc):
+                    actions[f"ai_{agent_idx}"] = (0, 0)
+                    reasons.append(f"AI{agent_idx}:Idle")
+                    continue
+                
+                task = sc[t_idx]
+                tid = task['id']
+                verb, obj, order_idx = tid
+                
+                ta = self.task_agents[agent_idx]
+                task_name = None
+                if verb == 'chop':
+                    task_name = f"chop_{obj}"
+                    ta.assigned_counter = task.get('assigned_counter')
+                elif verb == 'cook':
+                    parts = obj.replace(' soup', '').split('-')
+                    task_name = f"cook_{'_'.join(parts)}"
+                    ta.assigned_counter = None
+                elif verb == 'serve':
+                    parts = obj.replace(' soup', '').split('-')
+                    task_name = f"serve_{'_'.join(parts)}"
+                    ta.assigned_counter = None
+                
+                import copy
+                e_agent = copy.copy(env)
+                e_agent.agent_idx = agent_idx
+                
+                if task_name:
+                    ta.task_name = task_name
+                    action, reason = ta(e_agent)
+                    
+                    if "Done" in reason or "done" in reason or "完了" in reason:
+                        print(f"[CSPAgent] AI{agent_idx} タスク {task_name} 完了。")
+                        self.current_task_idx[agent_idx] += 1
+                        ta.assigned_cutboard = None
+                        ta.assigned_pot = None
+                        ta.assigned_plate = None
+                        ta.assigned_serve_loc = None
+                        ta.assigned_counter = None
+                        
+                    actions[f"ai_{agent_idx}"] = action
+                    reasons.append(reason)
+                else:
+                    actions[f"ai_{agent_idx}"] = (0, 0)
+                    reasons.append("アイドル")
+                
+            return actions, " | ".join(reasons)
 
     # ============ OR-Tools: 0-1選択問題（予算内で重み最大化） ============ 
     def solve_csp_knapsack_with_ortools(self, env):
@@ -432,11 +492,14 @@ class CSPAgent:
         # 現在のエージェント位置（初期位置）
         if hasattr(env, 'sim_agents'):
             agent_pos = env.sim_agents[0].location
+            agent1_pos = env.sim_agents[1].location if len(env.sim_agents) > 1 else agent_pos
         elif hasattr(env, 'agents'):
             agent_pos = env.agents[0].location
+            agent1_pos = env.agents[1].location if len(env.agents) > 1 else agent_pos
         else:
             # Fallback (should not happen in standard gym_cooking envs)
             agent_pos = (0, 0)
+            agent1_pos = (0, 0)
         
         # リソース位置の特定と固定 (Fixed Position)
         resources = self._get_resources(env)
@@ -481,8 +544,10 @@ class CSPAgent:
                 t['fixed_res'] = ('pot', pot) # ServeもPotリソース扱いにしておく
 
         # 2. 距離行列の作成 (A* distance)
-        all_nodes = list(range(num_tasks + 1))
+        node_num = num_tasks + 2 if self.sc_2agent else num_tasks + 1
+        all_nodes = list(range(node_num))
         start_node = num_tasks # ダミーノード
+        agent1_start_node = num_tasks + 1 if self.sc_2agent else None
         
         dist_matrix = {} # (from_idx, to_idx) -> distance
         print("[CSPAgent] 距離行列を計算中...")
@@ -504,10 +569,12 @@ class CSPAgent:
                 # From Node
                 if i == start_node:
                     pos_i = agent_pos
+                elif self.sc_2agent and i == agent1_start_node:
+                    pos_i = agent1_pos
                 else:
                     pos_i = tasks[i]['end_pos']
                 # To Node
-                if j == start_node:
+                if j == start_node or (self.sc_2agent and j == agent1_start_node):
                     dist_matrix[(i,j)] = 0
                 else:
                     pos_j = tasks[j]['start_pos']
@@ -550,6 +617,9 @@ class CSPAgent:
         # Startノード用のダミー変数（Circuit用）
         starts[start_node] = model.NewIntVar(0, 0, 'start_dummy')
         ends[start_node] = model.NewIntVar(0, 0, 'end_dummy')
+        if self.sc_2agent:
+            starts[agent1_start_node] = model.NewIntVar(0, 0, 'start_dummy_1')
+            ends[agent1_start_node] = model.NewIntVar(0, 0, 'end_dummy_1')
 
         # Circuit用のArc変数
         arcs = []
@@ -563,15 +633,23 @@ class CSPAgent:
                 arcs.append((i, j, lit))
                 lit_map[(i, j)] = lit
                 
-                # 遷移制約: i -> j ならば start[j] >= end[i] + distance
-                if j != start_node: # Startノードに戻るときは制約不要
-                    dist = dist_matrix[(i, j)]
-                    model.Add(starts[j] >= ends[i] + dist).OnlyEnforceIf(lit)
-                
-                # 最初のタスク（Start -> j）の場合
-                if i == start_node:
-                    dist = dist_matrix[(i, j)]
-                    model.Add(starts[j] >= dist).OnlyEnforceIf(lit)
+                if not self.sc_2agent:
+                    # 遷移制約: i -> j ならば start[j] >= end[i] + distance
+                    if j != start_node: # Startノードに戻るときは制約不要
+                        dist = dist_matrix[(i, j)]
+                        model.Add(starts[j] >= ends[i] + dist).OnlyEnforceIf(lit)
+                    
+                    # 最初のタスク（Start -> j）の場合
+                    if i == start_node:
+                        dist = dist_matrix[(i, j)]
+                        model.Add(starts[j] >= dist).OnlyEnforceIf(lit)
+                else:
+                    if j < num_tasks:
+                        dist = dist_matrix[(i, j)]
+                        if i == start_node or i == agent1_start_node:
+                            model.Add(starts[j] >= dist).OnlyEnforceIf(lit)
+                        else:
+                            model.Add(starts[j] >= ends[i] + dist).OnlyEnforceIf(lit)
 
         # 一筆書き制約 (TSP)
         model.AddCircuit(arcs)
@@ -689,6 +767,23 @@ class CSPAgent:
                 model.AddNoOverlap(intervals_list)
                 print(f"[CSPAgent] 鍋 {pot_loc} の重複禁止制約を追加 ({len(intervals_list)} 注文)")
 
+        # まな板の占有制約 (Cutboard Usage Constraint)
+        cutboard_intervals = {} # cutboard_loc -> list of interval_vars
+        for i in range(num_tasks):
+            t = tasks[i]
+            if t['verb'] == 'chop':
+                c_res = t.get('fixed_res')
+                if c_res and c_res[0] == 'cutboard':
+                    c_loc = c_res[1]
+                    if c_loc not in cutboard_intervals:
+                        cutboard_intervals[c_loc] = []
+                    cutboard_intervals[c_loc].append(intervals[i])
+        
+        for c_loc, intervals_list in cutboard_intervals.items():
+            if len(intervals_list) > 1:
+                model.AddNoOverlap(intervals_list)
+                print(f"[CSPAgent] まな板 {c_loc} の重複禁止制約を追加 ({len(intervals_list)} タスク)")
+
         # 動的制約 (Dynamic Constraints)
         if hasattr(self, 'active_constraints') and self.active_constraints:
             print(f"[CSPAgent] 動的制約を適用中: {len(self.active_constraints)}件")
@@ -747,7 +842,12 @@ class CSPAgent:
             model.AddMaxEquality(makespan, task_ends)
         else:
             model.Add(makespan == 0)
-        model.Minimize(makespan)
+            
+        # 複数エージェントの場合、Makespanだけだと「余裕のある(Slack)」タスクが遅延して
+        # まるでシーケンシャルに動いているように見えるため、全タスクの開始時間もペナルティとして最小化する
+        start_sum = sum(starts[i] for i in range(num_tasks))
+        weight_makespan = num_tasks * 100 # Makespanを最優先
+        model.Minimize(makespan * weight_makespan + start_sum)
 
         solver = cp_model.CpSolver()
         status = solver.Solve(model)
@@ -755,7 +855,8 @@ class CSPAgent:
 
         schedule = []
         if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-            print(f"[CSPAgent] 最適Makespan(移動込み): {solver.ObjectiveValue()}")
+            actual_makespan = solver.Value(makespan)
+            print(f"[CSPAgent] 最適Makespan(移動込み): {actual_makespan} (評価値: {solver.ObjectiveValue()})")
             
             for i in range(num_tasks):
                 t = tasks[i]
@@ -770,58 +871,72 @@ class CSPAgent:
                     'assigned_counter': t.get('assigned_counter')
                 })
             
-            schedule.sort(key=lambda x: x['start'])
-            
-            # デバッグ: 順序と移動の表示
-            print("--- 推定順序と移動時間 (詳細) ---")
-            current_node = start_node
-            visited_count = 0
-            
-            # Start node "end time" is effectively 0 for the first task calculation
-            last_end_time = 0 
-            
-            while visited_count < num_tasks:
-                found_next = False
-                for j in all_nodes:
-                    if current_node == j: continue
-                    lit = lit_map.get((current_node, j))
-                    if lit is not None and solver.Value(lit) == 1:
-                        dist = dist_matrix[(current_node, j)]
-                        
-                        # 座標情報の取得
-                        if current_node == start_node:
-                            prev_pos = agent_pos
-                            prev_end_time = 0
-                        else:
-                            prev_pos = tasks[current_node]['end_pos']
-                            prev_end_time = solver.Value(ends[current_node])
-                            
-                        if j == start_node:
-                            next_pos = agent_pos # ゴール（初期位置に戻る想定）
-                            next_start_time = solver.ObjectiveValue() # Makespan
-                        else:
-                            next_pos = tasks[j]['start_pos']
-                            next_start_time = solver.Value(starts[j])
-                        
-                        actual_gap = next_start_time - prev_end_time
-                        
-                        if j != start_node:
-                            task_name = f"{tasks[j]['verb']} {tasks[j]['obj']}"
-                            print(f" -> {task_name}")
-                            print(f"    移動: {prev_pos} -> {next_pos} (距離: {dist})")
-                            print(f"    時間: 前完了={prev_end_time} + 移動={dist} <= 次開始={next_start_time} (実ギャップ: {actual_gap})")
-                            
-                            if actual_gap < dist:
-                                print("    [WARNING] 移動時間が不足しています！制約違反の可能性があります。")
-
-                        current_node = j
-                        found_next = True
-                        visited_count += 1
-                        break
-                if not found_next:
-                    break
-            print("---------------------------------")
-            
+            if not self.sc_2agent:
+                schedule.sort(key=lambda x: x['start'])
+                # デバッグ: 順序と移動の表示
+                print("--- 推定順序と移動時間 (詳細) ---")
+                current_node = start_node
+                visited_count = 0
+                while visited_count < num_tasks:
+                    found_next = False
+                    for j in all_nodes:
+                        if current_node == j: continue
+                        lit = lit_map.get((current_node, j))
+                        if lit is not None and solver.Value(lit) == 1:
+                            if j != start_node:
+                                task_name = f"{tasks[j]['verb']} {tasks[j]['obj']}"
+                                print(f" -> {task_name}")
+                            current_node = j
+                            found_next = True
+                            visited_count += 1
+                            break
+                    if not found_next: break
+                print("---------------------------------")
+            else:
+                schedule_per_agent = {0: [], 1: []}
+                # Trace Agent 0
+                curr = start_node
+                while True:
+                    next_n = None
+                    for j in all_nodes:
+                        if curr == j: continue
+                        lit = lit_map.get((curr, j))
+                        if lit is not None and solver.Value(lit) == 1:
+                            next_n = j
+                            break
+                    if next_n is None or next_n == agent1_start_node: break
+                    if next_n < num_tasks:
+                        t = tasks[next_n]
+                        schedule_per_agent[0].append({
+                            'id': t['id'], 'start': solver.Value(starts[next_n]), 'end': solver.Value(ends[next_n]),
+                            'res': t.get('fixed_res'), 'assigned_counter': t.get('assigned_counter'),
+                            'agent_idx': 0
+                        })
+                    curr = next_n
+                # Trace Agent 1
+                curr = agent1_start_node
+                while True:
+                    next_n = None
+                    for j in all_nodes:
+                        if curr == j: continue
+                        lit = lit_map.get((curr, j))
+                        if lit is not None and solver.Value(lit) == 1:
+                            next_n = j
+                            break
+                    if next_n is None or next_n == start_node: break
+                    if next_n < num_tasks:
+                        t = tasks[next_n]
+                        schedule_per_agent[1].append({
+                            'id': t['id'], 'start': solver.Value(starts[next_n]), 'end': solver.Value(ends[next_n]),
+                            'res': t.get('fixed_res'), 'assigned_counter': t.get('assigned_counter'),
+                            'agent_idx': 1
+                        })
+                    curr = next_n
+                
+                self.schedule_per_agent = schedule_per_agent
+                schedule = schedule_per_agent[0] + schedule_per_agent[1]
+                schedule.sort(key=lambda x: x['start'])
+                
         else:
             print(f"[CSPAgent] 解が見つかりませんでした。")
             
@@ -899,13 +1014,24 @@ class CSPAgent:
     def _print_schedule(self, schedule):
         print("\n=== CSP スケジュール（フレーム単位） ===")
         total_frames = 0
-        total_weighted_unselected = 0
+        
+        # Group by agent
+        agents_sched = {}
         for item in schedule:
-            tid = item['id']; start=item['start']; end=item['end']; res=item['res']
-            verb,obj,order = tid
-            print(f"{verb} {obj} (注文{order+1}) : 開始={start}, 終了={end}, 資源={res}")
-            total_frames = max(total_frames, end)
-        print(f"総投入フレーム: {total_frames}")
+            aid = item.get('agent_idx', 0)
+            if aid not in agents_sched:
+                agents_sched[aid] = []
+            agents_sched[aid].append(item)
+            total_frames = max(total_frames, item['end'])
+            
+        for aid in sorted(agents_sched.keys()):
+            print(f"\nAI{aid}")
+            for item in agents_sched[aid]:
+                tid = item['id']; start=item['start']; end=item['end']; res=item['res']
+                verb,obj,order = tid
+                print(f"{verb} {obj} (注文{order+1}) : 開始={start}, 終了={end}, 資源={res}")
+                
+        print(f"\n総投入フレーム: {total_frames}")
         print("===================================\n")
 
     def get_assigned_counters(self):

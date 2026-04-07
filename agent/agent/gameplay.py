@@ -33,17 +33,18 @@ from copy import deepcopy as dcopy
 
 
 class GamePlay(Game):
-    def __init__(self, env, replay: Replay, agent_set: AgentSetting, debug_mode: bool = False):
+    def __init__(self, env, replay: Replay, agent_set: AgentSetting, debug_mode: bool = False, sc_2agent: bool = False):
         Game.__init__(self, env, play=True)
         self.replay = replay
         self.agent_set = agent_set
         self.debug_mode = debug_mode
+        self.sc_2agent = sc_2agent
 
         # fps of human and ai
         self.fps = 10
         self.fps_ai = agent_set.speed
 
-        self.idx_human = 1
+        self.idx_human = None if sc_2agent else 1
         self.ai = get_agent(self.agent_set, self.replay)
         self.predictor = HumanPredictor(env)
 
@@ -91,7 +92,7 @@ class GamePlay(Game):
         info = self.env.get_ai_info()
         e = EnvState(world=info['world'],
                      agents=info['sim_agents'],
-                     agent_idx=1 - idx_human,
+                     agent_idx=1 - idx_human if idx_human is not None else 0,
                      order=info['order_scheduler'],
                      event_history=info['event_history'],
                      time=info['current_time'],
@@ -103,10 +104,15 @@ class GamePlay(Game):
                 event = self._q_env.get_nowait()
                 event_type, args = event
                 if event_type == 'Action':
-                    if args['agent'] == "human":
+                    if args['agent'] == "human" and idx_human is not None:
                         action_dict[self.sim_agents[idx_human].name] = args['action']
-                    elif idx_human == 1:
+                    elif args['agent'] == "ai":
                         action_dict[self.sim_agents[0].name] = args['action']
+                    elif args['agent'] == "ai_0":
+                        action_dict[self.sim_agents[0].name] = args['action']
+                    elif args['agent'] == "ai_1":
+                        if len(self.sim_agents) > 1:
+                            action_dict[self.sim_agents[1].name] = args['action']
                 elif event_type == 'Pause':
                     paused += 1
                 elif event_type == 'Continue':
@@ -139,14 +145,18 @@ class GamePlay(Game):
                              chg_grid=info['chg_grid'])
                 
                 # Human Prediction
-                task_name, cost, all_costs = self.predictor.predict(e, self.idx_human)
-                #print(f"[Human Prediction] Task: {task_name}, Remaining Cost: {cost}")
-                if all_costs:
-                    # Sort by cost
-                    all_costs.sort(key=lambda x: x[1])
-                    # Print top 5 or all
-                    costs_str = ", ".join([f"{t}: {c}" for t, c in all_costs])
-                    #print(f"   All costs: {costs_str}")
+                if self.idx_human is not None:
+                    try:
+                        task_name, cost, all_costs = self.predictor.predict(e, self.idx_human)
+                        #print(f"[Human Prediction] Task: {task_name}, Remaining Cost: {cost}")
+                        if all_costs:
+                            # Sort by cost
+                            all_costs.sort(key=lambda x: x[1])
+                            # Print top 5 or all
+                            costs_str = ", ".join([f"{t}: {c}" for t, c in all_costs])
+                            #print(f"   All costs: {costs_str}")
+                    except Exception as e:
+                        print(f"Prediction failed: {e}")
 
                 if action_dict[self.sim_agents[0].name] is not None:
                     self._q_ai.put(('Env', {"EnvState": dcopy(e)}))
@@ -205,7 +215,12 @@ class GamePlay(Game):
 
                 if chat_ret:
                     self._q_env.put(('ChatOut', {"chat": chat_ret}))
-                self._q_env.put(('Action', {"agent": "ai", "action": move}))
+                    
+                if isinstance(move, dict):
+                    for agent_id, m in move.items():
+                        self._q_env.put(('Action', {"agent": agent_id, "action": m}))
+                else:
+                    self._q_env.put(('Action', {"agent": "ai", "action": move}))
                 human_act = False
                 env_update = False
 

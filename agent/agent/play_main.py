@@ -37,13 +37,16 @@ def parse_arguments():
         "--no_reschedule", action='store_true', help="Disable rescheduling in CSPAgent"
     )
     parser.add_argument(
+        "--sc_2agent", action='store_true', help="Enable two AI agents via CSP"
+    )
+    parser.add_argument(
         "--debug", action='store_true', help="Enable debug mode with overlay"
     )
 
     return parser.parse_args()
 
 
-def init_env_replay(map_name, agent_name, task_name=None, no_reschedule=False, debug_mode=False):
+def init_env_replay(map_name, agent_name, task_name=None, no_reschedule=False, debug_mode=False, sc_2agent=False):
     map_set = MapSetting(**MAP_SETTINGS[map_name])
     # agent_set = AgentSetting(agent_name, speed=2.5 if map_name != 'quick' else 3.5)
     agent_set = AgentSetting(agent_name, speed=10)
@@ -74,7 +77,7 @@ def init_env_replay(map_name, agent_name, task_name=None, no_reschedule=False, d
         ai._compute_all_distances(init_env_state)
         ai.extract_tasks_from_current_orders(init_env_state)
     elif agent_name == "CSP":
-        ai = CSPAgent(agent_set.speed, replay, no_reschedule=no_reschedule)
+        ai = CSPAgent(agent_set.speed, replay, no_reschedule=no_reschedule, sc_2agent=sc_2agent)
         # CSPエージェントの初期化（将来的に制約の構築などを行う）
         try:
             from agent.myagent.gui import configure_agent_settings
@@ -92,7 +95,7 @@ def init_env_replay(map_name, agent_name, task_name=None, no_reschedule=False, d
         ai = TaskAgent(agent_set.speed, replay, task_name=task_name)
     else:
         ai = get_agent(agent_set, replay)
-    game = GamePlay(env, replay, agent_set, debug_mode=debug_mode)
+    game = GamePlay(env, replay, agent_set, debug_mode=debug_mode, sc_2agent=sc_2agent)
     game.ai = ai
     replay['set_map'] = deepcopy(map_set)
     replay['set_agent'] = deepcopy(agent_set)
@@ -105,7 +108,7 @@ if __name__ == '__main__':
     arglist = parse_arguments()
 
     # initialize replay
-    game, env, replay = init_env_replay(arglist.map, arglist.agent, arglist.task, arglist.no_reschedule, arglist.debug)
+    game, env, replay = init_env_replay(arglist.map, arglist.agent, arglist.task, arglist.no_reschedule, arglist.debug, arglist.sc_2agent)
 
     try:
         # play
