@@ -48,6 +48,92 @@ class CSPAgent:
 
         print("[CSPAgent] 初期化完了 - 現在はランダム行動")
 
+    def get_remaining_tids(self, env, current_orders):
+        """現在の環境から残存タスクのID集合(tid)を抽出する（インベントリ照合）"""
+        inv_chopped = []
+        inv_pots_ings = []
+        inv_plates_ings = []
+        
+        items = []
+        for a in getattr(env, 'agents', []):
+            if hasattr(a, 'holding') and a.holding is not None:
+                items.append(a.holding)
+                
+        for pos, obj in env.pos_obj.items():
+            if obj is not None:
+                items.append(obj)
+                
+        for obj in items:
+            name = getattr(obj, 'name', '')
+            if name.startswith('Chopped'):
+                inv_chopped.append(name)
+            elif 'Pot' in name or name == 'Soup_cooked':
+                ings = getattr(obj, 'ingredient_names', [])
+                if ings:
+                    inv_pots_ings.append(set(ings))
+            elif name == 'Plate':
+                ings = getattr(obj, 'ingredient_names', [])
+                if ings:
+                    inv_plates_ings.append(set(ings))
+                    
+        remaining_tids = set()
+        
+        for order_idx, order in enumerate(current_orders):
+            order_name = order['name']
+            if ' soup' not in order_name: continue
+            
+            raw_parts = order_name.replace(' soup', '').split('-')
+            req_set = set(raw_parts)
+            
+            needs_chop = list(raw_parts)
+            needs_cook = True
+            needs_serve = True
+            
+            # 1. 皿にある完成品
+            plate_match = None
+            for p in inv_plates_ings:
+                if p == req_set:
+                    plate_match = p
+                    break
+            if plate_match:
+                inv_plates_ings.remove(plate_match)
+                needs_chop = []
+                needs_cook = False
+            else:
+                # 2. 鍋にあるか？
+                pot_match = None
+                for pot_s in inv_pots_ings:
+                    if pot_s.issubset(req_set) and len(pot_s) > 0:
+                        pot_match = pot_s
+                        break
+                if pot_match:
+                    inv_pots_ings.remove(pot_match)
+                    # 鍋にあるものはchop完了済み
+                    for ing in pot_match:
+                        if ing in needs_chop:
+                            needs_chop.remove(ing)
+            
+            # 3. chop済み確認
+            final_needs_chop = []
+            for ing in needs_chop:
+                if ing in inv_chopped:
+                    inv_chopped.remove(ing)
+                else:
+                    final_needs_chop.append(ing)
+                    
+            # tids構築
+            for ing in final_needs_chop:
+                raw_ing = ing.replace('Chopped', '').lower()
+                remaining_tids.add(('chop', raw_ing, order_idx))
+                
+            soup_name = "-".join([i.replace('Chopped', '').lower() for i in raw_parts]) + " soup"
+            if needs_cook:
+                remaining_tids.add(('cook', soup_name, order_idx))
+            if needs_serve:
+                remaining_tids.add(('serve', soup_name, order_idx))
+                
+        return remaining_tids
+
     def __call__(self, env):
         """
         環境から呼ばれるメイン関数

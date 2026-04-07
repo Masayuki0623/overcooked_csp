@@ -17,7 +17,7 @@ class TaskAgent:
         # 経路予約用（Cooperative A*）
         self.planned_path = []
         
-        print(f"[TaskAgent] タスクで初期化: {self.task_name}")
+        #print(f"[TaskAgent] タスクで初期化: {self.task_name}")
 
     def astar_path(self, env, start, goal, dynamic_obstacles=None):
         if dynamic_obstacles is None:
@@ -71,7 +71,7 @@ class TaskAgent:
         self_pos = env.self_pos
         dist = abs(self_pos[0] - target_pos[0]) + abs(self_pos[1] - target_pos[1])
         if dist == 1:
-            print(f"  [MoveTo] ターゲット {target_pos} に隣接。インタラクトします。")
+            #print(f"  [MoveTo] ターゲット {target_pos} に隣接。インタラクトします。")
             return (target_pos[0] - self_pos[0], target_pos[1] - self_pos[1])
         
         adjacents = []
@@ -81,7 +81,7 @@ class TaskAgent:
                 adjacents.append((nx, ny))
         
         if not adjacents:
-            print(f"  [MoveTo] ターゲット {target_pos} の歩行可能な隣接セルがありません (to_grid_a で確認)")
+            #print(f"  [MoveTo] ターゲット {target_pos} の歩行可能な隣接セルがありません (to_grid_a で確認)")
             return (0,0)
 
         best_path = None
@@ -96,11 +96,11 @@ class TaskAgent:
         if best_path:
             self.planned_path = best_path
             next_step = best_path[0]
-            print(f"  [MoveTo] 経路が見つかりました。次のステップ: {next_step} / 予約経路数: {len(best_path)}")
+            #print(f"  [MoveTo] 経路が見つかりました。次のステップ: {next_step} / 予約経路数: {len(best_path)}")
             return (next_step[0] - self_pos[0], next_step[1] - self_pos[1])
         
         # 目的地が塞がれている場合：到達可能な範囲内で目的地に最も近い「空きマス（一時的な目的地）」を探す
-        print(f"  [MoveTo] {target_pos} への経路がないため、可能な限り近い場所へ一時退避・接近します")
+        #print(f"  [MoveTo] {target_pos} への経路がないため、可能な限り近い場所へ一時退避・接近します")
         
         width = env.world_width
         height = env.world_height
@@ -135,7 +135,7 @@ class TaskAgent:
                 best_temp_pos = v
 
         if best_temp_pos == self_pos:
-            print(f"  [MoveTo] 現在地 {self_pos} が最も目的に近い到達可能マスです。待機します。")
+            #print(f"  [MoveTo] 現在地 {self_pos} が最も目的に近い到達可能マスです。待機します。")
             return (0, 0)
         else:
             # 経路復元
@@ -148,7 +148,7 @@ class TaskAgent:
             
             self.planned_path = temp_path
             next_step = temp_path[0]
-            print(f"  [MoveTo] 一時目的地 {best_temp_pos} への向かいます。次のステップ: {next_step}")
+            #print(f"  [MoveTo] 一時目的地 {best_temp_pos} への向かいます。次のステップ: {next_step}")
             return (next_step[0] - self_pos[0], next_step[1] - self_pos[1])
 
     def __call__(self, env, dynamic_obstacles=None):
@@ -178,7 +178,7 @@ class TaskAgent:
         if ingredients:
             ingredients.sort()
             target_food_name = "-".join([f"Cooked{i}" for i in ingredients])
-            print(f"[TaskAgent] 配膳ターゲット: {target_food_name}")
+            #print(f"[TaskAgent] 配膳ターゲット: {target_food_name}")
         
         def is_target_food(name):
             if not name: return False
@@ -203,7 +203,7 @@ class TaskAgent:
             
             if deliveries:
                 target = min(deliveries, key=lambda p: abs(p[0]-self_pos[0]) + abs(p[1]-self_pos[1]))
-                print(f"  -> {target} へ配膳中")
+                #print(f"  -> {target} へ配膳中")
                 dist = abs(self_pos[0]-target[0]) + abs(self_pos[1]-target[1])
                 if dist == 1:
                     return self.move_to(env, target, dynamic_obstacles=dynamic_obstacles), "配膳 (完了)"
@@ -222,14 +222,14 @@ class TaskAgent:
             for p_loc in pots:
                 obj = env.pos_obj[p_loc]
                 if obj and is_target_food(obj.full_name):
-                    print(f"  [探索] 鍋 {p_loc} に調理済み料理 {obj.full_name} を発見")
+                    #print(f"  [探索] 鍋 {p_loc} に調理済み料理 {obj.full_name} を発見")
                     dist = abs(self_pos[0]-p_loc[0]) + abs(self_pos[1]-p_loc[1])
                     if dist < min_dist:
                         min_dist = dist
                         target_pot = p_loc
             
             if target_pot:
-                print(f"  -> 鍋 {target_pot} から調理済み料理を取りに行きます")
+                #print(f"  -> 鍋 {target_pot} から調理済み料理を取りに行きます")
                 return self.move_to(env, target_pot, dynamic_obstacles=dynamic_obstacles), "調理済み料理の取得"
             
             return (0,0), "ターゲットの調理済み料理が入った鍋が見つかりません"
@@ -245,7 +245,7 @@ class TaskAgent:
             
             if plate_locs:
                 target = min(plate_locs, key=lambda p: abs(p[0]-self_pos[0]) + abs(p[1]-self_pos[1]))
-                print(f"  -> {target} から皿を取得しに行きます")
+                #print(f"  -> {target} から皿を取得しに行きます")
                 return self.move_to(env, target, dynamic_obstacles=dynamic_obstacles), "皿の取得"
             
             return (0,0), "皿が見つかりません"
@@ -261,7 +261,7 @@ class TaskAgent:
         if ingredients:
             ingredients.sort()
             target_name = "-".join([f"Chopped{i}" for i in ingredients])
-            print(f"[TaskAgent] 調理ターゲット: {target_name}")
+            #print(f"[TaskAgent] 調理ターゲット: {target_name}")
         
         def is_target(name):
             if not name: return False
@@ -294,7 +294,7 @@ class TaskAgent:
                         best_pot = p_loc
             
             if best_pot:
-                print(f"  -> 鍋 {best_pot} へ移動中")
+                #print(f"  -> 鍋 {best_pot} へ移動中")
                 dist = abs(self_pos[0]-best_pot[0]) + abs(self_pos[1]-best_pot[1])
                 if dist == 1:
                     return self.move_to(env, best_pot, dynamic_obstacles=dynamic_obstacles), "鍋に食材を入れる (完了)"
@@ -309,14 +309,14 @@ class TaskAgent:
         for pos, obj in env.pos_obj.items():
             if obj:
                 if is_target(obj.full_name):
-                    print(f"  [探索] ターゲット {obj.full_name} を {pos} で発見")
+                    #print(f"  [探索] ターゲット {obj.full_name} を {pos} で発見")
                     dist = abs(self_pos[0]-pos[0]) + abs(self_pos[1]-pos[1])
                     if dist < min_dist:
                         min_dist = dist
                         target_loc = pos
         
         if target_loc:
-            print(f"  -> {target_loc} からターゲットを取得しに行きます")
+            #print(f"  -> {target_loc} からターゲットを取得しに行きます")
             return self.move_to(env, target_loc, dynamic_obstacles=dynamic_obstacles), "食材の取得"
             
         return (0,0), f"ターゲット {target_name if target_name else 'merged ingredients'} が見つかりません"
@@ -353,13 +353,13 @@ class TaskAgent:
                     can_place = True
                 elif mergeable(holding, counter_obj):
                     can_place = True
-                    print(f"  [配置] 割り当てられたカウンター {assigned_counter} に {counter_obj.full_name} がありますが、マージ可能です。")
+                    #print(f"  [配置] 割り当てられたカウンター {assigned_counter} に {counter_obj.full_name} がありますが、マージ可能です。")
                 
                 if can_place:
                     target_table = assigned_counter
-                    print(f"  [配置] 割り当てられたカウンターを使用: {target_table}")
+                    #print(f"  [配置] 割り当てられたカウンターを使用: {target_table}")
                 else:
-                    print(f"  [配置] 割り当てられたカウンター {assigned_counter} は使用中/マージ不可です。近くを探します...")
+                    #print(f"  [配置] 割り当てられたカウンター {assigned_counter} は使用中/マージ不可です。近くを探します...")
                     counters = env.get_pos_by_obj_gs(gs='Counter')
                     if env.agent_idx == 1:
                         counters = list(reversed(counters))
@@ -382,7 +382,7 @@ class TaskAgent:
                     
                     if best_c:
                         target_table = best_c
-                        print(f"  [配置] 近くの有効なカウンター {target_table} を発見 (距離 {best_dist})")
+                        #print(f"  [配置] 近くの有効なカウンター {target_table} を発見 (距離 {best_dist})")
             
             if not target_table:
                 counters = env.get_pos_by_obj_gs(gs='Counter')
@@ -398,7 +398,7 @@ class TaskAgent:
                             target_table = c_pos
             
             if target_table:
-                print(f"  -> {chopped_ing_name} を {target_table} に置きます")
+                #print(f"  -> {chopped_ing_name} を {target_table} に置きます")
                 dist = abs(self_pos[0]-target_table[0]) + abs(self_pos[1]-target_table[1])
                 if dist == 1:
                     return self.move_to(env, target_table, dynamic_obstacles=dynamic_obstacles), f"{chopped_ing_name} を置く (完了)"
@@ -411,7 +411,7 @@ class TaskAgent:
         for loc in all_cutboards:
             obj = env.pos_obj[loc]
             if obj and chopped_ing_name in obj.full_name:
-                print(f"  [まな板確認] {loc} で {chopped_ing_name} を発見")
+                #print(f"  [まな板確認] {loc} で {chopped_ing_name} を発見")
                 if not holding:
                     return self.move_to(env, loc, dynamic_obstacles=dynamic_obstacles), f"{chopped_ing_name} を拾う"
 
@@ -424,7 +424,7 @@ class TaskAgent:
             obj = env.pos_obj[loc]
             if obj:
                 if target_ing_name in obj.full_name or chopping_ing_name in obj.full_name:
-                    print(f"  [まな板確認] {loc} で {obj.full_name} を発見")
+                    #print(f"  [まな板確認] {loc} で {obj.full_name} を発見")
                     return self.move_to(env, loc, dynamic_obstacles=dynamic_obstacles), f"{ing_name} を切る"
         
         # 2. If holding Fresh Ingredient -> Place on Cutboard
@@ -444,7 +444,7 @@ class TaskAgent:
                         best_cb = loc
             
             if best_cb:
-                print(f"  -> {target_ing_name} をまな板 {best_cb} に置きます")
+                #print(f"  -> {target_ing_name} をまな板 {best_cb} に置きます")
                 return self.move_to(env, best_cb, dynamic_obstacles=dynamic_obstacles), f"{target_ing_name} を置く"
             else:
                 return (0,0), "空いているまな板がありません"
@@ -471,7 +471,7 @@ class TaskAgent:
                         target_loc = d_pos
 
         if target_loc:
-            print(f"  -> {target_loc} から {target_ing_name} を取得しに行きます")
+            #print(f"  -> {target_loc} から {target_ing_name} を取得しに行きます")
             return self.move_to(env, target_loc, dynamic_obstacles=dynamic_obstacles), f"{target_ing_name} の取得"
 
         return (0,0), f"{target_ing_name} が見つかりません"
