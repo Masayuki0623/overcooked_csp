@@ -29,11 +29,6 @@ class CSPAgent:
         self.deadline_frames = 75 * self.fps
         # 30秒の選択予算
         self.budget_frames = 30 * self.fps
-        # タスク重み
-        self.w_chop = 1
-        self.w_cook = 2
-        self.w_serve = 5
-        
         # 実行状態管理
         self.current_task_idx = {0: 0, 1: 0} if self.sc_2agent else 0
         self.holding_state = None 
@@ -216,7 +211,7 @@ class CSPAgent:
             model.add_bool_var(name)
             var_names.append(name)
             durations[name] = int(t['dur'])
-            benefits[name] = int(t['weight'] * t['dur'])
+            benefits[name] = 100 if t['verb'] == 'serve' else 0
 
         model.add_linear_le(durations, self.budget_frames)
 
@@ -255,9 +250,9 @@ class CSPAgent:
         total = 0
         for t in selected_tasks:
             verb = t['verb']; obj = t['obj']; order = t['order']
-            dur = t['dur']; w = t['weight']
+            dur = t['dur']
             total += dur
-            print(f"選択: {verb} {obj} (注文{order+1}) 所要={dur}, 重み={w}")
+            print(f"選択: {verb} {obj} (注文{order+1}) 所要={dur}")
         print(f"合計投入フレーム(選択分): {total}")
         print("===================================\n")
 
@@ -365,8 +360,6 @@ class CSPAgent:
         else:
             return None
 
-    def _task_weight(self, verb):
-        return { 'chop': self.w_chop, 'cook': self.w_cook, 'serve': self.w_serve }.get(verb, 1)
 
     def _build_order_tasks(self, env):
         available_chopped = {} 
@@ -444,7 +437,7 @@ class CSPAgent:
                 tasks.append({
                     'id': ('chop', ing.lower(), order_idx),
                     'verb':'chop','obj':ing.lower(),'order':order_idx,
-                    'dur':dur,'weight':self._task_weight('chop'),
+                    'dur':dur,
                     'res_candidates': [('cutboard', r) for r in resources['cutboards']],
                     'assigned_counter': assigned_counter
                 })
@@ -454,7 +447,7 @@ class CSPAgent:
                     tasks.append({
                         'id': ('cook', soup_name, order_idx),
                         'verb':'cook','obj':soup_name,'order':order_idx,
-                        'dur':dur,'weight':self._task_weight('cook'),
+                        'dur':dur,
                         'res_candidates': [('pot', r) for r in resources['pots']],
                     })
             dur = self._task_duration_frames(env, 'serve', soup_name, order_idx)
@@ -462,7 +455,7 @@ class CSPAgent:
                 tasks.append({
                     'id': ('serve', soup_name, order_idx),
                     'verb':'serve','obj':soup_name,'order':order_idx,
-                    'dur':dur,'weight':self._task_weight('serve'),
+                    'dur':dur,
                     'res_candidates': [],
                 })
             orders.append({'order':order_idx,'ingredients':ings_lower,'tasks':tasks})
@@ -960,7 +953,7 @@ class CSPAgent:
         schedule = []
         time_cursor = 0
 
-        orders_sorted = sorted(orders, key=lambda o: sum(t['weight']*t['dur'] for t in o['tasks'] if t['verb']=='serve'), reverse=True)
+        orders_sorted = orders
 
         for o in orders_sorted:
             prev_finish = time_cursor
