@@ -32,6 +32,8 @@ class CSPAgent:
         # 実行状態管理
         self.current_task_idx = {0: 0, 1: 0} if self.sc_2agent else 0
         self.holding_state = None 
+        # 交代制のためのターン管理
+        self.turn = 0
         
         self.task_agent = TaskAgent()
         if self.sc_2agent:
@@ -173,10 +175,18 @@ class CSPAgent:
                 import copy
                 e_agent = copy.copy(env)
                 e_agent.agent_idx = agent_idx
-                
+                # 相手の現在位置を完全に「壁」とみなす
+                other_pos = env.agents[1 - agent_idx].location
+                dynamic_obstacles = {other_pos}
+
                 if task_name:
                     ta.task_name = task_name
-                    action, reason = ta(e_agent)
+                    
+                    # ユーザーの要望「同時に動かすのではなく交互に」
+                    if agent_idx == self.turn:
+                        action, reason = ta(e_agent, dynamic_obstacles=dynamic_obstacles)
+                    else:
+                        action, reason = (0, 0), "待機(相手のターン)"
                     
                     if "Done" in reason or "done" in reason or "完了" in reason:
                         print(f"[CSPAgent] AI{agent_idx} タスク {task_name} 完了。")
@@ -192,6 +202,9 @@ class CSPAgent:
                 else:
                     actions[f"ai_{agent_idx}"] = (0, 0)
                     reasons.append("アイドル")
+
+            # ターンを入れ替え（次フレームはもう一方を動かす）
+            self.turn = 1 - self.turn
                 
             return actions, " | ".join(reasons)
 
