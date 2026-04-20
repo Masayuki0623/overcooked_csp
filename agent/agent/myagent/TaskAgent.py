@@ -87,15 +87,29 @@ class TaskAgent:
         best_path = None
         min_len = float('inf')
         
+        # 1回目：動的障害物を避ける迂回ルートを探す
         for adj in adjacents:
             path = self.astar_path(env, self_pos, adj, dynamic_obstacles=dynamic_obstacles)
             if path and len(path) < min_len:
                 min_len = len(path)
                 best_path = path
-        
+
+        # 2回目：ルートが見つからなかった場合、他のエージェントをのちに移動する一時的な物体として無視して探索
+        if not best_path and dynamic_obstacles:
+            for adj in adjacents:
+                path = self.astar_path(env, self_pos, adj, dynamic_obstacles=set())
+                if path and len(path) < min_len:
+                    min_len = len(path)
+                    best_path = path
+
         if best_path:
             self.planned_path = best_path
             next_step = best_path[0]
+            
+            # もし次の一歩が他のエージェントの現在位置なら、通り過ぎるのを待機する
+            if next_step in (dynamic_obstacles or set()):
+                return (0, 0)
+            
             #print(f"  [MoveTo] 経路が見つかりました。次のステップ: {next_step} / 予約経路数: {len(best_path)}")
             return (next_step[0] - self_pos[0], next_step[1] - self_pos[1])
         
