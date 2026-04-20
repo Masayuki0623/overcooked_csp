@@ -50,9 +50,9 @@ class Game:
             (self.container_scale * np.asarray(self.holding_size)).astype(int))
         # self.font = pygame.font.SysFont('arialttf', 10)
 
-        self.small_font = pygame.font.SysFont('Times', 20)
-        self.font = pygame.font.SysFont('Times', 40)
-        self.large_font = pygame.font.SysFont('Times', 100)
+        self.small_font = pygame.font.SysFont('Times', int(self.scale * 0.35))
+        self.font = pygame.font.SysFont('Times', int(self.scale * 0.7))
+        self.large_font = pygame.font.SysFont('Times', int(self.scale * 1.5))
 
         self.__plot_elements = []
 
@@ -147,18 +147,35 @@ class Game:
 
     def draw_debug_overlay(self, debug_info):
         """Draw debug information overlay."""
-        for order_idx, loc in debug_info.items():
-            if not loc: continue
-            sl = self.scaled_location(loc)
+        if 'counters' in debug_info:
+            for order_idx, loc in debug_info['counters'].items():
+                if not loc: continue
+                sl = self.scaled_location(loc)
+                
+                # Draw red frame
+                pygame.draw.rect(self.screen, (255, 0, 0), (sl[0], sl[1], self.scale, self.scale), 3)
+                
+                # Draw text
+                text = f"Order {order_idx+1}"
+                # Render text with white background for readability
+                t = self.small_font.render(text, True, (255, 0, 0), (255, 255, 255))
+                self.screen.blit(t, (sl[0], sl[1] - 20))
+                
+        if 'tasks' in debug_info:
+            # 画面下部の中央付近（ScoreやTimeに被らない位置）にタスクを表示
+            start_x = (self.world.width / 2.0 - 1.0) * self.tile_size[0]
+            start_y = (self.world.height + 0.2) * self.tile_size[1]
             
-            # Draw red frame
-            pygame.draw.rect(self.screen, (255, 0, 0), (sl[0], sl[1], self.scale, self.scale), 3)
-            
-            # Draw text
-            text = f"Order {order_idx+1}"
-            # Render text with white background for readability
-            t = self.small_font.render(text, True, (255, 0, 0), (255, 255, 255))
-            self.screen.blit(t, (sl[0], sl[1] - 20))
+            y_offset = 0
+            for agent_name, task_name in debug_info['tasks'].items():
+                if not task_name: task_name = "Idle"
+                formatted_task = task_name.replace('_', ' ').capitalize()
+                text = f"{agent_name}: {formatted_task}"
+                
+                # テキストの描画
+                t = self.small_font.render(text, True, (10, 10, 10), (255, 255, 255))
+                self.screen.blit(t, (start_x, start_y + y_offset))
+                y_offset += int(self.scale * 0.45) # フォントサイズに合わせた行間
 
     def draw_gridsquare(self, gs):
         sl = self.scaled_location(gs.location)

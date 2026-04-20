@@ -122,7 +122,8 @@ class GamePlay(Game):
                         args['chat']
                     chat_out = ""
                 elif event_type == 'ChatOut':
-                    chat_out = "AI Output:\n\n" + args['chat']
+                    # chat_out = "AI Output:\n\n" + args['chat']
+                    chat_out = ""  # AI Outputの画面表示を無効化
 
             if not paused:
                 ad = {k: v if v is not None else (
@@ -168,9 +169,19 @@ class GamePlay(Game):
 
             chat = chat_in + '\n\n' + chat_out
 
-            debug_info = None
-            if self.debug_mode and hasattr(self.ai, 'get_assigned_counters'):
-                debug_info = self.ai.get_assigned_counters()
+            debug_info = {}
+            if self.debug_mode:
+                if hasattr(self.ai, 'get_assigned_counters'):
+                    debug_info['counters'] = self.ai.get_assigned_counters()
+                if self.sc_2agent and hasattr(self.ai, 'task_agents'):
+                    debug_info['tasks'] = {
+                        "AI0": self.ai.task_agents[0].task_name if hasattr(self.ai.task_agents[0], 'task_name') and self.ai.task_agents[0].task_name else "Idle",
+                        "AI1": self.ai.task_agents[1].task_name if hasattr(self.ai.task_agents[1], 'task_name') and self.ai.task_agents[1].task_name else "Idle"
+                    }
+                elif hasattr(self.ai, 'task_agent'):
+                    debug_info['tasks'] = {
+                        "AI": self.ai.task_agent.task_name if hasattr(self.ai.task_agent, 'task_name') and self.ai.task_agent.task_name else "Idle"
+                    }
 
             if not paused:
                 self.replay.log('on_render', {'paused': paused, 'chat': chat})
