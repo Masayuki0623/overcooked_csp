@@ -34,6 +34,7 @@ class CSPAgent:
         self.holding_state = None 
         # 交代制のためのターン管理
         self.turn = 0
+        self.completed_task_ids = set() # 追加：完了したタスクのID集合（同期用）
         
         self.task_agent = TaskAgent()
         if self.sc_2agent:
@@ -215,6 +216,7 @@ class CSPAgent:
                 # Check completion
                 if "Done" in reason or "done" in reason or "完了" in reason:
                     print(f"[CSPAgent] タスク {task_name} 完了。次へ移動。")
+                    self.completed_task_ids.add(tid)
                     self.current_task_idx += 1
                     # Reset assignments
                     self.task_agent.assigned_cutboard = None
@@ -243,6 +245,26 @@ class CSPAgent:
                 task = sc[t_idx]
                 tid = task['id']
                 verb, obj, order_idx = tid
+                
+                # --- 先行する依存タスクが終わっているか（フライング実行エラーの防止） ---
+                can_start = True
+                if verb == 'cook':
+                    parts = obj.replace(' soup', '').split('-')
+                    for p in parts:
+                        req_tid = ('chop', p.strip(), order_idx)
+                        if req_tid not in self.completed_task_ids:
+                            can_start = False
+                            break
+                elif verb == 'serve':
+                    req_tid = ('cook', obj, order_idx)
+                    if req_tid not in self.completed_task_ids:
+                        can_start = False
+                        
+                if not can_start:
+                    actions[f"ai_{agent_idx}"] = (0, 0)
+                    reasons.append(f"AI{agent_idx}:WaitingForDependencies")
+                    continue
+                # -------------------------------------------------------------
                 
                 ta = self.task_agents[agent_idx]
                 task_name = None
@@ -276,6 +298,7 @@ class CSPAgent:
                     
                     if "Done" in reason or "done" in reason or "完了" in reason:
                         print(f"[CSPAgent] AI{agent_idx} タスク {task_name} 完了。")
+                        self.completed_task_ids.add(tid)
                         self.current_task_idx[agent_idx] += 1
                         ta.assigned_cutboard = None
                         ta.assigned_pot = None
@@ -936,10 +959,11 @@ class CSPAgent:
             model.Add(makespan == 0)
             
         # 複数エージェントの場合、Makespanだけだと「余裕のある(Slack)」タスクが遅延して
-        # まるでシーケンシャルに動いているように見えるため、全タスクの開始時間もペナルティとして最小化する
-        start_sum = sum(starts[i] for i in range(num_tasks))
-        weight_makespan = num_tasks * 100 # Makespanを最優先
-        model.Minimize(makespan * weight_makespan + start_sum)
+        # まるでシーケンシャルに動いているように見えるため、全タスクの終了時間もペナルティとして最小化する
+        # これにより、全体のMakespanを保ちつつ、各タスクを極限まで前倒し（左詰め）するスケジュールになる
+        end_sum = sum(task_ends) if task_ends else 0
+        weight_makespan = num_tasks * 1000 # Makespanを絶対最優先
+        model.Minimize(makespan * weight_makespan + end_sum)
 
         solver = cp_model.CpSolver()
         status = solver.Solve(model)

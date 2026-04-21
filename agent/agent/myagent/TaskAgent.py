@@ -16,6 +16,7 @@ class TaskAgent:
         
         # 経路予約用（Cooperative A*）
         self.planned_path = []
+        self.wait_count = 0  # 待機カウンターを追加
         
         #print(f"[TaskAgent] タスクで初期化: {self.task_name}")
 
@@ -65,12 +66,67 @@ class TaskAgent:
                     f_score[neighbor] = tentative_g + heuristic(neighbor, goal)
                     heapq.heappush(open_set, (f_score[neighbor], neighbor))
         return None
+        
+    def astar_path_cost(self, env, start, goal, dynamic_obstacles=None):
+        if dynamic_obstacles is None:
+            dynamic_obstacles = set()
+            
+        width = env.world_width
+        height = env.world_height
+        grid = env.to_grid_a
+
+        def in_bounds(x, y):
+            return 0 <= x < width and 0 <= y < height
+
+        def walkable(x, y):
+            # 床であれば歩けるが、後で障害物コストを付与する
+            return in_bounds(x, y) and grid[x][y] == 1 
+
+        def heuristic(a, b):
+            return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+        open_set = []
+        heapq.heappush(open_set, (0, start))
+        came_from = {}
+        g_score = {start: 0}
+        f_score = {start: heuristic(start, goal)}
+
+        while open_set:
+            _, current = heapq.heappop(open_set)
+            if current == goal:
+                path = []
+                while current in came_from:
+                    path.append(current)
+                    current = came_from[current]
+                path.reverse()
+                return path, g_score[goal]
+
+            cx, cy = current
+            for dx, dy in [(0,1),(0,-1),(1,0),(-1,0)]:
+                nx, ny = cx+dx, cy+dy
+                if not walkable(nx, ny):
+                    continue
+                neighbor = (nx, ny)
+                
+                # 通常のコストは1、他のエージェントが居る場合はペナルティを与える（迂回を優先させる）
+                step_cost = 1
+                if neighbor in dynamic_obstacles:
+                    step_cost = 20  # ここを通るなら20マス遠回りしてでも避けるプランを採用する
+
+                tentative_g = g_score[current] + step_cost
+                if neighbor not in g_score or tentative_g < g_score[neighbor]:
+                    came_from[neighbor] = current
+                    g_score[neighbor] = tentative_g
+                    f_score[neighbor] = tentative_g + heuristic(neighbor, goal)
+                    heapq.heappush(open_set, (f_score[neighbor], neighbor))
+        return None, float('inf')
 
     def move_to(self, env, target_pos, dynamic_obstacles=None):
         self.planned_path = [] # リセット
         self_pos = env.self_pos
         dist = abs(self_pos[0] - target_pos[0]) + abs(self_pos[1] - target_pos[1])
         if dist == 1:
+            self.wait_count = 0
             #print(f"  [MoveTo] ターゲット {target_pos} に隣接。インタラクトします。")
             return (target_pos[0] - self_pos[0], target_pos[1] - self_pos[1])
         
@@ -85,33 +141,44 @@ class TaskAgent:
             return (0,0)
 
         best_path = None
-        min_len = float('inf')
+        min_cost = float('inf')
         
-        # 1回目：動的障害物を避ける迂回ルートを探す
+        # ターゲットの隣接マスのうち、コスト(距離＋障害物ペナルティ)が最小のルート(プラン)を採用する
         for adj in adjacents:
-            path = self.astar_path(env, self_pos, adj, dynamic_obstacles=dynamic_obstacles)
-            if path and len(path) < min_len:
-                min_len = len(path)
+            path, cost = self.astar_path_cost(env, self_pos, adj, dynamic_obstacles=dynamic_obstacles)
+            if path and cost < min_cost:
+                min_cost = cost
                 best_path = path
 
-        # 2回目：ルートが見つからなかった場合、他のエージェントをのちに移動する一時的な物体として無視して探索
-        if not best_path and dynamic_obstacles:
-            for adj in adjacents:
-                path = self.astar_path(env, self_pos, adj, dynamic_obstacles=set())
-                if path and len(path) < min_len:
-                    min_len = len(path)
-                    best_path = path
+        if not best_path:
+            return (0, 0)
 
-        if best_path:
-            self.planned_path = best_path
-            next_step = best_path[0]
+        self.planned_path = best_path
+        next_step = best_path[0]
+        
+        # もし次の一歩が他のエージェントの現在位置なら、通り過ぎるのを待機する
+        if next_step in (dynamic_obstacles or set()):
+            self.wait_count += 1
+            print(f"[{env.agent_idx}:{self.task_name}] 最短距離上の障害物を避ける迂回ルートがない(またはコスト高すぎる)と判断し待機 (wait={self.wait_count}, cost={min_cost})")
             
-            # もし次の一歩が他のエージェントの現在位置なら、通り過ぎるのを待機する
-            if next_step in (dynamic_obstacles or set()):
-                return (0, 0)
-            
-            #print(f"  [MoveTo] 経路が見つかりました。次のステップ: {next_step} / 予約経路数: {len(best_path)}")
-            return (next_step[0] - self_pos[0], next_step[1] - self_pos[1])
+            # デッドロック（お互いにお見合いで同じ場所で立ち往生する）防止策
+            if self.wait_count > 15:
+                import random
+                escapes = []
+                for dx, dy in [(0,1), (0,-1), (1,0), (-1,0)]:
+                    nx, ny = self_pos[0]+dx, self_pos[1]+dy
+                    if 0 <= nx < env.world_width and 0 <= ny < env.world_height and env.to_grid_a[nx][ny] == 1:
+                        if (nx, ny) not in (dynamic_obstacles or set()):
+                            escapes.append((dx, dy))
+                if escapes:
+                    self.wait_count = 0
+                    print(f"[{env.agent_idx}:{self.task_name}] お見合いが長すぎたため退避します！")
+                    return random.choice(escapes)
+
+            return (0, 0)
+        
+        self.wait_count = 0
+        return (next_step[0] - self_pos[0], next_step[1] - self_pos[1])
         
         # 目的地が塞がれている場合：到達可能な範囲内で目的地に最も近い「空きマス（一時的な目的地）」を探す
         #print(f"  [MoveTo] {target_pos} への経路がないため、可能な限り近い場所へ一時退避・接近します")
