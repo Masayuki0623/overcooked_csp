@@ -12,6 +12,10 @@ import pygame
 import threading
 import queue
 import time
+import logging
+import sys
+import os
+from datetime import datetime
 
 from copy import deepcopy as dcopy
 
@@ -32,6 +36,21 @@ from copy import deepcopy as dcopy
 #     threading.Thread(target=_speak, args=(text,)).start()
 
 
+class _TeeWriter:
+    """標準出力とファイルの両方に書き出すラッパー"""
+    def __init__(self, stdout, logfile):
+        self.stdout = stdout
+        self.logfile = logfile
+
+    def write(self, text):
+        self.stdout.write(text)
+        self.logfile.write(text)
+
+    def flush(self):
+        self.stdout.flush()
+        self.logfile.flush()
+
+
 class GamePlay(Game):
     def __init__(self, env, replay: Replay, agent_set: AgentSetting, debug_mode: bool = False, sc_2agent: bool = False):
         Game.__init__(self, env, play=True)
@@ -39,6 +58,20 @@ class GamePlay(Game):
         self.agent_set = agent_set
         self.debug_mode = debug_mode
         self.sc_2agent = sc_2agent
+
+        # デバッグモード時はログをファイルに出力
+        if debug_mode:
+            log_dir = os.path.join(os.path.dirname(__file__), 'logs')
+            os.makedirs(log_dir, exist_ok=True)
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            log_path = os.path.join(log_dir, f'debug_{timestamp}.log')
+            # 標準出力をファイルとターミナル両方に出力する
+            self._log_file = open(log_path, 'w', encoding='utf-8', buffering=1)
+            self._original_stdout = sys.stdout
+            sys.stdout = _TeeWriter(sys.stdout, self._log_file)
+            print(f'=== Debug log: {log_path} ===')
+        else:
+            self._log_file = None
 
         # fps of human and ai
         self.fps = 10
@@ -314,5 +347,10 @@ class GamePlay(Game):
         )
         if hasattr(self.ai, "_lock"):
             self.ai._lock.release()
+
+        # ログファイルを閉じる
+        if self._log_file:
+            sys.stdout = self._original_stdout
+            self._log_file.close()
 
         return self._success

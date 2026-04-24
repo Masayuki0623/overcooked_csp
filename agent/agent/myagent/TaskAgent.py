@@ -232,7 +232,78 @@ class TaskAgent:
             #print(f"  [MoveTo] 一時目的地 {best_temp_pos} への向かいます。次のステップ: {next_step}")
             return (next_step[0] - self_pos[0], next_step[1] - self_pos[1])
 
+    def move_to_safe_position(self, env, blocking_task, own_next_task=None, dynamic_obstacles=None):
+        """
+        依存待ち状態のときに他エージェントのじゃまにならない場所へ移動する。
+
+        Args:
+            blocking_task  : 他エージェントが現在実行中のタスク辞書
+                             {'res': ('cutboard'/(pot, (x,y)), ...}
+                             このリソースの隣接マスが「立ち入り禁止エリア」になる
+            own_next_task  : このエージェントが次に実行するタスク辞書
+                             できるだけこのリソースに近くで待機する
+            dynamic_obstacles: 他エージェントの現在位置セット
+        Returns:
+            action (dx, dy)
+        """
+        if dynamic_obstacles is None:
+            dynamic_obstacles = set()
+
+        width  = env.world_width
+        height = env.world_height
+        grid   = env.to_grid_a
+        self_pos = env.self_pos
+
+        # ① 他エージェントが使用中のリソース位置とその隣接マスを「禁止エリア」にする
+        prohibited = set()
+        if blocking_task and blocking_task.get('res'):
+            res_pos = blocking_task['res'][1]  # ('cutboard'/'pot', (x,y)) の座標部分
+            prohibited.add(res_pos)
+            for dx, dy in [(0,1),(0,-1),(1,0),(-1,0)]:
+                prohibited.add((res_pos[0]+dx, res_pos[1]+dy))
+
+        # ② 全 walkable タイルから安全な候補を列挙
+        candidates = []
+        for x in range(width):
+            for y in range(height):
+                pos = (x, y)
+                if grid[x][y] != 1:   # 壁・設備は除外
+                    continue
+                if pos in prohibited:  # 禁止エリアは除外
+                    continue
+                if pos in dynamic_obstacles:  # 他エージェントがいる場所も除外
+                    continue
+                candidates.append(pos)
+
+        if not candidates:
+            # 候補がない場合はその場で待機
+            return (0, 0)
+
+        # ③ 自分の次タスクのリソース位置に最も近い候補を選ぶ
+        #    (次タスクの開始をできるだけ早くするため、なるべく近くで待機)
+
+        # ③-a 既に安全な場所にいれば動かない（Bug 7: 振動防止）
+        #      self_pos が候補リストに含まれる = 現在地は既に安全
+        if self_pos in candidates:
+            return (0, 0)
+
+        ref_pos = None
+        if own_next_task and own_next_task.get('res'):
+            ref_pos = own_next_task['res'][1]
+
+        if ref_pos:
+            # A*距離ではなくマンハッタン距離で近さを評価（計算コスト節約）
+            target = min(candidates, key=lambda p: abs(p[0]-ref_pos[0]) + abs(p[1]-ref_pos[1]))
+        else:
+            # 次タスクが不明なら現在地に最も近い候補（なるべく動かない）
+            target = min(candidates, key=lambda p: abs(p[0]-self_pos[0]) + abs(p[1]-self_pos[1]))
+
+        print(f"  [SafeWait] {self_pos} → {target} (避けているリソース={blocking_task.get('res') if blocking_task else None})")
+        return self.move_to(env, target, dynamic_obstacles=dynamic_obstacles)
+
+
     def __call__(self, env, dynamic_obstacles=None):
+
         if self.task_name.startswith('chop_'):
             ing_name = self.task_name.split('_')[1].capitalize()
             return self.process_chop_task(env, ing_name, assigned_cutboard=self.assigned_cutboard, assigned_counter=self.assigned_counter, dynamic_obstacles=dynamic_obstacles)
@@ -241,7 +312,7 @@ class TaskAgent:
             ingredients = []
             if len(parts) > 1:
                 ingredients = [p.capitalize() for p in parts[1:]]
-            return self.process_cook_task(env, ingredients, assigned_pot=self.assigned_pot, dynamic_obstacles=dynamic_obstacles)
+            return self.process_cook_task(env, ingredients, assigned_pot=self.assigned_pot, assigned_counter=self.assigned_counter, dynamic_obstacles=dynamic_obstacles)
         elif self.task_name.startswith('serve'):
             parts = self.task_name.split('_')
             ingredients = []
@@ -333,74 +404,166 @@ class TaskAgent:
             
         return (0,0), f"{holding_name} を持っていますが、配膳タスクで何をすべきかわかりません"
 
-    def process_cook_task(self, env, ingredients=None, assigned_pot=None, dynamic_obstacles=None):
+    def process_cook_task(self, env, ingredients=None, assigned_pot=None, assigned_counter=None, dynamic_obstacles=None):
         self_pos = env.self_pos
         holding = env.hold
         holding_name = holding.full_name if holding else None
         
-        target_name = None
-        if ingredients:
-            ingredients.sort()
-            target_name = "-".join([f"Chopped{i}" for i in ingredients])
-            #print(f"[TaskAgent] 調理ターゲット: {target_name}")
+        if not ingredients:
+            return (0, 0), "調理する食材が指定されていません"
+            
+        target_ing_names = sorted([f"Chopped{i}" for i in ingredients])
         
-        def is_target(name):
-            if not name: return False
-            if target_name:
-                return name == target_name
-            return 'Chopped' in name and '-' in name
-
-        # 1. If holding target -> Go to Pot
-        if is_target(holding_name):
-            if assigned_pot:
-                pots = [assigned_pot]
+        pots = [assigned_pot] if assigned_pot else env.get_pos_by_obj_gs(gs='Pot')
+        if env.agent_idx == 1:
+            pots = list(reversed(pots))
+            
+        target_pot_loc = None
+        missing_ings = target_ing_names.copy()
+        
+        # 1. 鍋の特定と不足食材(missing_ings)の算出
+        for p_loc in pots:
+            obj = env.pos_obj.get(p_loc)
+            if obj is None:
+                if target_pot_loc is None:
+                    target_pot_loc = p_loc
             else:
-                pots = env.get_pos_by_obj_gs(gs='Pot')
-            
-            best_pot = None
-            min_dist = float('inf')
-            
-            check_pots = pots
-            if env.agent_idx == 1:
-                check_pots = list(reversed(pots))
-
-            for p_loc in check_pots:
-                pot_obj = env.pos_obj[p_loc]
+                obj_name = getattr(obj, 'full_name', '')
+                parts = obj_name.replace('Cooking', 'Chopped').replace('Cooked', 'Chopped').replace('Charred', 'Chopped').split('-')
+                is_subset = True
+                curr_ings = []
+                for p in parts:
+                    if p not in target_ing_names:
+                        is_subset = False
+                        break
+                    curr_ings.append(p)
                 
-                if pot_obj is None:
-                    # Empty pot
-                    dist = abs(self_pos[0]-p_loc[0]) + abs(self_pos[1]-p_loc[1])
-                    if dist < min_dist:
-                        min_dist = dist
-                        best_pot = p_loc
+                if is_subset:
+                    target_pot_loc = p_loc
+                    missing_ings = target_ing_names.copy()
+                    for p in curr_ings:
+                        if p in missing_ings:
+                            missing_ings.remove(p)
+                    break
+                    
+        if not target_pot_loc:
+            return (0, 0), "利用可能な鍋がありません"
             
-            if best_pot:
-                #print(f"  -> 鍋 {best_pot} へ移動中")
-                dist = abs(self_pos[0]-best_pot[0]) + abs(self_pos[1]-best_pot[1])
-                if dist == 1:
-                    return self.move_to(env, best_pot, dynamic_obstacles=dynamic_obstacles), "鍋に食材を入れる (完了)"
-                return self.move_to(env, best_pot, dynamic_obstacles=dynamic_obstacles), "鍋に食材を入れる"
+        if not missing_ings:
+            return (0, 0), "調理完了 (Done)"
+            
+        # 2. 手持ちアイテムの解析
+        held_ings = []
+        if holding_name:
+            holding_parts = holding_name.replace('Cooking', 'Chopped').replace('Cooked', 'Chopped').replace('Charred', 'Chopped').split('-')
+            for p in holding_parts:
+                if p in missing_ings:
+                    held_ings.append(p)
+                    
+        if holding_name and len(held_ings) < len(holding_parts):
+            # 不要なものを持っている場合は捨てる
+            return self.drop_unwanted_item(env, holding, reason=f"不要なもの({holding_name})を持っています", dynamic_obstacles=dynamic_obstacles)
+            
+        # 3. 必要な全てを持っていれば鍋へ
+        if set(held_ings) == set(missing_ings):
+            return self.move_to(env, target_pot_loc, dynamic_obstacles=dynamic_obstacles), "完成した食材を鍋に入れる"
+            
+        # 4. 手に一部の食材だけを持っている -> 他の未調理食材の場所に行き、それを置いてマージする！
+        if holding_name:
+            remaining_ings = list(set(missing_ings) - set(held_ings))
+            target_merge_loc = None
+            
+            # 常にCSPで指定された特定のカウンター(assigned_counter) をマージ先とする
+            if assigned_counter:
+                c_obj = env.pos_obj.get(assigned_counter)
+                if c_obj is None or mergeable(holding, c_obj):
+                    target_merge_loc = assigned_counter
+                    
+            if target_merge_loc:
+                action = self.move_to(env, target_merge_loc, dynamic_obstacles=dynamic_obstacles)
+                return action, "指定テーブルにて食材をマージさせるために置く"
+            elif assigned_counter:
+                # 指定テーブルが使えない（他注文の食材が乗っている等）場合は待機
+                c_obj = env.pos_obj.get(assigned_counter)
+                c_content = c_obj.full_name if c_obj else 'None'
+                print(f"[DEBUG] cook: assigned_counter={assigned_counter} がブロック: content='{c_content}' holding='{holding_name}'")
+                return (0, 0), "指定テーブルが使用中のため待機中"
             else:
-                return (0,0), "空の鍋が見つかりません"
-
-        # 2. Find target in environment
-        target_loc = None
-        min_dist = float('inf')
+                # フォールバック: 指定テーブルがない場合は今まで通り一番近くに探す
+                min_dist = float('inf')
+                for pos, obj in env.pos_obj.items():
+                    if obj:
+                        obj_name = getattr(obj, 'full_name', '')
+                        parts = obj_name.replace('Cooking', 'Chopped').replace('Cooked', 'Chopped').replace('Charred', 'Chopped').split('-')
+                        
+                        is_valid_target = False
+                        has_unwanted = False
+                        for p in parts:
+                            if p in remaining_ings:
+                                is_valid_target = True
+                            if p not in missing_ings or p in held_ings:
+                                has_unwanted = True
+                                
+                        if is_valid_target and not has_unwanted:
+                            dist = abs(self_pos[0] - pos[0]) + abs(self_pos[1] - pos[1])
+                            if dist < min_dist:
+                                min_dist = dist
+                                target_merge_loc = pos
+                                
+                if target_merge_loc:
+                    return self.move_to(env, target_merge_loc, dynamic_obstacles=dynamic_obstacles), "離れた食材とマージさせるために置く"
+                else:
+                    return self.move_to(env, target_pot_loc, dynamic_obstacles=dynamic_obstacles), "マージ対象がないため今の分を鍋に入れる"
+                
+        # 5. 手が空の場合 -> 足りない食材のいずれかを探すが、すでにマージが進んでいるものを優先する
+        target_ing_loc = None
+        best_score = -float('inf')
         
         for pos, obj in env.pos_obj.items():
             if obj:
-                if is_target(obj.full_name):
-                    #print(f"  [探索] ターゲット {obj.full_name} を {pos} で発見")
-                    dist = abs(self_pos[0]-pos[0]) + abs(self_pos[1]-pos[1])
-                    if dist < min_dist:
-                        min_dist = dist
-                        target_loc = pos
-        
-        if target_loc:
-            #print(f"  -> {target_loc} からターゲットを取得しに行きます")
-            return self.move_to(env, target_loc, dynamic_obstacles=dynamic_obstacles), "食材の取得"
+                obj_name = getattr(obj, 'full_name', '')
+                parts = obj_name.replace('Cooking', 'Chopped').replace('Cooked', 'Chopped').replace('Charred', 'Chopped').split('-')
+                
+                valid_count = 0
+                has_unwanted = False
+                for p in parts:
+                    if p in missing_ings:
+                        valid_count += 1
+                    else:
+                        has_unwanted = True
+                        
+                if valid_count > 0 and not has_unwanted:
+                    dist = abs(self_pos[0] - pos[0]) + abs(self_pos[1] - pos[1])
+                    score = (valid_count * 100) - dist
+                    if score > best_score:
+                        best_score = score
+                        target_ing_loc = pos
+                        
+        if target_ing_loc:
+            return self.move_to(env, target_ing_loc, dynamic_obstacles=dynamic_obstacles), "食材の取得"
             
-        return (0,0), f"ターゲット {target_name if target_name else 'merged ingredients'} が見つかりません"
+        print(f"[DEBUG] cook: 必要食材が見つからない missing={missing_ings} counter={assigned_counter}")
+        print(f"[DEBUG]   カウンター上: { {p: env.pos_obj[p].full_name for p in env.get_pos_by_obj_gs('Counter') if env.pos_obj.get(p)} }")
+        return (0, 0), "必要な食材 (Chopped) を待機中"
+
+    def drop_unwanted_item(self, env, holding, reason="", dynamic_obstacles=None):
+        '''手に持っている不要なアイテムを最寄りの空きカウンターに置く'''
+        counters = env.get_pos_by_obj_gs(gs='Counter')
+        best_dist = float('inf')
+        best_c = None
+        
+        for c_pos in counters:
+            if env.pos_obj.get(c_pos) is None:  # 空いているカウンター
+                dist = abs(env.self_pos[0] - c_pos[0]) + abs(env.self_pos[1] - c_pos[1])
+                if dist < best_dist:
+                    best_dist = dist
+                    best_c = c_pos
+                    
+        if best_c:
+            return self.move_to(env, best_c, dynamic_obstacles=dynamic_obstacles), f"不要アイテム放棄: {reason}"
+            
+        # 全てのカウンターが塞がっている場合はとりあえず待機
+        return (0, 0), "空きカウンターがありません"
 
     def process_chop_task(self, env, ing_name, assigned_cutboard=None, assigned_counter=None, dynamic_obstacles=None):
         self_pos = env.self_pos
@@ -428,51 +591,21 @@ class TaskAgent:
             
             if assigned_counter:
                 counter_obj = env.pos_obj.get(assigned_counter)
-                can_place = False
-                
-                if counter_obj is None:
-                    can_place = True
-                elif mergeable(holding, counter_obj):
-                    can_place = True
-                    #print(f"  [配置] 割り当てられたカウンター {assigned_counter} に {counter_obj.full_name} がありますが、マージ可能です。")
-                
-                if can_place:
+                if counter_obj is None or mergeable(holding, counter_obj):
                     target_table = assigned_counter
-                    #print(f"  [配置] 割り当てられたカウンターを使用: {target_table}")
                 else:
-                    #print(f"  [配置] 割り当てられたカウンター {assigned_counter} は使用中/マージ不可です。近くを探します...")
-                    counters = env.get_pos_by_obj_gs(gs='Counter')
-                    if env.agent_idx == 1:
-                        counters = list(reversed(counters))
-
-                    best_dist = float('inf')
-                    best_c = None
-                    for c_pos in counters:
-                        c_obj = env.pos_obj.get(c_pos)
-                        is_valid = False
-                        if c_obj is None:
-                            is_valid = True
-                        elif mergeable(holding, c_obj):
-                            is_valid = True
-                        
-                        if is_valid:
-                            dist = abs(assigned_counter[0]-c_pos[0]) + abs(assigned_counter[1]-c_pos[1])
-                            if dist < best_dist:
-                                best_dist = dist
-                                best_c = c_pos
-                    
-                    if best_c:
-                        target_table = best_c
-                        #print(f"  [配置] 近くの有効なカウンター {target_table} を発見 (距離 {best_dist})")
+                    # 指定テーブルが塞がっている → 何が乗っているか表示
+                    print(f"[DEBUG] chop: assigned_counter={assigned_counter} がブロック: content='{counter_obj.full_name}' holding='{holding_name}'")
+                    return (0, 0), "指定テーブルが使用中(マージ不可)のため待機"
             
-            if not target_table:
+            if not target_table and not assigned_counter:
                 counters = env.get_pos_by_obj_gs(gs='Counter')
                 if env.agent_idx == 1:
                     counters = list(reversed(counters))
 
                 best_dist = float('inf')
                 for c_pos in counters:
-                    if env.pos_obj[c_pos] is None:
+                    if env.pos_obj.get(c_pos) is None:
                         dist = abs(self_pos[0]-c_pos[0]) + abs(self_pos[1]-c_pos[1])
                         if dist < best_dist:
                             best_dist = dist
