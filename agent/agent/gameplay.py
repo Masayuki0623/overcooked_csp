@@ -51,13 +51,42 @@ class _TeeWriter:
         self.logfile.flush()
 
 
+class _SelectiveWriter:
+    """特定プレフィックスの行だけを通すラッパー"""
+    def __init__(self, stream, allowed_prefixes):
+        self.stream = stream
+        self.allowed_prefixes = allowed_prefixes
+        self._buffer = ""
+
+    def _should_emit(self, line):
+        stripped = line.lstrip()
+        return any(stripped.startswith(prefix) for prefix in self.allowed_prefixes)
+
+    def write(self, text):
+        self._buffer += text
+        while "\n" in self._buffer:
+            line, self._buffer = self._buffer.split("\n", 1)
+            if self._should_emit(line):
+                self.stream.write(line + "\n")
+
+    def flush(self):
+        if self._buffer:
+            if self._should_emit(self._buffer):
+                self.stream.write(self._buffer)
+            self._buffer = ""
+        self.stream.flush()
+
+
 class GamePlay(Game):
-    def __init__(self, env, replay: Replay, agent_set: AgentSetting, debug_mode: bool = False, sc_2agent: bool = False):
+    def __init__(self, env, replay: Replay, agent_set: AgentSetting, debug_mode: bool = False, human_agent_idx: int | None = 1, ai_agent_idx: int | None = 0, sc_2agent: bool = False, skill_emi: bool = False):
         Game.__init__(self, env, play=True)
         self.replay = replay
         self.agent_set = agent_set
         self.debug_mode = debug_mode
+        self.human_agent_idx = human_agent_idx
+        self.ai_agent_idx = ai_agent_idx
         self.sc_2agent = sc_2agent
+        self.skill_emi = skill_emi
 
         # デバッグモード時はログをファイルに出力
         if debug_mode:
@@ -73,11 +102,16 @@ class GamePlay(Game):
         else:
             self._log_file = None
 
+        if skill_emi:
+            sys.stdout = _SelectiveWriter(sys.stdout, ("[SkillEstimator]",))
+            sys.stderr = _SelectiveWriter(sys.stderr, ("[SkillEstimator]",))
+
         # fps of human and ai
         self.fps = 10
         self.fps_ai = agent_set.speed
 
-        self.idx_human = None if sc_2agent else 1
+        # human_agent_idx は None の場合もある（両方AIの旧モードなど）
+        self.idx_human = human_agent_idx
         self.ai = get_agent(self.agent_set, self.replay)
         self.predictor = HumanPredictor(env)
 
@@ -96,7 +130,8 @@ class GamePlay(Game):
                 # Control
                 action_dict = {agent.name: (0, 0) for agent in self.sim_agents}
                 action = KeyToTuple[event.key]
-                action_dict[self.current_agent.name] = action
+                if self.idx_human is not None and self.idx_human < len(self.sim_agents):
+                    action_dict[self.sim_agents[self.idx_human].name] = action
                 self._q_env.put(
                     ('Action', {"agent": "human", "action": action}))
                 self._q_ai.put(
@@ -125,7 +160,7 @@ class GamePlay(Game):
         info = self.env.get_ai_info()
         e = EnvState(world=info['world'],
                      agents=info['sim_agents'],
-                     agent_idx=1 - idx_human if idx_human is not None else 0,
+                     agent_idx=self.ai_agent_idx if self.ai_agent_idx is not None else 0,
                      order=info['order_scheduler'],
                      event_history=info['event_history'],
                      time=info['current_time'],
@@ -139,8 +174,8 @@ class GamePlay(Game):
                 if event_type == 'Action':
                     if args['agent'] == "human" and idx_human is not None:
                         action_dict[self.sim_agents[idx_human].name] = args['action']
-                    elif args['agent'] == "ai":
-                        action_dict[self.sim_agents[0].name] = args['action']
+                    elif args['agent'] == "ai" and self.ai_agent_idx is not None:
+                        action_dict[self.sim_agents[self.ai_agent_idx].name] = args['action']
                     elif args['agent'] == "ai_0":
                         action_dict[self.sim_agents[0].name] = args['action']
                     elif args['agent'] == "ai_1":
@@ -172,7 +207,7 @@ class GamePlay(Game):
                 info = self.env.get_ai_info()
                 e = EnvState(world=info['world'],
                              agents=info['sim_agents'],
-                             agent_idx=0,
+                             agent_idx=self.ai_agent_idx if self.ai_agent_idx is not None else 0,
                              order=info['order_scheduler'],
                              event_history=info['event_history'],
                              time=info['current_time'],
@@ -192,7 +227,10 @@ class GamePlay(Game):
                     except Exception as e:
                         print(f"Prediction failed: {e}")
 
-                if action_dict[self.sim_agents[0].name] is not None:
+                if self.ai_agent_idx is None:
+                    if any(action_dict[agent.name] is not None for agent in self.sim_agents):
+                        self._q_ai.put(('Env', {"EnvState": dcopy(e)}))
+                elif action_dict[self.sim_agents[self.ai_agent_idx].name] is not None:
                     self._q_ai.put(('Env', {"EnvState": dcopy(e)}))
                 action_dict = {agent.name: None for agent in self.sim_agents}
 
@@ -262,9 +300,19 @@ class GamePlay(Game):
                     
                 if isinstance(move, dict):
                     for agent_id, m in move.items():
+                        if agent_id == "ai_0":
+                            target_idx = 0
+                        elif agent_id == "ai_1":
+                            target_idx = 1
+                        else:
+                            target_idx = self.ai_agent_idx if self.ai_agent_idx is not None else 0
+                        if self.human_agent_idx is not None and target_idx == self.human_agent_idx:
+                            continue
                         self._q_env.put(('Action', {"agent": agent_id, "action": m}))
                 else:
-                    self._q_env.put(('Action', {"agent": "ai", "action": move}))
+                    target_idx = self.ai_agent_idx if self.ai_agent_idx is not None else 0
+                    if self.human_agent_idx is None or target_idx != self.human_agent_idx:
+                        self._q_env.put(('Action', {"agent": f"ai_{target_idx}", "action": move}))
                 human_act = False
                 env_update = False
 
@@ -339,6 +387,15 @@ class GamePlay(Game):
             self.replay['llm_hist'] = self.ai._llm_hist
         if hasattr(self.ai, "_mov_hist"):
             self.replay['mov_hist'] = self.ai._mov_hist
+
+        # スキル推定の最終レポートと履歴保存
+        if self.skill_emi and hasattr(self.ai, 'skill_estimator'):
+            self.ai.skill_estimator.print_final_report()
+            self.replay['skill_estimation'] = {
+                'history': self.ai.skill_estimator.get_history(),
+                'summary': self.ai.skill_estimator.get_summary()
+            }
+
         # log recipy infos
         self.replay['order_result'] = dict(
             success=self.env.order_scheduler.successful_orders,
@@ -350,7 +407,8 @@ class GamePlay(Game):
 
         # ログファイルを閉じる
         if self._log_file:
-            sys.stdout = self._original_stdout
+            if not self.skill_emi:
+                sys.stdout = self._original_stdout
             self._log_file.close()
 
         return self._success

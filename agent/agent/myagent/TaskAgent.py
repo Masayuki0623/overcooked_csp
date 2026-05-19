@@ -1,4 +1,5 @@
 import heapq
+import random
 from gym_cooking.utils.core import mergeable
 
 class TaskAgent:
@@ -19,6 +20,21 @@ class TaskAgent:
         self.wait_count = 0  # 待機カウンターを追加
         
         #print(f"[TaskAgent] タスクで初期化: {self.task_name}")
+
+    def choose_random_chop_task_name(self, env):
+        """現在の注文から chop 対象を 1 つランダムに選ぶ"""
+        candidates = []
+        for order_tuple in getattr(env.order, 'current_orders', []):
+            goal_obj = order_tuple[0]
+            name = getattr(goal_obj, 'full_name', '').lower()
+            for ingredient in ('lettuce', 'onion', 'tomato'):
+                if ingredient in name and ingredient not in candidates:
+                    candidates.append(ingredient)
+
+        if not candidates:
+            return None
+
+        return f"chop_{random.choice(candidates)}"
 
     def astar_path(self, env, start, goal, dynamic_obstacles=None):
         if dynamic_obstacles is None:

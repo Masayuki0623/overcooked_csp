@@ -15,6 +15,8 @@ import argparse
 from datetime import datetime
 from pathlib import Path
 from agent.myagent.GreedyAgent import GreedyAgent  # 追加
+from agent.myagent.ChopOnlyAgent import ChopOnlyAgent  # 追加
+from agent.myagent.DualAgentController import DualAgentController  # 追加
 from agent.myagent.CSPAgent import CSPAgent  # 追加
 
 
@@ -28,7 +30,19 @@ def parse_arguments():
     )
     parser.add_argument(
         "--agent", type=str,
-        choices=['HLA', 'SMOA', 'FMOA', 'NEA','Random', 'TSPSolver', 'Greedy', 'CSP', 'Task'], default='TSPSolver'  # CSP, Taskを追加
+        choices=['HLA', 'SMOA', 'FMOA', 'NEA','Random', 'TSPSolver', 'Greedy', 'CSP', 'Task', 'choponly'], default='TSPSolver'  # CSP, Taskを追加
+    )
+    parser.add_argument(
+        "--agent0", type=str,
+        choices=['human', 'HLA', 'SMOA', 'FMOA', 'NEA', 'Random', 'TSPSolver', 'Greedy', 'CSP', 'Task', 'choponly'],
+        default=None,
+        help="Agent for player 0. If omitted, falls back to --agent for backward compatibility."
+    )
+    parser.add_argument(
+        "--agent1", type=str,
+        choices=['human', 'HLA', 'SMOA', 'FMOA', 'NEA', 'Random', 'TSPSolver', 'Greedy', 'CSP', 'Task', 'choponly'],
+        default=None,
+        help="Agent for player 1. If omitted, defaults to human unless --agent0/--agent are used."
     )
     parser.add_argument(
         "--task", type=str, default=None, help="Task to execute for TaskAgent (e.g. chop_tomato)"
@@ -42,14 +56,42 @@ def parse_arguments():
     parser.add_argument(
         "--debug", action='store_true', help="Enable debug mode with overlay"
     )
+    parser.add_argument(
+        "--skillemi", action='store_true', help="Enable cooperative skill estimation for player 0"
+    )
 
     return parser.parse_args()
 
 
-def init_env_replay(map_name, agent_name, task_name=None, no_reschedule=False, debug_mode=False, sc_2agent=False):
+def _create_single_agent(agent_name, speed, replay, init_env_state, env, task_name=None, no_reschedule=False):
+    if agent_name == "TSPSolver":
+        ai = TSPSolverAgent(speed, replay)
+        ai._compute_all_distances(init_env_state)
+        ai.extract_tasks_from_current_orders(init_env_state)
+        graph = ai.generate_task_graph(init_env_state)
+        print("=== タスクグラフ（ノード, コスト） ===")
+        for node, cost in graph:
+            print(node, ":", cost)
+        print("===============================")
+        print("=== タスク間遷移コスト ===")
+        ai.print_task_transition_costs(init_env_state)
+        print("===============================")
+        return ai
+    if agent_name == "Greedy":
+        ai = GreedyAgent(speed, replay)
+        ai._compute_all_distances(init_env_state)
+        ai.extract_tasks_from_current_orders(init_env_state)
+        return ai
+    if agent_name == "Task":
+        from agent.myagent.TaskAgent import TaskAgent
+        return TaskAgent(speed, replay, task_name=task_name)
+    if agent_name == "choponly":
+        return ChopOnlyAgent(speed, replay)
+    return get_agent(AgentSetting(agent_name, speed=speed), replay)
+
+
+def init_env_replay(map_name, agent0_name, agent1_name, task_name=None, no_reschedule=False, debug_mode=False, skill_emi=False):
     map_set = MapSetting(**MAP_SETTINGS[map_name])
-    # agent_set = AgentSetting(agent_name, speed=2.5 if map_name != 'quick' else 3.5)
-    agent_set = AgentSetting(agent_name, speed=10)
     replay = Replay()
 
     env = OvercookedEnvironment(map_set)
@@ -57,45 +99,91 @@ def init_env_replay(map_name, agent_name, task_name=None, no_reschedule=False, d
 
     # ここで初期状態のEnvStateを作成
     init_env_state = EnvState(env.world, env.sim_agents, 0, env.order_scheduler, [], env.chg_grid, env.current_time)
-    # ここでエージェントを初期化（距離計算も済ませる）
-    if agent_name == "TSPSolver":
-        ai = TSPSolverAgent(agent_set.speed, replay)
-        ai._compute_all_distances(init_env_state)
-        ai.extract_tasks_from_current_orders(init_env_state)
-        # グラフの出力
-        graph = ai.generate_task_graph(init_env_state)
-        print("=== タスクグラフ（ノード, コスト） ===")
-        for node, cost in graph:
-            print(node, ":", cost)
-        print("===============================")
-        # タスク間遷移コストの出力
-        print("=== タスク間遷移コスト ===")
-        ai.print_task_transition_costs(init_env_state)
-        print("===============================")
-    elif agent_name == "Greedy":
-        ai = GreedyAgent(agent_set.speed, replay)
-        ai._compute_all_distances(init_env_state)
-        ai.extract_tasks_from_current_orders(init_env_state)
-    elif agent_name == "CSP":
-        ai = CSPAgent(agent_set.speed, replay, no_reschedule=no_reschedule, sc_2agent=sc_2agent)
-        # CSPエージェントの初期化（将来的に制約の構築などを行う）
+
+    legacy_mode = agent1_name is None
+    if legacy_mode:
+        agent1_name = "human"
+
+    if agent0_name == "human" and agent1_name == "human":
+        raise ValueError("At least one of --agent0 / --agent1 must be an AI agent.")
+
+    primary_agent_name = agent1_name if agent1_name not in (None, "human") else agent0_name
+    agent_set = AgentSetting(primary_agent_name, speed=10)
+
+    skill_emi_enabled = skill_emi and agent1_name == "CSP"
+    ai = None
+    ai_idx = None
+    human_idx = None
+
+    if agent1_name == "CSP":
+        if agent0_name == "choponly":
+            chop_agent = ChopOnlyAgent(agent_set.speed, replay)
+            csp_agent = CSPAgent(agent_set.speed, replay, no_reschedule=no_reschedule, sc_2agent=True, skill_emi=skill_emi_enabled)
+            ai = DualAgentController(chop_agent, csp_agent)
+            ai_idx = None
+            human_idx = None
+            try:
+                from agent.myagent.gui import configure_agent_settings
+                print("Opening Agent Configuration GUI...")
+                settings = configure_agent_settings(env)
+                csp_agent.priority_weights = settings['weights']
+                csp_agent.gui_text_input = settings['text_input']
+                csp_agent.gui_constraint_input = settings.get('constraint_input', "")
+                csp_agent.active_constraints = settings.get('constraints', [])
+                print("Settings configured:", settings)
+            except Exception as e:
+                print(f"Failed to configure settings via GUI: {e}")
+        else:
+            ai = CSPAgent(agent_set.speed, replay, no_reschedule=no_reschedule, sc_2agent=True, skill_emi=skill_emi_enabled)
+            ai_idx = 1
+            if agent0_name == "human":
+                human_idx = 0
+            elif agent0_name == "CSP":
+                human_idx = None
+            else:
+                raise NotImplementedError("--agent1 CSP currently supports only agent0 human/CSP/choponly.")
+            try:
+                from agent.myagent.gui import configure_agent_settings
+                print("Opening Agent Configuration GUI...")
+                settings = configure_agent_settings(env)
+                ai.priority_weights = settings['weights']
+                ai.gui_text_input = settings['text_input']
+                ai.gui_constraint_input = settings.get('constraint_input', "")
+                ai.active_constraints = settings.get('constraints', [])
+                print("Settings configured:", settings)
+            except Exception as e:
+                print(f"Failed to configure settings via GUI: {e}")
+    elif agent0_name == "CSP":
+        ai = CSPAgent(agent_set.speed, replay, no_reschedule=no_reschedule, sc_2agent=False, skill_emi=False)
+        ai_idx = 0
+        if agent1_name == "human":
+            human_idx = 1
+        else:
+            raise NotImplementedError("--agent0 CSP currently supports only agent1 human.")
         try:
             from agent.myagent.gui import configure_agent_settings
             print("Opening Agent Configuration GUI...")
             settings = configure_agent_settings(env)
             ai.priority_weights = settings['weights']
-            ai.gui_text_input = settings['text_input'] # 将来の使用のために保存
-            ai.gui_constraint_input = settings.get('constraint_input', "") # 制約テキストを保存
-            ai.active_constraints = settings.get('constraints', []) # 生成された制約リスト
+            ai.gui_text_input = settings['text_input']
+            ai.gui_constraint_input = settings.get('constraint_input', "")
+            ai.active_constraints = settings.get('constraints', [])
             print("Settings configured:", settings)
         except Exception as e:
             print(f"Failed to configure settings via GUI: {e}")
-    elif agent_name == "Task":
-        from agent.myagent.TaskAgent import TaskAgent
-        ai = TaskAgent(agent_set.speed, replay, task_name=task_name)
     else:
-        ai = get_agent(agent_set, replay)
-    game = GamePlay(env, replay, agent_set, debug_mode=debug_mode, sc_2agent=sc_2agent)
+        if agent0_name != "human" and agent1_name == "human":
+            ai = _create_single_agent(agent0_name, agent_set.speed, replay, init_env_state, env, task_name=task_name, no_reschedule=no_reschedule)
+            ai_idx = 0
+            human_idx = 1
+        elif agent0_name == "human" and agent1_name != "human":
+            ai = _create_single_agent(agent1_name, agent_set.speed, replay, init_env_state, env, task_name=task_name, no_reschedule=no_reschedule)
+            ai_idx = 1
+            human_idx = 0
+        else:
+            raise NotImplementedError("This mode currently supports one AI and one human, or CSP on agent1/agent0.")
+
+    game = GamePlay(env, replay, agent_set, debug_mode=debug_mode, human_agent_idx=human_idx, ai_agent_idx=ai_idx, skill_emi=skill_emi_enabled)
     game.ai = ai
     replay['set_map'] = deepcopy(map_set)
     replay['set_agent'] = deepcopy(agent_set)
@@ -107,8 +195,11 @@ def init_env_replay(map_name, agent_name, task_name=None, no_reschedule=False, d
 if __name__ == '__main__':
     arglist = parse_arguments()
 
+    agent0_name = arglist.agent0 if arglist.agent0 is not None else arglist.agent
+    agent1_name = arglist.agent1
+
     # initialize replay
-    game, env, replay = init_env_replay(arglist.map, arglist.agent, arglist.task, arglist.no_reschedule, arglist.debug, arglist.sc_2agent)
+    game, env, replay = init_env_replay(arglist.map, agent0_name, agent1_name, arglist.task, arglist.no_reschedule, arglist.debug, arglist.skillemi)
 
     try:
         # play
@@ -125,5 +216,5 @@ if __name__ == '__main__':
     finally:
         print(replay['order_result'])
         repdir = Path(__file__).resolve().parent / 'replay'
-        replay.save(repdir / f'{arglist.map}-{arglist.agent}-{datetime.now().strftime("%Y%m%d_%H%M%S")}.rep')
+        replay.save(repdir / f'{arglist.map}-{agent0_name}-{agent1_name or "human"}-{datetime.now().strftime("%Y%m%d_%H%M%S")}.rep')
         print(f"Replay saved to {repdir}")

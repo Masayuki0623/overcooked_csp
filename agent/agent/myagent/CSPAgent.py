@@ -4,17 +4,19 @@ from ortools.sat.python import cp_model
 from .csp.model import CSPModel
 from .csp.solver import solve as solve_csp
 from .TaskAgent import TaskAgent
+from .skill_estimator import SkillEstimator
 from gym_cooking.utils.config import COOKING_TIME_SECONDS
 
 class CSPAgent:
     """
     CSP(制約充足問題)ベースのエージェント
     """
-    def __init__(self, speed=2.5, replay=None, no_reschedule=False, sc_2agent=False):
+    def __init__(self, speed=2.5, replay=None, no_reschedule=False, sc_2agent=False, skill_emi=False):
         self.speed = speed
         self.replay = replay
         self.no_reschedule = no_reschedule
         self.sc_2agent = sc_2agent
+        self.skill_emi = skill_emi
         self.initialized = False
         
         # CSP関連の変数
@@ -48,7 +50,14 @@ class CSPAgent:
         # 適用する動的制約リスト (JSON format)
         self.active_constraints = []
 
-        print("[CSPAgent] 初期化完了 - 現在はランダム行動")
+        # スキル推定器
+        if self.skill_emi:
+            self.skill_estimator = SkillEstimator(alpha=0.3)
+            # AI側が完了したタスクIDを別途追跡（人間完了タスクとの区別用）
+            self.ai_completed_task_ids = set()
+            print("[CSPAgent] スキル推定モード有効")
+
+        print("[CSPAgent] 初期化完了")
 
     def get_remaining_tids(self, env, current_orders):
         """現在の環境から残存タスクのID集合(tid)を抽出する（インベントリ照合）"""
@@ -221,6 +230,15 @@ class CSPAgent:
                     print(f"[CSPAgent] CSPスケジュール中に例外: {e}")
                     import traceback
                     traceback.print_exc()
+
+                # === スキル推定 ===
+                if self.skill_emi and self.initialized and hasattr(self, 'schedule_per_agent'):
+                    try:
+                        self._run_skill_estimation(env, current_orders, removed)
+                    except Exception as e:
+                        print(f"[SkillEstimator] スキル推定中に例外: {e}")
+                        import traceback
+                        traceback.print_exc()
                 
                 self.prev_task_ids = current_task_ids
                 self.initialized = True
@@ -276,6 +294,7 @@ class CSPAgent:
             actions = {}
             reasons = []
             for agent_idx in [0, 1]:
+
                 sc = self.schedule_per_agent.get(agent_idx, [])
                 t_idx = self.current_task_idx[agent_idx]
                 if t_idx >= len(sc):
@@ -375,6 +394,8 @@ class CSPAgent:
                     if "Done" in reason or "done" in reason or "完了" in reason:
                         print(f"[CSPAgent] AI{agent_idx} タスク {task_name} 完了。")
                         self.completed_task_ids.add(tid)
+                        if self.skill_emi:
+                            self.ai_completed_task_ids.add(tid)
                         self.current_task_idx[agent_idx] += 1
                         ta.assigned_cutboard = None
                         ta.assigned_pot = None
@@ -1342,6 +1363,182 @@ class CSPAgent:
                     f_score[neighbor] = tentative_g + heuristic(neighbor, goal)
                     heapq.heappush(open_set, (f_score[neighbor], neighbor))
         return None
+
+    def _run_skill_estimation(self, env, current_orders, removed):
+        """
+        スキル推定を実行する。
+
+        タスク変化が発生したタイミングで呼ばれる。
+        「エージェント0が何もしなかった場合の仮想計画(A_virtual)」と
+        「実際の計画(A_plan)」のレーベンシュタイン距離を計算し、
+        協調スキル値を更新する。
+
+        スキル推定の対象はエージェント0。エージェント0はAIベースライン
+        エージェントの場合もある。
+
+        Args:
+            env: 現在の環境状態
+            current_orders: 現在の注文リスト
+            removed: 前回から消えたタスクIDの集合
+        """
+        if not hasattr(self, 'skill_estimator'):
+            return
+
+        print(f"[SkillEstimator] 推定フローを開始: env.time={env.time}")
+
+        # 現在の実際のJoint計画を取得（リスケジュール後の最新状態）
+        # エージェント0とエージェント1の両方のタスク配列を連結して比較する
+        actual_plan_ids_0 = SkillEstimator.extract_plan_ids(
+            self.schedule_per_agent if hasattr(self, 'schedule_per_agent') else None,
+            agent_idx=0  # エージェント0のスケジュール
+        )
+        actual_plan_ids_1 = SkillEstimator.extract_plan_ids(
+            self.schedule_per_agent if hasattr(self, 'schedule_per_agent') else None,
+            agent_idx=1  # エージェント1のスケジュール
+        )
+        actual_plan_ids = actual_plan_ids_0 + actual_plan_ids_1
+        print(f"[SkillEstimator] 実際計画の抽出: AI0={actual_plan_ids_0}, AI1={actual_plan_ids_1}")
+
+        # エージェント0が完了したタスクの特定
+        # removed（今回消えたタスク）のうち、AI(エージェント1)が完了していないもの = エージェント0が完了させたタスク
+        agent0_removed = removed - self.ai_completed_task_ids if removed else set()
+
+        if agent0_removed:
+            print(f"[SkillEstimator] エージェント0が完了させたタスク: {sorted(agent0_removed)}")
+        else:
+            print("[SkillEstimator] エージェント0が完了させたタスクはなし")
+
+        # 仮想計画の計算:
+        # 「エージェント0が何もしなかった場合」= エージェント0が完了させたタスクを元に戻す
+        if agent0_removed:
+            print("[SkillEstimator] 仮想注文を再構築して、エージェント0が何もしなかった場合の計画を再計算する")
+            # エージェント0が完了させたタスクを含む仮想注文リストを再構築
+            virtual_orders = self._build_virtual_orders(env, current_orders, agent0_removed)
+            try:
+                # 仮想計画をCSPで計算（通常のsolve_csp_schedulingを流用）
+                virtual_schedule = self.solve_csp_scheduling(env, orders=virtual_orders)
+                virtual_plan_ids_0 = SkillEstimator.extract_plan_ids(
+                    self.schedule_per_agent if hasattr(self, 'schedule_per_agent') else None,
+                    agent_idx=0
+                )
+                virtual_plan_ids_1 = SkillEstimator.extract_plan_ids(
+                    self.schedule_per_agent if hasattr(self, 'schedule_per_agent') else None,
+                    agent_idx=1
+                )
+                virtual_plan_ids = virtual_plan_ids_0 + virtual_plan_ids_1
+                print(f"[SkillEstimator] 仮想計画の抽出: AI0={virtual_plan_ids_0}, AI1={virtual_plan_ids_1}")
+
+                # ★重要: 仮想計画計算後、実際の計画で再度スケジュールを復元する
+                self.schedule = self.solve_csp_scheduling(env, orders=current_orders)
+                # 実際の計画を再取得
+                actual_plan_ids_0 = SkillEstimator.extract_plan_ids(
+                    self.schedule_per_agent if hasattr(self, 'schedule_per_agent') else None,
+                    agent_idx=0
+                )
+                actual_plan_ids_1 = SkillEstimator.extract_plan_ids(
+                    self.schedule_per_agent if hasattr(self, 'schedule_per_agent') else None,
+                    agent_idx=1
+                )
+                actual_plan_ids = actual_plan_ids_0 + actual_plan_ids_1
+                print(f"[SkillEstimator] 実際計画を復元: AI0={actual_plan_ids_0}, AI1={actual_plan_ids_1}")
+            except Exception as e:
+                print(f"[SkillEstimator] 仮想計画計算に失敗: {e}")
+                virtual_plan_ids = actual_plan_ids  # フォールバック: 同じ計画=V_coop=0
+                print("[SkillEstimator] フォールバック: 仮想計画を実際計画と同一にして継続する")
+        else:
+            # エージェント0が何も完了させていない場合
+            # → 環境変化のみ。仮想計画 = 前回の計画（prev_ai_plan）
+            virtual_plan_ids = self.skill_estimator.prev_ai_plan if self.skill_estimator.prev_ai_plan else actual_plan_ids
+            if self.skill_estimator.prev_ai_plan:
+                print(f"[SkillEstimator] 前回計画を仮想計画として使用: {self.skill_estimator.prev_ai_plan}")
+            else:
+                print("[SkillEstimator] 前回計画がないため、仮想計画=実際計画で開始する")
+
+        # スキル推定値を更新
+        self.skill_estimator.update(
+            time=env.time,
+            virtual_plan_ids=virtual_plan_ids,
+            actual_plan_ids=actual_plan_ids
+        )
+
+        # 次回比較用に現在の計画を保存
+        self.skill_estimator.prev_ai_plan = list(actual_plan_ids)
+        print(f"[SkillEstimator] 次回比較用の計画を保存: {self.skill_estimator.prev_ai_plan}")
+
+    def _build_virtual_orders(self, env, current_orders, agent0_removed):
+        """
+        仮想注文リストを構築する。
+
+        エージェント0が完了させたタスクを「元に戻す」（= まだ未完了として扱う）ための
+        仮想的な注文リストを生成する。
+
+        Args:
+            env: 現在の環境状態
+            current_orders: 現在の注文リスト（_build_order_tasks の出力）
+            agent0_removed: エージェント0が完了させたタスクIDの集合
+
+        Returns:
+            list: 仮想注文リスト（current_ordersと同形式だがagent0_removedタスクが追加）
+        """
+        from copy import deepcopy
+
+        virtual_orders = deepcopy(current_orders)
+
+        # エージェント0が完了させたタスクを仮想注文に追加し直す
+        for tid in agent0_removed:
+            verb, obj, order_idx = tid
+
+            # 対応する注文を見つける
+            target_order = None
+            for o in virtual_orders:
+                if o['order'] == order_idx:
+                    target_order = o
+                    break
+
+            if target_order is None:
+                # 注文が見つからない場合（既に完全に完了した注文）は新規作成
+                # この場合は食材名からingredientsを推定
+                if verb == 'chop':
+                    ings = [obj]
+                else:
+                    ings = obj.replace(' soup', '').split('-')
+                target_order = {
+                    'order': order_idx,
+                    'ingredients': ings,
+                    'tasks': []
+                }
+                virtual_orders.append(target_order)
+
+            # 既にこのタスクが存在していないか確認
+            existing_ids = {t['id'] for t in target_order['tasks']}
+            if tid in existing_ids:
+                continue
+
+            # タスクを追加
+            dur = self._task_duration_frames(env, verb, obj, order_idx)
+            if dur is None:
+                dur = 10  # フォールバック
+
+            resources = self._get_resources(env)
+            res_candidates = []
+            assigned_counter = target_order['tasks'][0].get('assigned_counter') if target_order['tasks'] else None
+
+            if verb == 'chop':
+                res_candidates = [('cutboard', r) for r in resources['cutboards']]
+            elif verb == 'cook':
+                res_candidates = [('pot', r) for r in resources['pots']]
+
+            target_order['tasks'].append({
+                'id': tid,
+                'verb': verb,
+                'obj': obj,
+                'order': order_idx,
+                'dur': dur,
+                'res_candidates': res_candidates,
+                'assigned_counter': assigned_counter
+            })
+
+        return virtual_orders
 
     def print_task_costs(self, env):
         tasks_all = []
