@@ -120,6 +120,7 @@ class GamePlay(Game):
         self._q_env = queue.Queue()
         self._q_ai = queue.Queue()
         self._success = False
+        self._finalized = False
 
     def on_event(self, event):
         if event.type == pygame.QUIT:
@@ -373,7 +374,17 @@ class GamePlay(Game):
         thread_ai.start()
         # thread_listen.start()
 
-        self._run_human()
+        try:
+            self._run_human()
+        finally:
+            self._finalize_execution()
+
+        return self._success
+
+    def _finalize_execution(self):
+        if self._finalized:
+            return
+        self._finalized = True
 
         # clean up
         self.on_cleanup()
@@ -381,34 +392,33 @@ class GamePlay(Game):
         # save history
         if hasattr(self.ai, "_lock"):
             self.ai._lock.acquire()
-        if hasattr(self.ai, "_int_hist"):
-            self.replay['int_hist'] = self.ai._int_hist
-        if hasattr(self.ai, "_llm_hist"):
-            self.replay['llm_hist'] = self.ai._llm_hist
-        if hasattr(self.ai, "_mov_hist"):
-            self.replay['mov_hist'] = self.ai._mov_hist
+        try:
+            if hasattr(self.ai, "_int_hist"):
+                self.replay['int_hist'] = self.ai._int_hist
+            if hasattr(self.ai, "_llm_hist"):
+                self.replay['llm_hist'] = self.ai._llm_hist
+            if hasattr(self.ai, "_mov_hist"):
+                self.replay['mov_hist'] = self.ai._mov_hist
 
-        # スキル推定の最終レポートと履歴保存
-        if self.skill_emi and hasattr(self.ai, 'skill_estimator'):
-            self.ai.skill_estimator.print_final_report()
-            self.replay['skill_estimation'] = {
-                'history': self.ai.skill_estimator.get_history(),
-                'summary': self.ai.skill_estimator.get_summary()
-            }
+            # スキル推定はプレイ中には計算せず、生ログだけ保存する
+            if self.skill_emi and hasattr(self.ai, 'skill_estimation_log'):
+                self.replay['skill_estimation_log'] = self.ai.skill_estimation_log
+                self.replay['skill_estimation_meta'] = {
+                    'alpha': getattr(self.ai, 'skill_estimation_alpha', 0.3)
+                }
 
-        # log recipy infos
-        self.replay['order_result'] = dict(
-            success=self.env.order_scheduler.successful_orders,
-            fail=self.env.order_scheduler.failed_orders,
-            reward=self.env.order_scheduler.reward
-        )
-        if hasattr(self.ai, "_lock"):
-            self.ai._lock.release()
+            # log recipy infos
+            self.replay['order_result'] = dict(
+                success=self.env.order_scheduler.successful_orders,
+                fail=self.env.order_scheduler.failed_orders,
+                reward=self.env.order_scheduler.reward
+            )
+        finally:
+            if hasattr(self.ai, "_lock"):
+                self.ai._lock.release()
 
-        # ログファイルを閉じる
-        if self._log_file:
-            if not self.skill_emi:
-                sys.stdout = self._original_stdout
-            self._log_file.close()
-
-        return self._success
+            # ログファイルを閉じる
+            if self._log_file:
+                if not self.skill_emi:
+                    sys.stdout = self._original_stdout
+                self._log_file.close()

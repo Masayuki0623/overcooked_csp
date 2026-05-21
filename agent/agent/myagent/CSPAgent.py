@@ -1,5 +1,6 @@
 import random
 import time
+from copy import deepcopy
 from ortools.sat.python import cp_model
 from .csp.model import CSPModel
 from .csp.solver import solve as solve_csp
@@ -38,10 +39,20 @@ class CSPAgent:
         # 交代制のためのターン管理
         self.turn = 0
         self.completed_task_ids = set() # 追加：完了したタスクのID集合（同期用）
+        self.pending_reschedule_reason = "initial"
+        self.stall_threshold = 8
+        self.stall_counts = {0: 0, 1: 0} if self.sc_2agent else 0
+        self.active_order_entries = []
+        self.next_order_uid = 0
+        self.counter_policy_by_order = {}
+        self.carry_task_by_agent = {0: None, 1: None} if self.sc_2agent else None
         
         self.task_agent = TaskAgent()
+        self.task_agent.strict_counter_management = True
         if self.sc_2agent:
             self.task_agents = {0: TaskAgent(), 1: TaskAgent()}
+            for task_agent in self.task_agents.values():
+                task_agent.strict_counter_management = True
         
         # 優先度重み（GUI等で設定）
         self.priority_weights = {}
@@ -52,44 +63,215 @@ class CSPAgent:
 
         # スキル推定器
         if self.skill_emi:
-            self.skill_estimator = SkillEstimator(alpha=0.3)
+            self.skill_estimation_alpha = 0.3
+            self.skill_estimation_log = []
             # AI側が完了したタスクIDを別途追跡（人間完了タスクとの区別用）
             self.ai_completed_task_ids = set()
             print("[CSPAgent] スキル推定モード有効")
 
         print("[CSPAgent] 初期化完了")
 
+    def _mark_reschedule_needed(self, reason):
+        if not self.no_reschedule:
+            self.pending_reschedule_reason = reason
+
+    def _get_active_task_ids(self):
+        if self.sc_2agent:
+            active = set()
+            if hasattr(self, 'schedule_per_agent') and isinstance(self.current_task_idx, dict):
+                for agent_idx in [0, 1]:
+                    schedule = self.schedule_per_agent.get(agent_idx, [])
+                    task_idx = self.current_task_idx.get(agent_idx, 0)
+                    if task_idx < len(schedule):
+                        active.add(schedule[task_idx]['id'])
+            return active
+
+        if hasattr(self, 'schedule') and self.schedule and isinstance(self.current_task_idx, int) and self.current_task_idx < len(self.schedule):
+            return {self.schedule[self.current_task_idx]['id']}
+        return set()
+
+    def _get_reschedule_reason(self, current_task_ids, added, removed):
+        if not self.initialized:
+            return "initial"
+
+        if self.pending_reschedule_reason:
+            return self.pending_reschedule_reason
+
+        if added:
+            return f"task_added:{sorted(added)}"
+
+        if removed:
+            return f"task_removed:{sorted(removed)}"
+
+        active_task_ids = self._get_active_task_ids()
+        missing_active = sorted(tid for tid in active_task_ids if tid not in current_task_ids)
+        if missing_active:
+            return f"active_task_missing:{missing_active}"
+
+    def _should_defer_holding_reschedule(self, env, added, removed):
+        if not self.initialized or self.pending_reschedule_reason:
+            return False
+        if not added and not removed:
+            return False
+
+        def iter_active_tasks():
+            if self.sc_2agent:
+                for agent_idx in [0, 1]:
+                    sc = getattr(self, 'schedule_per_agent', {}).get(agent_idx, [])
+                    task_idx = getattr(self, 'current_task_idx', {}).get(agent_idx, 0)
+                    if task_idx < len(sc):
+                        yield agent_idx, sc[task_idx]
+            else:
+                schedule = getattr(self, 'schedule', [])
+                task_idx = getattr(self, 'current_task_idx', 0)
+                if task_idx < len(schedule):
+                    yield 0, schedule[task_idx]
+
+        for agent_idx, task in iter_active_tasks():
+            agents = getattr(env, 'agents', [])
+            if agent_idx >= len(agents):
+                continue
+            holding = getattr(agents[agent_idx], 'holding', None)
+            holding_name = getattr(holding, 'full_name', None) if holding is not None else None
+            if not holding_name or 'Chopped' not in holding_name:
+                continue
+
+            verb, obj, order_uid = task['id']
+            if verb == 'chop':
+                chopped_name = f"Chopped{obj.capitalize()}"
+                if chopped_name in holding_name and task['id'] in removed:
+                    return True
+
+            if verb == 'cook':
+                recipe_ings = obj.replace(' soup', '').split('-')
+                if any(f"Chopped{ing.capitalize()}" in holding_name for ing in recipe_ings):
+                    if any(tid[0] == 'chop' and tid[2] == order_uid for tid in added):
+                        return True
+
+        return False
+
+        if current_task_ids and not self._get_active_task_ids():
+            return "no_active_task_with_remaining_work"
+
+        return None
+
+    def _update_stall_state(self, agent_idx, action, reason):
+        if self.sc_2agent:
+            if action == (0, 0) and reason not in ("待機(相手のターン)", "AI0:Idle", "AI1:Idle"):
+                self.stall_counts[agent_idx] += 1
+                if self.stall_counts[agent_idx] >= self.stall_threshold:
+                    self._mark_reschedule_needed(f"stall_agent_{agent_idx}")
+            else:
+                self.stall_counts[agent_idx] = 0
+            return
+
+        if action == (0, 0) and "タスクなし" not in reason and "アイドル" not in reason:
+            self.stall_counts += 1
+            if self.stall_counts >= self.stall_threshold:
+                self._mark_reschedule_needed("stall_single_agent")
+        else:
+            self.stall_counts = 0
+
+    def _refresh_active_order_uids(self, current_orders):
+        previous_entries = list(getattr(self, 'active_order_entries', []))
+        current_uids = [None] * len(current_orders)
+        next_entries = []
+
+        for order_idx, order_tuple in enumerate(current_orders):
+            goal = order_tuple[0]
+            name = getattr(goal, 'full_name', '').lower()
+            if not any(ing in name for ing in ['lettuce', 'onion', 'tomato']):
+                continue
+
+            rest_time = order_tuple[1] if len(order_tuple) > 1 else None
+            time_limit = order_tuple[2] if len(order_tuple) > 2 else None
+
+            best_prev_idx = None
+            best_score = None
+            for prev_idx, prev in enumerate(previous_entries):
+                if prev['name'] != name:
+                    continue
+
+                prev_rest_time = prev.get('rest_time')
+                if prev_rest_time is not None and rest_time is not None and rest_time > prev_rest_time + 1e-6:
+                    continue
+
+                delta = 0.0 if prev_rest_time is None or rest_time is None else prev_rest_time - rest_time
+                score = (abs(delta), abs(prev.get('order_idx', order_idx) - order_idx))
+                if best_score is None or score < best_score:
+                    best_score = score
+                    best_prev_idx = prev_idx
+
+            if best_prev_idx is not None:
+                matched = previous_entries.pop(best_prev_idx)
+                order_uid = matched['uid']
+            else:
+                order_uid = self.next_order_uid
+                self.next_order_uid += 1
+
+            current_uids[order_idx] = order_uid
+            next_entries.append({
+                'uid': order_uid,
+                'name': name,
+                'rest_time': rest_time,
+                'time_limit': time_limit,
+                'order_idx': order_idx,
+            })
+
+        active_uids = {entry['uid'] for entry in next_entries}
+        stale_uids = [uid for uid in list(self.counter_policy_by_order) if uid not in active_uids]
+        for uid in stale_uids:
+            self.counter_policy_by_order.pop(uid, None)
+
+        self.active_order_entries = next_entries
+        return current_uids
+
     def get_remaining_tids(self, env, current_orders):
         """現在の環境から残存タスクのID集合(tid)を抽出する（インベントリ照合）"""
         inv_chopped = []
         inv_pots_ings = []
         inv_plates_ings = []
+        cutboard_locs = set(env.get_pos_by_obj_gs(gs="Cutboard"))
+        pot_locs = set(env.get_pos_by_obj_gs(gs="Pot"))
+
+        def extract_food_names(obj):
+            names = []
+            for content in getattr(obj, 'contents', []):
+                name = getattr(content, 'name', None)
+                if name in ('Lettuce', 'Onion', 'Tomato'):
+                    names.append(name.lower())
+            return names
+
+        def has_plate(obj):
+            return any(getattr(content, 'name', None) == 'Plate' for content in getattr(obj, 'contents', []))
         
         items = []
-        for a in getattr(env, 'agents', []):
-            if hasattr(a, 'holding') and a.holding is not None:
-                items.append(a.holding)
-                
         for pos, obj in env.pos_obj.items():
             if obj is not None:
                 items.append(obj)
                 
         for obj in items:
-            name = getattr(obj, 'name', '')
-            if name.startswith('Chopped'):
-                inv_chopped.append(name)
-            elif 'Pot' in name or name == 'Soup_cooked':
-                ings = getattr(obj, 'ingredient_names', [])
-                if ings:
-                    inv_pots_ings.append(set(ings))
-            elif name == 'Plate':
-                ings = getattr(obj, 'ingredient_names', [])
-                if ings:
-                    inv_plates_ings.append(set(ings))
+            if getattr(obj, 'location', None) in cutboard_locs:
+                continue
+
+            if hasattr(obj, 'is_chopped') and obj.is_chopped():
+                for ing in extract_food_names(obj):
+                    inv_chopped.append(ing)
+
+            obj_foods = set(extract_food_names(obj))
+            if not obj_foods:
+                continue
+
+            obj_loc = getattr(obj, 'location', None)
+            if obj_loc in pot_locs:
+                inv_pots_ings.append(obj_foods)
+            elif has_plate(obj):
+                inv_plates_ings.append(obj_foods)
                     
         remaining_tids = set()
         
-        for order_idx, order in enumerate(current_orders):
+        for order in current_orders:
+            order_uid = order['order']
             order_name = order['name']
             if ' soup' not in order_name: continue
             
@@ -114,6 +296,10 @@ class CSPAgent:
                 # 2. 鍋にあるか？
                 pot_match = None
                 for pot_s in inv_pots_ings:
+                    if pot_s == req_set:
+                        pot_match = pot_s
+                        needs_cook = False
+                        break
                     if pot_s.issubset(req_set) and len(pot_s) > 0:
                         pot_match = pot_s
                         break
@@ -135,15 +321,177 @@ class CSPAgent:
             # tids構築
             for ing in final_needs_chop:
                 raw_ing = ing.replace('Chopped', '').lower()
-                remaining_tids.add(('chop', raw_ing, order_idx))
+                remaining_tids.add(('chop', raw_ing, order_uid))
                 
             soup_name = "-".join([i.replace('Chopped', '').lower() for i in raw_parts]) + " soup"
             if needs_cook:
-                remaining_tids.add(('cook', soup_name, order_idx))
+                remaining_tids.add(('cook', soup_name, order_uid))
             if needs_serve:
-                remaining_tids.add(('serve', soup_name, order_idx))
+                remaining_tids.add(('serve', soup_name, order_uid))
                 
         return remaining_tids
+
+    def _stabilize_task_ids_for_held_progress(self, env, current_task_ids):
+        def get_holding_name(agent_idx):
+            agents = getattr(env, 'agents', [])
+            if agent_idx >= len(agents):
+                return None
+            holding = getattr(agents[agent_idx], 'holding', None)
+            return getattr(holding, 'full_name', None) if holding is not None else None
+
+        def apply_for_task(agent_idx, task):
+            if not task:
+                return
+
+            holding_name = get_holding_name(agent_idx)
+            if not holding_name:
+                return
+
+            verb, obj, order_uid = task['id']
+            if verb == 'chop':
+                chopped_name = f"Chopped{obj.capitalize()}"
+                if chopped_name in holding_name:
+                    current_task_ids.add(task['id'])
+            elif verb == 'cook':
+                for ing in obj.replace(' soup', '').split('-'):
+                    chopped_name = f"Chopped{ing.capitalize()}"
+                    if chopped_name in holding_name:
+                        current_task_ids.discard(('chop', ing, order_uid))
+
+        if self.sc_2agent:
+            for agent_idx in [0, 1]:
+                sc = getattr(self, 'schedule_per_agent', {}).get(agent_idx, [])
+                task_idx = getattr(self, 'current_task_idx', {}).get(agent_idx, 0)
+                task = sc[task_idx] if task_idx < len(sc) else None
+                apply_for_task(agent_idx, task)
+                carry_task = getattr(self, 'carry_task_by_agent', {}).get(agent_idx) if isinstance(getattr(self, 'carry_task_by_agent', None), dict) else None
+                apply_for_task(agent_idx, carry_task)
+        else:
+            schedule = getattr(self, 'schedule', [])
+            task_idx = getattr(self, 'current_task_idx', 0)
+            task = schedule[task_idx] if task_idx < len(schedule) else None
+            apply_for_task(0, task)
+            apply_for_task(0, getattr(self, 'carry_task_by_agent', None))
+
+        return current_task_ids
+
+    def _hold_before_for_log(self, env_like):
+        return getattr(env_like, 'hold', None)
+
+    def _hold_hint_for_log(self, hold_before, reason):
+        if hold_before is None:
+            if reason == '皿の取得':
+                return 'after_interact_may_be_plate'
+            return 'no_hold_before'
+
+        hold_str = str(hold_before)
+        if hold_str == 'p':
+            if reason in ('調理済み料理の取得', '調理完了待ち'):
+                return 'holding_plate'
+            return 'plate_like'
+
+        return 'carrying_item'
+
+    def _get_carry_override_task(self, env, agent_idx, scheduled_task):
+        agents = getattr(env, 'agents', [])
+        if agent_idx >= len(agents):
+            return scheduled_task
+
+        holding = getattr(agents[agent_idx], 'holding', None)
+        holding_name = getattr(holding, 'full_name', None) if holding is not None else None
+        if not holding_name:
+            if self.sc_2agent:
+                self.carry_task_by_agent[agent_idx] = None
+            else:
+                self.carry_task_by_agent = None
+            return scheduled_task
+
+        if 'Plate' in holding_name and 'Cooked' in holding_name:
+            cooked_parts = []
+            for part in holding_name.split('-'):
+                if part.startswith('Cooked'):
+                    cooked_parts.append(part.replace('Cooked', '').lower())
+            if cooked_parts:
+                cooked_parts.sort()
+                return {
+                    'id': ('serve', f"{'-'.join(cooked_parts)} soup", -1),
+                    'res': ('delivery', None),
+                }
+
+        chopped_combo_parts = []
+        if 'Plate' not in holding_name and '-' in holding_name:
+            parts = holding_name.split('-')
+            if parts and all(part.startswith('Chopped') for part in parts):
+                chopped_combo_parts = sorted(part.replace('Chopped', '').lower() for part in parts)
+
+        carried_ing = None
+        if '-' not in holding_name:
+            if holding_name.startswith('Fresh'):
+                carried_ing = holding_name.replace('Fresh', '').lower()
+            elif holding_name.startswith('Chopped'):
+                carried_ing = holding_name.replace('Chopped', '').lower()
+
+        carry_task = self.carry_task_by_agent[agent_idx] if self.sc_2agent else self.carry_task_by_agent
+
+        if scheduled_task:
+            verb, obj, _ = scheduled_task['id']
+            if verb == 'cook' and chopped_combo_parts:
+                scheduled_parts = sorted(obj.replace(' soup', '').split('-'))
+                if scheduled_parts == chopped_combo_parts:
+                    if self.sc_2agent:
+                        self.carry_task_by_agent[agent_idx] = deepcopy(scheduled_task)
+                    else:
+                        self.carry_task_by_agent = deepcopy(scheduled_task)
+                    return scheduled_task
+            if verb == 'chop':
+                food_names = (f"Fresh{obj.capitalize()}", f"Chopped{obj.capitalize()}")
+                if any(food_name in holding_name for food_name in food_names):
+                    if self.sc_2agent:
+                        self.carry_task_by_agent[agent_idx] = deepcopy(scheduled_task)
+                    else:
+                        self.carry_task_by_agent = deepcopy(scheduled_task)
+                    return scheduled_task
+
+        if carry_task:
+            verb, obj, _ = carry_task['id']
+            if verb == 'cook' and chopped_combo_parts:
+                carry_parts = sorted(obj.replace(' soup', '').split('-'))
+                if carry_parts == chopped_combo_parts:
+                    return deepcopy(carry_task)
+            food_names = (f"Fresh{obj.capitalize()}", f"Chopped{obj.capitalize()}")
+            if verb == 'chop' and any(food_name in holding_name for food_name in food_names):
+                return deepcopy(carry_task)
+
+        if chopped_combo_parts:
+            assigned_counter = None
+            if carry_task:
+                assigned_counter = carry_task.get('assigned_counter')
+            if assigned_counter is None and scheduled_task:
+                assigned_counter = scheduled_task.get('assigned_counter')
+            return {
+                'id': ('cook', f"{'-'.join(chopped_combo_parts)} soup", -1),
+                'res': ('pot', None),
+                'assigned_counter': assigned_counter,
+            }
+
+        if carried_ing:
+            assigned_counter = None
+            if carry_task:
+                assigned_counter = carry_task.get('assigned_counter')
+            if assigned_counter is None and scheduled_task:
+                assigned_counter = scheduled_task.get('assigned_counter')
+            return {
+                'id': ('chop', carried_ing, -1),
+                'res': ('cutboard', None),
+                'assigned_counter': assigned_counter,
+            }
+
+        if self.sc_2agent:
+            self.carry_task_by_agent[agent_idx] = None
+        else:
+            self.carry_task_by_agent = None
+
+        return scheduled_task
 
     def __call__(self, env):
         """
@@ -155,6 +503,7 @@ class CSPAgent:
         for o in current_orders:
             for t in o['tasks']:
                 current_task_ids.add(t['id'])
+        current_task_ids = self._stabilize_task_ids_for_held_progress(env, current_task_ids)
 
         if not hasattr(self, 'prev_task_ids'):
             self.prev_task_ids = set()
@@ -162,96 +511,113 @@ class CSPAgent:
         added = current_task_ids - self.prev_task_ids
         removed = self.prev_task_ids - current_task_ids
 
-        # 変化があった場合、または初回の場合
-        if added or removed or not self.initialized:
-            # 削除されたタスク = 物理的に完了済み → completed_task_idsに追加
-            # (ターン制で「Done」を返せなかった場合でも正しく完了を検知できる)
+        if self._should_defer_holding_reschedule(env, added, removed):
+            added = set()
+            removed = set()
+
+        reschedule_reason = None if self.no_reschedule and self.initialized else self._get_reschedule_reason(current_task_ids, added, removed)
+
+        # 必要なタイミングだけリスケジュールする
+        if reschedule_reason is not None:
+            # 削除された cook タスクのみ物理完了として扱う。
+            # chop は一時的に食材が存在して current_task_ids から消えても、
+            # 後で消費されて再度必要になるため completed_task_ids へ積まない。
             if removed and self.initialized:
-                physically_done = {t for t in removed if t[0] in ('chop', 'cook')}
+                physically_done = {t for t in removed if t[0] == 'cook'}
                 if physically_done:
                     print(f"  [完了検知] 物理完了タスク: {physically_done}")
                     self.completed_task_ids |= physically_done
+                    self._mark_reschedule_needed("physical_completion")
 
-            # no_rescheduleが有効で、既に初期化済みなら再計算しない
-            if self.no_reschedule and self.initialized:
-                pass
-            else:
-                if self.initialized: # 初回以外なら差分を表示
-                    print(f"\n[タスク更新] 時間: {env.time}")
-                    if added:
-                        print(f"  (+) 追加: {added}")
-                    if removed:
-                        print(f"  (-) 削除: {removed}")
-                    print("  -> スケジュール再計算中...")
+            if self.initialized: # 初回以外なら差分を表示
+                print(f"\n[タスク更新] 時間: {env.time}")
+                print(f"  [再計算理由] {reschedule_reason}")
+                if added:
+                    print(f"  (+) 追加: {added}")
+                if removed:
+                    print(f"  (-) 削除: {removed}")
+                print("  -> スケジュール再計算中...")
 
-                # ① リスケジュール前に「現在実行中のタスクID」を保存する（Bug 1&5 対策）
-                in_progress_tasks = {}  # agent_idx -> task_id
-                if self.sc_2agent and hasattr(self, 'schedule_per_agent'):
+            # ① リスケジュール前に「現在実行中のタスクID」を保存する（Bug 1&5 対策）
+            in_progress_tasks = {}  # agent_idx -> task dict
+            if self.sc_2agent and hasattr(self, 'schedule_per_agent'):
+                for aidx in [0, 1]:
+                    sc = self.schedule_per_agent.get(aidx, [])
+                    t_idx = self.current_task_idx.get(aidx, 0) if isinstance(self.current_task_idx, dict) else 0
+                    if t_idx < len(sc):
+                        in_progress_tasks[aidx] = deepcopy(sc[t_idx])
+                        print(f"  [継続確認] AI{aidx} 実行中タスク: {sc[t_idx]['id']}")
+
+            # 簡易CSPスケジューリング
+            try:
+                start_time = time.time()
+                self.schedule = self.solve_csp_scheduling(env, orders=current_orders)
+                elapsed_time = time.time() - start_time
+                print(f"[CSPAgent] スケジューリング時間: {elapsed_time:.4f} 秒")
+
+                self._print_schedule(self.schedule)
+
+                # ② 新スケジュール内で「実行中タスク」を探してインデックスを復元する
+                if self.sc_2agent:
+                    new_idx = {0: 0, 1: 0}
                     for aidx in [0, 1]:
-                        sc = self.schedule_per_agent.get(aidx, [])
-                        t_idx = self.current_task_idx.get(aidx, 0) if isinstance(self.current_task_idx, dict) else 0
-                        if t_idx < len(sc):
-                            in_progress_tasks[aidx] = sc[t_idx]['id']
-                            print(f"  [継続確認] AI{aidx} 実行中タスク: {sc[t_idx]['id']}")
+                        in_prog_task = in_progress_tasks.get(aidx)
+                        if in_prog_task:
+                            in_prog_tid = in_prog_task['id']
+                            new_sc = self.schedule_per_agent.get(aidx, [])
+                            found = False
+                            for i, t in enumerate(new_sc):
+                                if t['id'] == in_prog_tid:
+                                    new_idx[aidx] = i
+                                    print(f"  [継続] AI{aidx}: {in_prog_tid} → 新スケジュール idx={i} から再開")
+                                    found = True
+                                    break
+                            if not found:
+                                holding = getattr(env.agents[aidx], 'holding', None)
+                                holding_name = getattr(holding, 'full_name', None) if holding is not None else None
+                                if in_prog_tid[0] == 'chop' and holding_name and f"{in_prog_tid[1].capitalize()}" in holding_name:
+                                    self.carry_task_by_agent[aidx] = deepcopy(in_prog_task)
+                                    print(f"  [保持継続] AI{aidx}: {in_prog_tid} を carry task として継続")
+                                print(f"  [スキップ] AI{aidx}: {in_prog_tid} が新スケジュールに存在しない → idx=0から開始")
+                                new_idx[aidx] = 0
+                    self.current_task_idx = new_idx
+                else:
+                    self.current_task_idx = 0
 
-                # 簡易CSPスケジューリング
+                self.pending_reschedule_reason = None
+                if self.sc_2agent:
+                    self.stall_counts = {0: 0, 1: 0}
+                else:
+                    self.stall_counts = 0
+
+            except Exception as e:
+                print(f"[CSPAgent] CSPスケジュール中に例外: {e}")
+                import traceback
+                traceback.print_exc()
+
+            # === スキル推定 ===
+            if self.skill_emi and self.initialized and hasattr(self, 'schedule_per_agent'):
                 try:
-                    start_time = time.time()
-                    self.schedule = self.solve_csp_scheduling(env, orders=current_orders)
-                    elapsed_time = time.time() - start_time
-                    print(f"[CSPAgent] スケジューリング時間: {elapsed_time:.4f} 秒")
-                    
-                    self._print_schedule(self.schedule)
-                    
-                    # ② 新スケジュール内で「実行中タスク」を探してインデックスを復元する
-                    if self.sc_2agent:
-                        new_idx = {0: 0, 1: 0}
-                        for aidx in [0, 1]:
-                            in_prog_tid = in_progress_tasks.get(aidx)
-                            if in_prog_tid:
-                                new_sc = self.schedule_per_agent.get(aidx, [])
-                                found = False
-                                for i, t in enumerate(new_sc):
-                                    if t['id'] == in_prog_tid:
-                                        new_idx[aidx] = i
-                                        print(f"  [継続] AI{aidx}: {in_prog_tid} → 新スケジュール idx={i} から再開")
-                                        found = True
-                                        break
-                                if not found:
-                                    # 新スケジュールに実行中タスクがない = 他エージェントが担当 or 不要になった
-                                    # → in_prog_tid を completed とみなしてスキップ
-                                    print(f"  [スキップ] AI{aidx}: {in_prog_tid} が新スケジュールに存在しない → idx=0から開始")
-                                    new_idx[aidx] = 0
-                        self.current_task_idx = new_idx
-                    else:
-                        self.current_task_idx = 0
-
+                    self._record_skill_estimation_event(env, current_orders, removed)
                 except Exception as e:
-                    print(f"[CSPAgent] CSPスケジュール中に例外: {e}")
+                    print(f"[SkillEstimator] スキル推定中に例外: {e}")
                     import traceback
                     traceback.print_exc()
 
-                # === スキル推定 ===
-                if self.skill_emi and self.initialized and hasattr(self, 'schedule_per_agent'):
-                    try:
-                        self._run_skill_estimation(env, current_orders, removed)
-                    except Exception as e:
-                        print(f"[SkillEstimator] スキル推定中に例外: {e}")
-                        import traceback
-                        traceback.print_exc()
-                
-                self.prev_task_ids = current_task_ids
-                self.initialized = True
+            self.initialized = True
 
+        self.prev_task_ids = current_task_ids
 
         # スケジュール実行
         if not self.sc_2agent:
             if not hasattr(self, 'schedule') or not self.schedule or self.current_task_idx >= len(self.schedule):
                 return (0, 0), "タスクなし"
 
-            task = self.schedule[self.current_task_idx]
+            scheduled_task = self.schedule[self.current_task_idx]
+            task = self._get_carry_override_task(env, 0, scheduled_task)
+            scheduled_tid = scheduled_task['id']
             tid = task['id']
-            verb, obj, order_idx = tid
+            verb, obj, order_uid = tid
             res = task['res'] 
 
             # Construct Task Name
@@ -262,7 +628,7 @@ class CSPAgent:
             elif verb == 'cook':
                 parts = obj.replace(' soup', '').split('-')
                 task_name = f"cook_{'_'.join(parts)}"
-                self.task_agent.assigned_counter = None
+                self.task_agent.assigned_counter = task.get('assigned_counter')
             elif verb == 'serve':
                 parts = obj.replace(' soup', '').split('-')
                 task_name = f"serve_{'_'.join(parts)}"
@@ -271,12 +637,23 @@ class CSPAgent:
             if task_name:
                 self.task_agent.task_name = task_name
                 action, reason = self.task_agent(env)
+                hold_before = self._hold_before_for_log(env)
+                hold_hint = self._hold_hint_for_log(hold_before, reason)
+                print(
+                    f"[ACTION] AI task={task_name} tid={tid} action={action} reason='{reason}' "
+                    f"hold_before={hold_before} hold_hint={hold_hint} counter={self.task_agent.assigned_counter}"
+                )
                 
                 # Check completion
                 if "Done" in reason or "done" in reason or "完了" in reason:
                     print(f"[CSPAgent] タスク {task_name} 完了。次へ移動。")
+                    if verb == 'serve':
+                        print(f"[SERVE] AI task={task_name} tid={tid} completed=True")
                     self.completed_task_ids.add(tid)
-                    self.current_task_idx += 1
+                    if tid == scheduled_tid:
+                        self.current_task_idx += 1
+                    self._mark_reschedule_needed("task_completed_single")
+                    self.carry_task_by_agent = None
                     # Reset assignments
                     self.task_agent.assigned_cutboard = None
                     self.task_agent.assigned_pot = None
@@ -302,9 +679,11 @@ class CSPAgent:
                     reasons.append(f"AI{agent_idx}:Idle")
                     continue
                 
-                task = sc[t_idx]
+                scheduled_task = sc[t_idx]
+                task = self._get_carry_override_task(env, agent_idx, scheduled_task)
+                scheduled_tid = scheduled_task['id']
                 tid = task['id']
-                verb, obj, order_idx = tid
+                verb, obj, order_uid = tid
                 
                 import copy
                 e_agent = copy.copy(env)
@@ -321,23 +700,23 @@ class CSPAgent:
                 if verb == 'cook':
                     parts = obj.replace(' soup', '').split('-')
                     for p in parts:
-                        req_tid = ('chop', p.strip(), order_idx)
+                        req_tid = ('chop', p.strip(), order_uid)
                         if req_tid not in self.completed_task_ids and req_tid in all_scheduled_ids:
                             can_start = False
                             break
                 elif verb == 'serve':
-                    req_tid = ('cook', obj, order_idx)
-                    if req_tid not in self.completed_task_ids and req_tid in all_scheduled_ids:
-                        can_start = False
+                    # serve は皿の先取りができるので、cook 完了前でも TaskAgent に進める。
+                    # 鍋前待機や実際の取得タイミングは process_serve_task 側で判定する。
+                    can_start = True
                         
                 if not can_start:
                     missing_deps = []
                     if verb == 'cook':
                         parts = obj.replace(' soup', '').split('-')
-                        missing_deps = [('chop', p.strip(), order_idx) for p in parts if ('chop', p.strip(), order_idx) not in self.completed_task_ids]
+                        missing_deps = [('chop', p.strip(), order_uid) for p in parts if ('chop', p.strip(), order_uid) not in self.completed_task_ids]
                     elif verb == 'serve':
-                        if ('cook', obj, order_idx) not in self.completed_task_ids:
-                            missing_deps = [('cook', obj, order_idx)]
+                        if ('cook', obj, order_uid) not in self.completed_task_ids:
+                            missing_deps = [('cook', obj, order_uid)]
                     print(f"[DEBUG] AI{agent_idx} 待機中: {verb} '{obj}' の前提タスク未完了 -> {missing_deps}")
                     print(f"[DEBUG]   完了済み: {self.completed_task_ids}")
                     
@@ -363,6 +742,11 @@ class CSPAgent:
                 
                 ta = self.task_agents[agent_idx]
                 task_name = None
+                ta.protected_counters = {
+                    entry['counter']
+                    for entry in self.counter_policy_by_order.values()
+                    if entry.get('counter') is not None
+                }
                 
                 # どのタスクでもassigned_counterを引き継ぐ（CSPでスケジュールされたカウンターがあるならそれを使う）
                 ta.assigned_counter = task.get('assigned_counter')
@@ -380,23 +764,40 @@ class CSPAgent:
 
                 if task_name:
                     ta.task_name = task_name
+                    if verb == 'cook':
+                        print(f"[DEBUG] AI{agent_idx} cook_task_start tid={tid} assigned_counter={ta.assigned_counter} completed={sorted(self.completed_task_ids)} hold={getattr(e_agent, 'hold', None)}")
                     
                     # ユーザーの要望「同時に動かすのではなく交互に」
                     if agent_idx == self.turn:
                         action, reason = ta(e_agent, dynamic_obstacles=dynamic_obstacles)
                     else:
                         action, reason = (0, 0), "待機(相手のターン)"
+
+                    hold_before = self._hold_before_for_log(e_agent)
+                    hold_hint = self._hold_hint_for_log(hold_before, reason)
+
+                    print(
+                        f"[ACTION] AI{agent_idx} task={task_name} tid={tid} action={action} reason='{reason}' "
+                        f"hold_before={hold_before} hold_hint={hold_hint} counter={ta.assigned_counter} turn={self.turn}"
+                    )
                     
                     if action == (0, 0) and reason not in ("待機(相手のターン)",):
-                        print(f"[DEBUG] AI{agent_idx} 停止: task={task_name} reason='{reason}' counter={ta.assigned_counter} hold={getattr(e_agent, 'hold', None)}")
+                        print(f"[DEBUG] AI{agent_idx} 停止: task={task_name} reason='{reason}' counter={ta.assigned_counter} hold_before={hold_before} hold_hint={hold_hint}")
+
+                    self._update_stall_state(agent_idx, action, reason)
 
                     
-                    if "Done" in reason or "done" in reason or "完了" in reason:
+                    if reason.endswith("(Done)") or reason.endswith("(完了)"):
                         print(f"[CSPAgent] AI{agent_idx} タスク {task_name} 完了。")
+                        if verb == 'serve':
+                            print(f"[SERVE] AI{agent_idx} task={task_name} tid={tid} completed=True")
                         self.completed_task_ids.add(tid)
                         if self.skill_emi:
                             self.ai_completed_task_ids.add(tid)
-                        self.current_task_idx[agent_idx] += 1
+                        if tid == scheduled_tid:
+                            self.current_task_idx[agent_idx] += 1
+                        self._mark_reschedule_needed(f"task_completed_agent_{agent_idx}")
+                        self.carry_task_by_agent[agent_idx] = None
                         ta.assigned_cutboard = None
                         ta.assigned_pot = None
                         ta.assigned_plate = None
@@ -468,7 +869,7 @@ class CSPAgent:
         print("\n=== OR-Tools 選択結果（予算内最大化） ===")
         total = 0
         for t in selected_tasks:
-            verb = t['verb']; obj = t['obj']; order = t['order']
+            verb = t['verb']; obj = t['obj']; order = t.get('display_order', t.get('slot_idx', t['order']))
             dur = t['dur']
             total += dur
             print(f"選択: {verb} {obj} (注文{order+1}) 所要={dur}")
@@ -495,6 +896,28 @@ class CSPAgent:
 
     def _task_duration_frames(self, env, verb, obj, order_idx, assigned_counter=None):
         resources = self._get_resources(env)
+
+        def get_holding_positions(predicate):
+            positions = []
+            for agent in getattr(env, 'agents', []):
+                holding = getattr(agent, 'holding', None)
+                if holding is not None and predicate(holding):
+                    pos = getattr(agent, 'location', None)
+                    if pos is not None:
+                        positions.append(pos)
+            return positions
+
+        def chopped_base_name(item):
+            if item is None:
+                return None
+            if hasattr(item, 'is_chopped') and item.is_chopped():
+                contents = getattr(item, 'contents', [])
+                if contents:
+                    return getattr(contents[0], 'name', None)
+            name = getattr(item, 'name', '')
+            if name.startswith('Chopped'):
+                return name.replace('Chopped', '')
+            return None
         
         def get_nearest(start_pos, candidates):
             if not candidates: return None
@@ -504,8 +927,16 @@ class CSPAgent:
         if verb == 'chop':
             tile_map = {"lettuce": "FreshLettuceTile", "onion": "FreshOnionTile", "tomato": "FreshTomatoTile"}
             ing_pos_list = env.get_pos_by_obj_gs(gs=tile_map.get(obj, ""))
-            if not ing_pos_list: return None
-            ing_pos = ing_pos_list[0] 
+            holding_raw_positions = get_holding_positions(
+                lambda holding: getattr(holding, 'name', '').lower() == obj
+            )
+            if holding_raw_positions:
+                ing_pos = holding_raw_positions[0]
+                pickup_cost = 0
+            else:
+                if not ing_pos_list: return None
+                ing_pos = ing_pos_list[0]
+                pickup_cost = 1
 
             cutboard_pos_list = resources['cutboards']
             if not cutboard_pos_list: return None
@@ -547,17 +978,36 @@ class CSPAgent:
             
             if min_total is None:
                 return None
-            return int(min_total + 8 + 1 + 1 + 1)
+            return int(min_total + 8 + pickup_cost + 1 + 1)
 
         elif verb == 'cook':
             pot_pos_list = resources['pots']
             if not pot_pos_list: return None
             
             pot_pos = pot_pos_list[order_idx % len(pot_pos_list)]
-            
-            counters = env.get_pos_by_obj_gs(gs="Counter")
-            if not counters: return None
-            start_pos = get_nearest(pot_pos, counters)
+
+            needed_ings = obj.replace(' soup', '').split('-')
+            start_candidates = []
+
+            for pos, world_obj in env.pos_obj.items():
+                if world_obj is None:
+                    continue
+                base_name = chopped_base_name(world_obj)
+                if base_name is not None and base_name.lower() in needed_ings:
+                    start_candidates.append(pos)
+
+            start_candidates.extend(
+                get_holding_positions(
+                    lambda holding: chopped_base_name(holding) is not None and chopped_base_name(holding).lower() in needed_ings
+                )
+            )
+
+            if start_candidates:
+                start_pos = get_nearest(pot_pos, start_candidates)
+            else:
+                counters = env.get_pos_by_obj_gs(gs="Counter")
+                if not counters: return None
+                start_pos = get_nearest(pot_pos, counters)
             
             d = self.astar_distance(env, start_pos, pot_pos)
             if d is None: return None
@@ -580,6 +1030,50 @@ class CSPAgent:
             return None
     def get_assigned_counters(self):
         return getattr(self, 'assigned_counters_display_map', {})
+
+    def _get_counter_policy_entry(self, order_uid):
+        return self.counter_policy_by_order.setdefault(order_uid, {
+            'counter': None,
+            'armed': False,
+            'last_state': None,
+        })
+
+    def _get_assigned_counter(self, order_uid):
+        return self._get_counter_policy_entry(order_uid)['counter']
+
+    def _set_assigned_counter(self, order_uid, counter_pos):
+        self._get_counter_policy_entry(order_uid)['counter'] = counter_pos
+
+    def _get_counter_food_names(self, env, counter_pos):
+        counter_obj = env.pos_obj.get(counter_pos)
+        if counter_obj is None or not hasattr(counter_obj, 'contents'):
+            return set()
+
+        return {
+            getattr(food, 'full_name', getattr(food, 'name', ''))
+            for food in counter_obj.contents
+            if getattr(food, 'full_name', getattr(food, 'name', '')) != 'Plate'
+        }
+
+    def _log_counter_policy(self, order_uid, action, counter_pos, details=""):
+        entry = self._get_counter_policy_entry(order_uid)
+        state = (action, counter_pos, details)
+        if entry['last_state'] == state:
+            return
+        entry['last_state'] = state
+
+        suffix = f" {details}" if details else ""
+        print(f"[CounterPolicy] order_uid={order_uid} action={action} counter={counter_pos}{suffix}")
+
+    def _resolve_assigned_counter(self, env, order_uid):
+        assigned_counter = self._get_assigned_counter(order_uid)
+        if assigned_counter is None:
+            return None, False
+
+        counter_food_names = self._get_counter_food_names(env, assigned_counter)
+        details = f"foods={sorted(counter_food_names)}" if counter_food_names else "reason=fixed"
+        self._log_counter_policy(order_uid, "fixed", assigned_counter, details)
+        return assigned_counter, False
 
     def _calculate_dynamic_merge_point(self, env, ings_lower, order_idx, pot_locs, used_counters):
         ing = ings_lower[0] if ings_lower else None
@@ -632,7 +1126,62 @@ class CSPAgent:
 
     def _build_order_tasks(self, env):
         available_chopped = {}
+        available_chopped_by_pos = {}
         pot_states = []
+        held_object_ids = {
+            id(getattr(agent, 'holding', None))
+            for agent in getattr(env, 'agents', [])
+            if getattr(agent, 'holding', None) is not None
+        }
+
+        def register_chopped_item(item, location=None):
+            if item is None:
+                return
+
+            def add_chopped(base_name):
+                if not base_name:
+                    return
+                available_chopped[base_name] = available_chopped.get(base_name, 0) + 1
+                if location is not None:
+                    pos_stock = available_chopped_by_pos.setdefault(location, {})
+                    pos_stock[base_name] = pos_stock.get(base_name, 0) + 1
+
+            if hasattr(item, 'is_chopped') and item.is_chopped():
+                for food in getattr(item, 'contents', []):
+                    if getattr(food, 'name', None):
+                        add_chopped(food.name)
+                return
+
+            name = getattr(item, 'name', '')
+            if name.startswith('Chopped'):
+                base_name = name.replace('Chopped', '')
+                add_chopped(base_name)
+
+        def consume_chopped(ingredient_name, assigned_counter, reserved_counters):
+            preferred_positions = []
+            if assigned_counter is not None:
+                preferred_positions.append(assigned_counter)
+            else:
+                preferred_positions.extend(
+                    pos for pos in available_chopped_by_pos.keys()
+                    if pos not in reserved_counters
+                )
+
+            for pos in preferred_positions:
+                pos_stock = available_chopped_by_pos.get(pos, {})
+                if pos_stock.get(ingredient_name, 0) <= 0:
+                    continue
+                pos_stock[ingredient_name] -= 1
+                if pos_stock[ingredient_name] <= 0:
+                    del pos_stock[ingredient_name]
+                if not pos_stock:
+                    available_chopped_by_pos.pop(pos, None)
+                available_chopped[ingredient_name] -= 1
+                if available_chopped[ingredient_name] <= 0:
+                    del available_chopped[ingredient_name]
+                return True
+
+            return False
 
         if hasattr(env, 'world_all'):
             all_objects = env.world_all
@@ -649,103 +1198,55 @@ class CSPAgent:
         cutboard_locs = env.get_pos_by_obj_gs(gs="Cutboard")
 
         for obj in all_objects:
+            if id(obj) in held_object_ids:
+                continue
             if type(obj).__name__ == 'Object':
                 if obj.location in pot_locs:
                     c_names = sorted([c.name for c in obj.contents])
                     pot_states.append({'names': c_names, 'obj': obj, 'used': False})
                 else:
                     if obj.location not in cutboard_locs:
-                        if hasattr(obj, 'is_chopped') and obj.is_chopped():
-                            for food in obj.contents:
-                                available_chopped[food.name] = available_chopped.get(food.name, 0) + 1
+                        register_chopped_item(obj, obj.location)
 
         resources = self._get_resources(env)
         orders = []
-        order_idx = 0
-
         current_orders = env.order.current_orders if hasattr(env, 'order') and hasattr(env.order, 'current_orders') else []
+        order_uids = self._refresh_active_order_uids(current_orders)
 
-        if not hasattr(self, 'assigned_counters_map'):
-            self.assigned_counters_map = {}  # stable_key -> counter_pos
-
-        # 完了した注文のキーを解放する
-        active_keys = set()
-        for idx, ot in enumerate(current_orders):
-            goal = ot[0]
-            n = getattr(goal, 'full_name', '').lower()
-            if any(ing in n for ing in ['lettuce', 'onion', 'tomato']):
-                active_keys.add(f"{n}_{idx}")
-        for k in [k for k in list(self.assigned_counters_map) if k not in active_keys]:
-            del self.assigned_counters_map[k]
-
-        used_counters = list(self.assigned_counters_map.values())
+        used_counters = [
+            entry['counter']
+            for entry in self.counter_policy_by_order.values()
+            if entry.get('counter') is not None
+        ]
         assigned_counters_display_map = {}
 
-        for order_tuple in current_orders:
+        for order_idx, order_tuple in enumerate(current_orders):
             goal = order_tuple[0]
             name = getattr(goal, 'full_name', '').lower()
             ings_lower = [ing for ing in ['lettuce', 'onion', 'tomato'] if ing in name]
             if not ings_lower:
-                order_idx += 1
                 continue
 
-            stable_key = f"{name}_{order_idx}"
+            order_uid = order_uids[order_idx]
             ings_cap = [ing.capitalize() for ing in ings_lower]
-            chopped_names = {f"Chopped{i}" for i in ings_cap}
-            all_counters = resources.get('counters', [])
 
-            current = self.assigned_counters_map.get(stable_key)
-            # 他の注文に割り当て済みのカウンター（自分のは除く）
-            other_orders_counters = {c for c in used_counters if c != current}
+            assigned_counter, released_for_cook = self._resolve_assigned_counter(
+                env,
+                order_uid,
+            )
 
-            # ルール3: 別のカウンターに必要な食材がある → そこを置き場にする
-            # ただし他注文に割り当て済みのカウンターは除外
-            food_counter = None
-            for c in all_counters:
-                if c in other_orders_counters:
-                    continue  # 他注文の置き場は除外
-                obj = env.pos_obj.get(c)
-                if obj is not None and hasattr(obj, 'contents'):
-                    if {f.name for f in obj.contents} & chopped_names:
-                        food_counter = c
-                        break
-
-            if food_counter and food_counter != current:
-                assigned_counter = food_counter
-                self.assigned_counters_map[stable_key] = assigned_counter
-                if current in used_counters:
-                    used_counters.remove(current)
-                if assigned_counter not in used_counters:
-                    used_counters.append(assigned_counter)
-            elif current is not None:
-                cur_obj = env.pos_obj.get(current)
-                if cur_obj is not None and hasattr(cur_obj, 'contents'):
-                    if {f.name for f in cur_obj.contents} & chopped_names:
-                        # ルール1: 適切な食材がある → そのまま
-                        assigned_counter = current
-                    else:
-                        # ルール2: 不適切な食材がある → 再計算（他注文の場所も除外）
-                        assigned_counter = self._calculate_dynamic_merge_point(env, ings_lower, order_idx, pot_locs, list(other_orders_counters))
-                        if assigned_counter:
-                            self.assigned_counters_map[stable_key] = assigned_counter
-                            if current in used_counters:
-                                used_counters.remove(current)
-                            used_counters.append(assigned_counter)
-                else:
-                    # カウンターが空 → 確定済みをそのまま
-                    assigned_counter = current
-            else:
-                # 未割り当て → 最適な場所を計算
+            if assigned_counter is None and not released_for_cook:
                 assigned_counter = self._calculate_dynamic_merge_point(env, ings_lower, order_idx, pot_locs, used_counters)
-                if assigned_counter:
-                    self.assigned_counters_map[stable_key] = assigned_counter
-                    used_counters.append(assigned_counter)
+                if assigned_counter is not None:
+                    self._set_assigned_counter(order_uid, assigned_counter)
+                    if assigned_counter not in used_counters:
+                        used_counters.append(assigned_counter)
+                    self._log_counter_policy(order_uid, "assign", assigned_counter, "reason=new_order")
 
             assigned_counters_display_map[order_idx] = assigned_counter
 
             soup_name = '-'.join(ings_lower) + ' soup'
             tasks = []
-
             sorted_ings = sorted(ings_cap)
             cook_needed = True
 
@@ -758,15 +1259,20 @@ class CSPAgent:
             for ing in ings_cap:
                 if not cook_needed:
                     continue
-                if available_chopped.get(ing, 0) > 0:
-                    available_chopped[ing] -= 1
+                reserved_other_counters = {
+                    counter for counter in used_counters
+                    if counter is not None and counter != assigned_counter
+                }
+                if consume_chopped(ing, assigned_counter, reserved_other_counters):
                     continue
                 dur = self._task_duration_frames(env, 'chop', ing.lower(), order_idx, assigned_counter)
                 if dur is None:
                     continue
                 tasks.append({
-                    'id': ('chop', ing.lower(), order_idx),
-                    'verb': 'chop', 'obj': ing.lower(), 'order': order_idx,
+                    'id': ('chop', ing.lower(), order_uid),
+                    'verb': 'chop', 'obj': ing.lower(), 'order': order_uid,
+                    'slot_idx': order_idx,
+                    'display_order': order_idx,
                     'dur': dur,
                     'res_candidates': [('cutboard', r) for r in resources['cutboards']],
                     'assigned_counter': assigned_counter
@@ -776,8 +1282,10 @@ class CSPAgent:
                 dur = self._task_duration_frames(env, 'cook', soup_name, order_idx)
                 if dur is not None:
                     tasks.append({
-                        'id': ('cook', soup_name, order_idx),
-                        'verb': 'cook', 'obj': soup_name, 'order': order_idx,
+                        'id': ('cook', soup_name, order_uid),
+                        'verb': 'cook', 'obj': soup_name, 'order': order_uid,
+                        'slot_idx': order_idx,
+                        'display_order': order_idx,
                         'dur': dur,
                         'res_candidates': [('pot', r) for r in resources['pots']],
                         'assigned_counter': assigned_counter
@@ -786,15 +1294,16 @@ class CSPAgent:
             dur = self._task_duration_frames(env, 'serve', soup_name, order_idx)
             if dur is not None:
                 tasks.append({
-                    'id': ('serve', soup_name, order_idx),
-                    'verb': 'serve', 'obj': soup_name, 'order': order_idx,
+                    'id': ('serve', soup_name, order_uid),
+                    'verb': 'serve', 'obj': soup_name, 'order': order_uid,
+                    'slot_idx': order_idx,
+                    'display_order': order_idx,
                     'dur': dur,
                     'res_candidates': [],
                     'assigned_counter': assigned_counter
                 })
 
-            orders.append({'order': order_idx, 'ingredients': ings_lower, 'tasks': tasks})
-            order_idx += 1
+            orders.append({'order': order_uid, 'display_order': order_idx, 'name': soup_name, 'ingredients': ings_lower, 'tasks': tasks})
 
         self.assigned_counters_display_map = assigned_counters_display_map
         return orders
@@ -841,7 +1350,7 @@ class CSPAgent:
         for t in tasks:
             verb = t['verb']
             obj = t['obj']
-            order_idx = t['order']
+            order_idx = t.get('slot_idx', t['order'])
             
             if verb == 'chop':
                 # 食材の位置から一番近いまな板を選ぶ
@@ -1019,11 +1528,11 @@ class CSPAgent:
         for i in range(num_tasks):
             t = tasks[i]
             tid = t['id']
-            order_idx = t['order']
-            if order_idx not in vars_by_order: vars_by_order[order_idx] = []
+            order_uid = t['order']
+            if order_uid not in vars_by_order: vars_by_order[order_uid] = []
             
             v_obj = {'start': starts[i], 'end': ends[i], 'task': t, 'interval': intervals[i]}
-            vars_by_order[order_idx].append(v_obj)
+            vars_by_order[order_uid].append(v_obj)
             vars_by_tid[tid] = v_obj
 
         # 標準的な順序制約 (Chop -> Cook -> Serve)
@@ -1167,7 +1676,8 @@ class CSPAgent:
                                     'start': solver.Value(starts[j]),
                                     'end': solver.Value(ends[j]),
                                     'res': t.get('fixed_res'),
-                                    'assigned_counter': t.get('assigned_counter')
+                                    'assigned_counter': t.get('assigned_counter'),
+                                    'display_order': t.get('display_order', t.get('slot_idx', t['order']))
                                 })
                                 print(f" -> {t['verb']} {t['obj']}")
                             current_node = j
@@ -1188,6 +1698,7 @@ class CSPAgent:
                         'end': solver.Value(ends[i]),
                         'res': t.get('fixed_res'),
                         'assigned_counter': t.get('assigned_counter'),
+                        'display_order': t.get('display_order', t.get('slot_idx', t['order'])),
                         'agent_idx': agent_idx
                     })
                 # 各エージェントのタスクを開始時刻順に並べる
@@ -1209,7 +1720,7 @@ class CSPAgent:
         
         print("\n--- 生成タスク (環境状態でフィルタ済) ---")
         for o in orders:
-            print(f"注文 {o['order']} (食材: {o['ingredients']}):")
+            print(f"注文 {o.get('display_order', o['order'])} (食材: {o['ingredients']}):")
             if not o['tasks']:
                 print("  (タスク不要)")
             for t in o['tasks']:
@@ -1290,29 +1801,11 @@ class CSPAgent:
             for item in agents_sched[aid]:
                 tid = item['id']; start=item['start']; end=item['end']; res=item['res']
                 verb,obj,order = tid
-                print(f"{verb} {obj} (注文{order+1}) : 開始={start}, 終了={end}, 資源={res}")
+                display_order = item.get('display_order', order)
+                print(f"{verb} {obj} (注文{display_order+1}) : 開始={start}, 終了={end}, 資源={res}")
                 
         print(f"\n総投入フレーム: {total_frames}")
         print("===================================\n")
-
-    def get_assigned_counters(self):
-        """
-        デバッグ用：各注文ごとの割り当てカウンター座標を返す
-        Returns: {order_idx: (x, y), ...}
-        """
-        if not hasattr(self, 'schedule') or not self.schedule:
-            return {}
-        
-        assignments = {}
-        for task in self.schedule:
-            tid = task['id']
-            # tid is (verb, obj, order_idx)
-            if len(tid) == 3 and tid[0] == 'chop':
-                order_idx = tid[2]
-                counter = task.get('assigned_counter')
-                if counter:
-                    assignments[order_idx] = counter
-        return assignments
 
     def astar_distance(self, env, start, goal):
         import heapq
@@ -1364,9 +1857,22 @@ class CSPAgent:
                     heapq.heappush(open_set, (f_score[neighbor], neighbor))
         return None
 
-    def _run_skill_estimation(self, env, current_orders, removed):
+    def _record_skill_estimation_event(self, env, current_orders, removed):
+        if not hasattr(self, 'skill_estimation_log'):
+            return
+
+        self.skill_estimation_log.append({
+            'time': env.time,
+            'env': deepcopy(env),
+            'current_orders': deepcopy(current_orders),
+            'removed': deepcopy(list(removed)),
+            'ai_completed_task_ids': deepcopy(list(self.ai_completed_task_ids)),
+            'schedule_per_agent': deepcopy(getattr(self, 'schedule_per_agent', {})),
+        })
+
+    def _evaluate_skill_estimation_event(self, estimator, env, current_orders, removed, emit_logs=False):
         """
-        スキル推定を実行する。
+        記録済みイベント 1 件からスキル推定を計算する。
 
         タスク変化が発生したタイミングで呼ばれる。
         「エージェント0が何もしなかった場合の仮想計画(A_virtual)」と
@@ -1381,10 +1887,11 @@ class CSPAgent:
             current_orders: 現在の注文リスト
             removed: 前回から消えたタスクIDの集合
         """
-        if not hasattr(self, 'skill_estimator'):
-            return
+        def log(message):
+            if emit_logs:
+                print(message)
 
-        print(f"[SkillEstimator] 推定フローを開始: env.time={env.time}")
+        log(f"[SkillEstimator] 推定フローを開始: env.time={env.time}")
 
         # 現在の実際のJoint計画を取得（リスケジュール後の最新状態）
         # エージェント0とエージェント1の両方のタスク配列を連結して比較する
@@ -1397,26 +1904,26 @@ class CSPAgent:
             agent_idx=1  # エージェント1のスケジュール
         )
         actual_plan_ids = actual_plan_ids_0 + actual_plan_ids_1
-        print(f"[SkillEstimator] 実際計画の抽出: AI0={actual_plan_ids_0}, AI1={actual_plan_ids_1}")
+        log(f"[SkillEstimator] 実際計画の抽出: AI0={actual_plan_ids_0}, AI1={actual_plan_ids_1}")
 
         # エージェント0が完了したタスクの特定
         # removed（今回消えたタスク）のうち、AI(エージェント1)が完了していないもの = エージェント0が完了させたタスク
         agent0_removed = removed - self.ai_completed_task_ids if removed else set()
 
         if agent0_removed:
-            print(f"[SkillEstimator] エージェント0が完了させたタスク: {sorted(agent0_removed)}")
+            log(f"[SkillEstimator] エージェント0が完了させたタスク: {sorted(agent0_removed)}")
         else:
-            print("[SkillEstimator] エージェント0が完了させたタスクはなし")
+            log("[SkillEstimator] エージェント0が完了させたタスクはなし")
 
         # 仮想計画の計算:
         # 「エージェント0が何もしなかった場合」= エージェント0が完了させたタスクを元に戻す
         if agent0_removed:
-            print("[SkillEstimator] 仮想注文を再構築して、エージェント0が何もしなかった場合の計画を再計算する")
+            log("[SkillEstimator] 仮想注文を再構築して、エージェント0が何もしなかった場合の計画を再計算する")
             # エージェント0が完了させたタスクを含む仮想注文リストを再構築
             virtual_orders = self._build_virtual_orders(env, current_orders, agent0_removed)
             try:
                 # 仮想計画をCSPで計算（通常のsolve_csp_schedulingを流用）
-                virtual_schedule = self.solve_csp_scheduling(env, orders=virtual_orders)
+                self.solve_csp_scheduling(env, orders=virtual_orders)
                 virtual_plan_ids_0 = SkillEstimator.extract_plan_ids(
                     self.schedule_per_agent if hasattr(self, 'schedule_per_agent') else None,
                     agent_idx=0
@@ -1426,7 +1933,7 @@ class CSPAgent:
                     agent_idx=1
                 )
                 virtual_plan_ids = virtual_plan_ids_0 + virtual_plan_ids_1
-                print(f"[SkillEstimator] 仮想計画の抽出: AI0={virtual_plan_ids_0}, AI1={virtual_plan_ids_1}")
+                log(f"[SkillEstimator] 仮想計画の抽出: AI0={virtual_plan_ids_0}, AI1={virtual_plan_ids_1}")
 
                 # ★重要: 仮想計画計算後、実際の計画で再度スケジュールを復元する
                 self.schedule = self.solve_csp_scheduling(env, orders=current_orders)
@@ -1440,30 +1947,50 @@ class CSPAgent:
                     agent_idx=1
                 )
                 actual_plan_ids = actual_plan_ids_0 + actual_plan_ids_1
-                print(f"[SkillEstimator] 実際計画を復元: AI0={actual_plan_ids_0}, AI1={actual_plan_ids_1}")
+                log(f"[SkillEstimator] 実際計画を復元: AI0={actual_plan_ids_0}, AI1={actual_plan_ids_1}")
             except Exception as e:
-                print(f"[SkillEstimator] 仮想計画計算に失敗: {e}")
+                log(f"[SkillEstimator] 仮想計画計算に失敗: {e}")
                 virtual_plan_ids = actual_plan_ids  # フォールバック: 同じ計画=V_coop=0
-                print("[SkillEstimator] フォールバック: 仮想計画を実際計画と同一にして継続する")
+                log("[SkillEstimator] フォールバック: 仮想計画を実際計画と同一にして継続する")
         else:
             # エージェント0が何も完了させていない場合
             # → 環境変化のみ。仮想計画 = 前回の計画（prev_ai_plan）
-            virtual_plan_ids = self.skill_estimator.prev_ai_plan if self.skill_estimator.prev_ai_plan else actual_plan_ids
-            if self.skill_estimator.prev_ai_plan:
-                print(f"[SkillEstimator] 前回計画を仮想計画として使用: {self.skill_estimator.prev_ai_plan}")
+            virtual_plan_ids = estimator.prev_ai_plan if estimator.prev_ai_plan else actual_plan_ids
+            if estimator.prev_ai_plan:
+                log(f"[SkillEstimator] 前回計画を仮想計画として使用: {estimator.prev_ai_plan}")
             else:
-                print("[SkillEstimator] 前回計画がないため、仮想計画=実際計画で開始する")
+                log("[SkillEstimator] 前回計画がないため、仮想計画=実際計画で開始する")
 
         # スキル推定値を更新
-        self.skill_estimator.update(
+        estimator.update(
             time=env.time,
             virtual_plan_ids=virtual_plan_ids,
             actual_plan_ids=actual_plan_ids
         )
 
         # 次回比較用に現在の計画を保存
-        self.skill_estimator.prev_ai_plan = list(actual_plan_ids)
-        print(f"[SkillEstimator] 次回比較用の計画を保存: {self.skill_estimator.prev_ai_plan}")
+        estimator.prev_ai_plan = list(actual_plan_ids)
+        log(f"[SkillEstimator] 次回比較用の計画を保存: {estimator.prev_ai_plan}")
+
+    def calculate_skill_estimation_from_log(self, skill_estimation_log=None, emit_logs=False):
+        events = skill_estimation_log if skill_estimation_log is not None else getattr(self, 'skill_estimation_log', [])
+        estimator = SkillEstimator(alpha=getattr(self, 'skill_estimation_alpha', 0.3))
+
+        for event in events:
+            self.schedule_per_agent = deepcopy(event.get('schedule_per_agent', {}))
+            self.ai_completed_task_ids = {tuple(task_id) for task_id in event.get('ai_completed_task_ids', [])}
+            self._evaluate_skill_estimation_event(
+                estimator=estimator,
+                env=deepcopy(event['env']),
+                current_orders=deepcopy(event['current_orders']),
+                removed={tuple(task_id) for task_id in event.get('removed', [])},
+                emit_logs=emit_logs,
+            )
+
+        return {
+            'history': estimator.get_history(),
+            'summary': estimator.get_summary(),
+        }
 
     def _build_virtual_orders(self, env, current_orders, agent0_removed):
         """
@@ -1486,12 +2013,12 @@ class CSPAgent:
 
         # エージェント0が完了させたタスクを仮想注文に追加し直す
         for tid in agent0_removed:
-            verb, obj, order_idx = tid
+            verb, obj, order_uid = tid
 
             # 対応する注文を見つける
             target_order = None
             for o in virtual_orders:
-                if o['order'] == order_idx:
+                if o['order'] == order_uid:
                     target_order = o
                     break
 
@@ -1503,7 +2030,9 @@ class CSPAgent:
                 else:
                     ings = obj.replace(' soup', '').split('-')
                 target_order = {
-                    'order': order_idx,
+                    'order': order_uid,
+                    'display_order': order_uid,
+                    'name': obj if verb != 'chop' else '-'.join(ings) + ' soup',
                     'ingredients': ings,
                     'tasks': []
                 }
@@ -1515,7 +2044,8 @@ class CSPAgent:
                 continue
 
             # タスクを追加
-            dur = self._task_duration_frames(env, verb, obj, order_idx)
+            slot_idx = target_order.get('display_order', target_order['order'])
+            dur = self._task_duration_frames(env, verb, obj, slot_idx)
             if dur is None:
                 dur = 10  # フォールバック
 
@@ -1532,7 +2062,9 @@ class CSPAgent:
                 'id': tid,
                 'verb': verb,
                 'obj': obj,
-                'order': order_idx,
+                'order': order_uid,
+                'slot_idx': slot_idx,
+                'display_order': slot_idx,
                 'dur': dur,
                 'res_candidates': res_candidates,
                 'assigned_counter': assigned_counter

@@ -214,6 +214,11 @@ if __name__ == '__main__':
         print("\nGame interrupted by user.")
 
     finally:
+        if arglist.skillemi and 'skill_estimation_log' in replay._d['dict'] and hasattr(game.ai, 'calculate_skill_estimation_from_log'):
+            replay['skill_estimation'] = game.ai.calculate_skill_estimation_from_log(
+                skill_estimation_log=replay['skill_estimation_log'],
+                emit_logs=False,
+            )
         print(replay['order_result'])
         repdir = Path(__file__).resolve().parent / 'replay'
         replay.save(repdir / f'{arglist.map}-{agent0_name}-{agent1_name or "human"}-{datetime.now().strftime("%Y%m%d_%H%M%S")}.rep')
