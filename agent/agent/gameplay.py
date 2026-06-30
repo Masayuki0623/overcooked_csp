@@ -1,11 +1,10 @@
 # modules for game
 from gym_cooking.misc.game.game import Game
 from gym_cooking.misc.game.utils import *
-from gym_cooking.utils.gui import popup_text
+from gym_cooking.utils.gui import popup_text, popup_task_choice
 from gym_cooking.utils.replay import Replay
 from agent.executor.low import EnvState
 from agent.mind.agent import get_agent, AgentSetting
-from agent.myagent.HumanPredictor import HumanPredictor
 
 # helpers
 import pygame
@@ -78,7 +77,7 @@ class _SelectiveWriter:
 
 
 class GamePlay(Game):
-    def __init__(self, env, replay: Replay, agent_set: AgentSetting, debug_mode: bool = False, human_agent_idx: int | None = 1, ai_agent_idx: int | None = 0, sc_2agent: bool = False, skill_emi: bool = False):
+    def __init__(self, env, replay: Replay, agent_set: AgentSetting, debug_mode: bool = False, human_agent_idx: int | None = 1, ai_agent_idx: int | None = 0, sc_2agent: bool = False):
         Game.__init__(self, env, play=True)
         self.replay = replay
         self.agent_set = agent_set
@@ -86,7 +85,6 @@ class GamePlay(Game):
         self.human_agent_idx = human_agent_idx
         self.ai_agent_idx = ai_agent_idx
         self.sc_2agent = sc_2agent
-        self.skill_emi = skill_emi
 
         # デバッグモード時はログをファイルに出力
         if debug_mode:
@@ -102,10 +100,6 @@ class GamePlay(Game):
         else:
             self._log_file = None
 
-        if skill_emi:
-            sys.stdout = _SelectiveWriter(sys.stdout, ("[SkillEstimator]",))
-            sys.stderr = _SelectiveWriter(sys.stderr, ("[SkillEstimator]",))
-
         # fps of human and ai
         self.fps = 10
         self.fps_ai = agent_set.speed
@@ -113,7 +107,6 @@ class GamePlay(Game):
         # human_agent_idx は None の場合もある（両方AIの旧モードなど）
         self.idx_human = human_agent_idx
         self.ai = get_agent(self.agent_set, self.replay)
-        self.predictor = HumanPredictor(env)
 
         # concurrent control variables
         self._q_control = queue.Queue()  # receive
@@ -121,6 +114,21 @@ class GamePlay(Game):
         self._q_ai = queue.Queue()
         self._success = False
         self._finalized = False
+        self._latest_env_state = None
+
+    def _get_unexecuted_task_candidates(self):
+        env_state = self._latest_env_state
+        if env_state is None:
+            return []
+
+        try:
+            snapshot = dcopy(env_state)
+            if hasattr(self.ai, 'get_instruction_candidates'):
+                return self.ai.get_instruction_candidates(snapshot)
+        except Exception as e:
+            print(f"[GamePlay] 候補タスク取得失敗: {e}")
+
+        return []
 
     def on_event(self, event):
         if event.type == pygame.QUIT:
@@ -141,7 +149,11 @@ class GamePlay(Game):
             if pygame.key.name(event.key) == "space":
                 self._q_env.put(('Pause', {}))
 
-                s = popup_text("Say to AI:")
+                candidates = self._get_unexecuted_task_candidates()
+                if candidates:
+                    s = popup_task_choice("AIへの指示タスクを選択してください", candidates)
+                else:
+                    s = popup_text("Say to AI:")
 
                 if s is not None:
                     self._q_env.put(('ChatIn', {"chat": s, "mode": "text"}))
@@ -166,6 +178,7 @@ class GamePlay(Game):
                      event_history=info['event_history'],
                      time=info['current_time'],
                      chg_grid=info['chg_grid'])
+        self._latest_env_state = dcopy(e)
         self._q_ai.put_nowait(('Env', {"EnvState": e}))
 
         while True:
@@ -213,20 +226,7 @@ class GamePlay(Game):
                              event_history=info['event_history'],
                              time=info['current_time'],
                              chg_grid=info['chg_grid'])
-                
-                # Human Prediction
-                if self.idx_human is not None:
-                    try:
-                        task_name, cost, all_costs = self.predictor.predict(e, self.idx_human)
-                        #print(f"[Human Prediction] Task: {task_name}, Remaining Cost: {cost}")
-                        if all_costs:
-                            # Sort by cost
-                            all_costs.sort(key=lambda x: x[1])
-                            # Print top 5 or all
-                            costs_str = ", ".join([f"{t}: {c}" for t, c in all_costs])
-                            #print(f"   All costs: {costs_str}")
-                    except Exception as e:
-                        print(f"Prediction failed: {e}")
+                self._latest_env_state = dcopy(e)
 
                 if self.ai_agent_idx is None:
                     if any(action_dict[agent.name] is not None for agent in self.sim_agents):
@@ -245,6 +245,8 @@ class GamePlay(Game):
             if self.debug_mode:
                 if hasattr(self.ai, 'get_assigned_counters'):
                     debug_info['counters'] = self.ai.get_assigned_counters()
+                if hasattr(self.ai, 'get_order_display_labels'):
+                    debug_info['order_labels'] = self.ai.get_order_display_labels()
                 if self.sc_2agent and hasattr(self.ai, 'task_agents'):
                     debug_info['tasks'] = {
                         "AI0": self.ai.task_agents[0].task_name if hasattr(self.ai.task_agents[0], 'task_name') and self.ai.task_agents[0].task_name else "Idle",
@@ -400,13 +402,6 @@ class GamePlay(Game):
             if hasattr(self.ai, "_mov_hist"):
                 self.replay['mov_hist'] = self.ai._mov_hist
 
-            # スキル推定はプレイ中には計算せず、生ログだけ保存する
-            if self.skill_emi and hasattr(self.ai, 'skill_estimation_log'):
-                self.replay['skill_estimation_log'] = self.ai.skill_estimation_log
-                self.replay['skill_estimation_meta'] = {
-                    'alpha': getattr(self.ai, 'skill_estimation_alpha', 0.3)
-                }
-
             # log recipy infos
             self.replay['order_result'] = dict(
                 success=self.env.order_scheduler.successful_orders,
@@ -419,6 +414,5 @@ class GamePlay(Game):
 
             # ログファイルを閉じる
             if self._log_file:
-                if not self.skill_emi:
-                    sys.stdout = self._original_stdout
+                sys.stdout = self._original_stdout
                 self._log_file.close()

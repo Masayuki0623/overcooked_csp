@@ -53,6 +53,7 @@ class Game:
         self.small_font = pygame.font.SysFont('Times', int(self.scale * 0.35))
         self.font = pygame.font.SysFont('Times', int(self.scale * 0.7))
         self.large_font = pygame.font.SysFont('Times', int(self.scale * 1.5))
+        self.order_display_labels = []
 
         self.__plot_elements = []
 
@@ -71,6 +72,7 @@ class Game:
 
     def on_render(self, paused=False, chat='', replay=False, debug_info=None):
         self.__plot_elements = []
+        self.order_display_labels = debug_info.get('order_labels', []) if debug_info else []
         try:
             self.screen.fill(Color.FLOOR)
         except:
@@ -148,7 +150,7 @@ class Game:
     def draw_debug_overlay(self, debug_info):
         """Draw debug information overlay."""
         if 'counters' in debug_info:
-            for order_idx, loc in debug_info['counters'].items():
+            for order_label, loc in debug_info['counters'].items():
                 if not loc: continue
                 sl = self.scaled_location(loc)
                 
@@ -156,7 +158,7 @@ class Game:
                 pygame.draw.rect(self.screen, (255, 0, 0), (sl[0], sl[1], self.scale, self.scale), 3)
                 
                 # Draw text
-                text = f"Order {order_idx+1}"
+                text = f"Order {order_label}"
                 # Render text with white background for readability
                 t = self.small_font.render(text, True, (255, 0, 0), (255, 255, 255))
                 self.screen.blit(t, (sl[0], sl[1] - 20))
@@ -330,7 +332,8 @@ class Game:
     def draw_current_orders(self):
         if self.world.arglist.user_recipy and self.order_scheduler is not None:
             for i, (order, restTime, timeLimit, bonus) in enumerate(self.order_scheduler.current_orders):
-                self.draw_current_order(i, copy.deepcopy(order), restTime)
+                order_label = self.order_display_labels[i] if i < len(self.order_display_labels) else (i + 1)
+                self.draw_current_order(i, copy.deepcopy(order), restTime, order_label)
 
         # draw success and failed ones
         self.put_text(self.small_font, "Score", (40, 80, 180),
@@ -338,7 +341,7 @@ class Game:
         self.put_text(self.font, str(self.order_scheduler.reward), (40, 80, 180),
                       ((0.5 + 0.3) * self.tile_size[0], (self.world.height + 1.4) * self.tile_size[1]))
 
-    def draw_current_order(self, idx, obj, t):
+    def draw_current_order(self, idx, obj, t, order_label=None):
         # order
         obj_loc = (idx, self.world.height)
         if any([isinstance(c, Plate) for c in obj.contents]):
@@ -366,16 +369,10 @@ class Game:
                     colors[l]) + (np.array(colors[r]) - np.array(colors[l])) * (w - l) / (r - l)
         self.draw_bar((idx + 0.1) * self.tile_size[0], (self.world.height + 1) * self.tile_size[1],
                       int(self.tile_size[0] * 0.9 * t / MAX_ORDER_LENGTH_SECONDS), self.tile_size[1] // 5, color)
-
-        name = obj.full_name
-        name = name.replace(
-            "CookedLettuce-CookedOnion-CookedTomato-Plate", "David")
-        name = name.replace("CookedLettuce-CookedOnion-Plate", "Alice")
-        name = name.replace("CookedLettuce-CookedTomato-Plate", "Bob")
-        name = name.replace("CookedOnion-CookedTomato-Plate", "Cathy")
         pos = self.scaled_location(obj_loc)
-        self.put_text(self.small_font, name, (40, 40, 100),
-                      (pos[0] + self.tile_size[0] * 0.2, pos[1]))
+        if order_label is not None:
+            label_surface = self.small_font.render(str(order_label), True, (180, 20, 20), (255, 255, 255))
+            self.screen.blit(label_surface, (pos[0] + 2, pos[1] + 2))
 
     def draw_soup_hint(self):
         if self.world.arglist.user_recipy:

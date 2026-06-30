@@ -56,9 +56,6 @@ def parse_arguments():
     parser.add_argument(
         "--debug", action='store_true', help="Enable debug mode with overlay"
     )
-    parser.add_argument(
-        "--skillemi", action='store_true', help="Enable cooperative skill estimation for player 0"
-    )
 
     return parser.parse_args()
 
@@ -90,7 +87,7 @@ def _create_single_agent(agent_name, speed, replay, init_env_state, env, task_na
     return get_agent(AgentSetting(agent_name, speed=speed), replay)
 
 
-def init_env_replay(map_name, agent0_name, agent1_name, task_name=None, no_reschedule=False, debug_mode=False, skill_emi=False):
+def init_env_replay(map_name, agent0_name, agent1_name, task_name=None, no_reschedule=False, debug_mode=False):
     map_set = MapSetting(**MAP_SETTINGS[map_name])
     replay = Replay()
 
@@ -110,7 +107,6 @@ def init_env_replay(map_name, agent0_name, agent1_name, task_name=None, no_resch
     primary_agent_name = agent1_name if agent1_name not in (None, "human") else agent0_name
     agent_set = AgentSetting(primary_agent_name, speed=10)
 
-    skill_emi_enabled = skill_emi and agent1_name == "CSP"
     ai = None
     ai_idx = None
     human_idx = None
@@ -118,7 +114,7 @@ def init_env_replay(map_name, agent0_name, agent1_name, task_name=None, no_resch
     if agent1_name == "CSP":
         if agent0_name == "choponly":
             chop_agent = ChopOnlyAgent(agent_set.speed, replay)
-            csp_agent = CSPAgent(agent_set.speed, replay, no_reschedule=no_reschedule, sc_2agent=True, skill_emi=skill_emi_enabled)
+            csp_agent = CSPAgent(agent_set.speed, replay, no_reschedule=no_reschedule, sc_2agent=True)
             ai = DualAgentController(chop_agent, csp_agent)
             ai_idx = None
             human_idx = None
@@ -134,10 +130,11 @@ def init_env_replay(map_name, agent0_name, agent1_name, task_name=None, no_resch
             except Exception as e:
                 print(f"Failed to configure settings via GUI: {e}")
         else:
-            ai = CSPAgent(agent_set.speed, replay, no_reschedule=no_reschedule, sc_2agent=True, skill_emi=skill_emi_enabled)
+            ai = CSPAgent(agent_set.speed, replay, no_reschedule=no_reschedule, sc_2agent=True)
             ai_idx = 1
             if agent0_name == "human":
                 human_idx = 0
+                ai.use_predicted_human_model = True
             elif agent0_name == "CSP":
                 human_idx = None
             else:
@@ -154,7 +151,7 @@ def init_env_replay(map_name, agent0_name, agent1_name, task_name=None, no_resch
             except Exception as e:
                 print(f"Failed to configure settings via GUI: {e}")
     elif agent0_name == "CSP":
-        ai = CSPAgent(agent_set.speed, replay, no_reschedule=no_reschedule, sc_2agent=False, skill_emi=False)
+        ai = CSPAgent(agent_set.speed, replay, no_reschedule=no_reschedule, sc_2agent=False)
         ai_idx = 0
         if agent1_name == "human":
             human_idx = 1
@@ -183,7 +180,7 @@ def init_env_replay(map_name, agent0_name, agent1_name, task_name=None, no_resch
         else:
             raise NotImplementedError("This mode currently supports one AI and one human, or CSP on agent1/agent0.")
 
-    game = GamePlay(env, replay, agent_set, debug_mode=debug_mode, human_agent_idx=human_idx, ai_agent_idx=ai_idx, skill_emi=skill_emi_enabled)
+    game = GamePlay(env, replay, agent_set, debug_mode=debug_mode, human_agent_idx=human_idx, ai_agent_idx=ai_idx)
     game.ai = ai
     replay['set_map'] = deepcopy(map_set)
     replay['set_agent'] = deepcopy(agent_set)
@@ -199,7 +196,7 @@ if __name__ == '__main__':
     agent1_name = arglist.agent1
 
     # initialize replay
-    game, env, replay = init_env_replay(arglist.map, agent0_name, agent1_name, arglist.task, arglist.no_reschedule, arglist.debug, arglist.skillemi)
+    game, env, replay = init_env_replay(arglist.map, agent0_name, agent1_name, arglist.task, arglist.no_reschedule, arglist.debug)
 
     try:
         # play
@@ -214,11 +211,6 @@ if __name__ == '__main__':
         print("\nGame interrupted by user.")
 
     finally:
-        if arglist.skillemi and 'skill_estimation_log' in replay._d['dict'] and hasattr(game.ai, 'calculate_skill_estimation_from_log'):
-            replay['skill_estimation'] = game.ai.calculate_skill_estimation_from_log(
-                skill_estimation_log=replay['skill_estimation_log'],
-                emit_logs=False,
-            )
         print(replay['order_result'])
         repdir = Path(__file__).resolve().parent / 'replay'
         replay.save(repdir / f'{arglist.map}-{agent0_name}-{agent1_name or "human"}-{datetime.now().strftime("%Y%m%d_%H%M%S")}.rep')

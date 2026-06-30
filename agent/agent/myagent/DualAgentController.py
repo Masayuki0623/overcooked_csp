@@ -71,22 +71,12 @@ class DualAgentController:
             return self.agent1.get_assigned_counters()
         return {}
 
-    @property
-    def skill_estimator(self):
-        return getattr(self.agent1, "skill_estimator", None)
+    def get_order_display_labels(self):
+        if hasattr(self.agent1, "get_order_display_labels"):
+            return self.agent1.get_order_display_labels()
+        return []
 
-    @property
-    def skill_estimation_log(self):
-        return getattr(self.agent1, "skill_estimation_log", None)
-
-    @property
-    def skill_estimation_alpha(self):
-        return getattr(self.agent1, "skill_estimation_alpha", 0.3)
-
-    def calculate_skill_estimation_from_log(self, skill_estimation_log=None, emit_logs=False):
-        if hasattr(self.agent1, "calculate_skill_estimation_from_log"):
-            return self.agent1.calculate_skill_estimation_from_log(
-                skill_estimation_log=skill_estimation_log,
-                emit_logs=emit_logs,
-            )
-        raise AttributeError("agent1 does not support deferred skill estimation calculation")
+    def get_instruction_candidates(self, env):
+        if hasattr(self.agent1, "get_instruction_candidates"):
+            return self.agent1.get_instruction_candidates(env)
+        return []

@@ -53,6 +53,53 @@ def popup_choice(description: str, choices: list[str]) -> str | None:
 
     return ret
 
+
+def popup_task_choice(description: str, choices: list[str]) -> str | None:
+    if not choices:
+        return None
+
+    root = Tk()
+    root.geometry("480x420")
+    root.title("Select Task")
+
+    ret = None
+
+    def submit_selection():
+        nonlocal ret
+        selected = listbox.curselection()
+        if not selected:
+            return
+        ret = choices[selected[0]]
+        root.destroy()
+
+    label = Label(text=description, font=('Times New Roman', 13, 'bold'))
+    listbox = Listbox(root, width=60, height=16, font=('Times New Roman', 12))
+    scrollbar = Scrollbar(root, orient=VERTICAL, command=listbox.yview)
+    listbox.configure(yscrollcommand=scrollbar.set)
+
+    for item in choices:
+        listbox.insert(END, item)
+
+    if choices:
+        listbox.selection_set(0)
+
+    listbox.bind('<Double-Button-1>', lambda _e: submit_selection())
+
+    btn_frame = Frame(root)
+    submit_btn = Button(btn_frame, height=2, width=10, text="Submit", command=submit_selection)
+    cancel_btn = Button(btn_frame, height=2, width=10, text="Cancel", command=root.destroy)
+
+    label.pack(pady=8)
+    listbox.pack(side=LEFT, fill=BOTH, expand=True, padx=(12, 0), pady=8)
+    scrollbar.pack(side=LEFT, fill=Y, pady=8, padx=(0, 12))
+    btn_frame.pack(pady=(0, 10))
+    submit_btn.pack(side=LEFT, padx=6)
+    cancel_btn.pack(side=LEFT, padx=6)
+
+    mainloop()
+
+    return ret
+
 def popup_box(description: str = '') -> bool | None:
     root = Tk()
     # root.geometry("300x300")
