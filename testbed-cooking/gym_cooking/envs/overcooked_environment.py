@@ -34,6 +34,7 @@ class MapSetting:
     ai_recipy: bool = True      # whether ai can see the recipy
     max_num_timesteps: int = 100    # max number of timesteps
     max_num_orders: int = 3         # max number of orders
+    order_file: str | None = None
 
     num_agents: int = 2  # fixed
 

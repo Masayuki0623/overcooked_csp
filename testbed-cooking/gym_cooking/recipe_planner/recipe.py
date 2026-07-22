@@ -37,6 +37,7 @@ class SimpleOnion(Recipe):
     def __init__(self):
         Recipe.__init__(self, 'Onion', 20, 10)
         self.add_ingredient(Onion(state_index=2))
+        self.add_goal()
 
 class TomatoLettuceSalad(Recipe):
     def __init__(self):
@@ -71,16 +72,19 @@ class OnionSoup(Recipe):
     def __init__(self):
         Recipe.__init__(self, 'OnionSoup', 50, 10)
         self.add_ingredient(Onion(state_index=4))
+        self.add_goal()
 
 class TomatoSoup(Recipe):
     def __init__(self):
         Recipe.__init__(self, 'TomatoSoup', 50, 10)
         self.add_ingredient(Tomato(state_index=4))
+        self.add_goal()
         
 class LettuceSoup(Recipe):
     def __init__(self):
         Recipe.__init__(self, 'LettuceSoup', 50, 10)
         self.add_ingredient(Lettuce(state_index=4))
+        self.add_goal()
 
 class TomatoLettuceSoup(Recipe):
     def __init__(self):

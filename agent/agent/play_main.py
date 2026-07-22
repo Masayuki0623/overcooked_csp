@@ -56,6 +56,10 @@ def parse_arguments():
     parser.add_argument(
         "--debug", action='store_true', help="Enable debug mode with overlay"
     )
+    parser.add_argument(
+        "--order", type=str, default='sample',
+        help="Order definition file name without extension, or a path (e.g. sample)"
+    )
 
     return parser.parse_args()
 
@@ -87,8 +91,11 @@ def _create_single_agent(agent_name, speed, replay, init_env_state, env, task_na
     return get_agent(AgentSetting(agent_name, speed=speed), replay)
 
 
-def init_env_replay(map_name, agent0_name, agent1_name, task_name=None, no_reschedule=False, debug_mode=False):
-    map_set = MapSetting(**MAP_SETTINGS[map_name])
+def init_env_replay(map_name, agent0_name, agent1_name, task_name=None, no_reschedule=False, debug_mode=False, order_file=None):
+    map_kwargs = dict(MAP_SETTINGS[map_name])
+    if order_file is not None:
+        map_kwargs['order_file'] = order_file
+    map_set = MapSetting(**map_kwargs)
     replay = Replay()
 
     env = OvercookedEnvironment(map_set)
@@ -196,7 +203,7 @@ if __name__ == '__main__':
     agent1_name = arglist.agent1
 
     # initialize replay
-    game, env, replay = init_env_replay(arglist.map, agent0_name, agent1_name, arglist.task, arglist.no_reschedule, arglist.debug)
+    game, env, replay = init_env_replay(arglist.map, agent0_name, agent1_name, arglist.task, arglist.no_reschedule, arglist.debug, arglist.order)
 
     try:
         # play

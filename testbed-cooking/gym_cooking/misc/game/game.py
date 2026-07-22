@@ -354,21 +354,6 @@ class Game:
         else:
             self.draw(obj.full_name, self.tile_size,
                       self.scaled_location(obj_loc))
-        colors = {
-            0: (220, 70, 1),
-            0.25: (249, 168, 37),
-            0.5: (255, 201, 40),
-            0.75: (124, 178, 66),
-            1.0: (0, 138, 122),
-        }
-        w = t / MAX_ORDER_LENGTH_SECONDS
-        color = (0, 0, 0)
-        for l, r in zip([0., 0.25, 0.5, 0.75], [0.25, 0.5, 0.75, 1.0]):
-            if l - 1e-3 <= w and w <= r + 1e-3:
-                color = np.array(
-                    colors[l]) + (np.array(colors[r]) - np.array(colors[l])) * (w - l) / (r - l)
-        self.draw_bar((idx + 0.1) * self.tile_size[0], (self.world.height + 1) * self.tile_size[1],
-                      int(self.tile_size[0] * 0.9 * t / MAX_ORDER_LENGTH_SECONDS), self.tile_size[1] // 5, color)
         pos = self.scaled_location(obj_loc)
         if order_label is not None:
             label_surface = self.small_font.render(str(order_label), True, (180, 20, 20), (255, 255, 255))

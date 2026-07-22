@@ -452,6 +452,15 @@ class CSPAgent:
 
         carry_task = self.carry_task_by_agent[agent_idx] if self.sc_2agent else self.carry_task_by_agent
 
+        def matches_single_chopped(task):
+            if carried_ing is None or not holding_name.startswith('Chopped') or task is None:
+                return False
+            verb, obj, _ = task['id']
+            if verb != 'cook':
+                return False
+            needed_parts = obj.replace(' soup', '').split('-')
+            return carried_ing in needed_parts
+
         if scheduled_task:
             verb, obj, _ = scheduled_task['id']
             if verb == 'cook' and chopped_combo_parts:
@@ -462,6 +471,12 @@ class CSPAgent:
                     else:
                         self.carry_task_by_agent = deepcopy(scheduled_task)
                     return scheduled_task
+            if matches_single_chopped(scheduled_task):
+                if self.sc_2agent:
+                    self.carry_task_by_agent[agent_idx] = deepcopy(scheduled_task)
+                else:
+                    self.carry_task_by_agent = deepcopy(scheduled_task)
+                return scheduled_task
             if verb == 'chop':
                 food_names = (f"Fresh{obj.capitalize()}", f"Chopped{obj.capitalize()}")
                 if any(food_name in holding_name for food_name in food_names):
@@ -477,6 +492,8 @@ class CSPAgent:
                 carry_parts = sorted(obj.replace(' soup', '').split('-'))
                 if carry_parts == chopped_combo_parts:
                     return deepcopy(carry_task)
+            if matches_single_chopped(carry_task):
+                return deepcopy(carry_task)
             food_names = (f"Fresh{obj.capitalize()}", f"Chopped{obj.capitalize()}")
             if verb == 'chop' and any(food_name in holding_name for food_name in food_names):
                 return deepcopy(carry_task)
@@ -932,18 +949,23 @@ class CSPAgent:
     def _annotate_task_geometry(self, env, tasks, default_start_pos):
         resources = self._get_resources(env)
 
-        def get_holding_positions(predicate):
-            positions = []
-            for agent in getattr(env, 'agents', []):
-                holding = getattr(agent, 'holding', None)
-                if holding is not None and predicate(holding):
-                    pos = getattr(agent, 'location', None)
-                    if pos is not None:
-                        positions.append(pos)
-            return positions
+        def raw_base_name(item):
+            if item is None:
+                return None
+            if getattr(item, 'is_held', False):
+                return None
+            name = getattr(item, 'name', '')
+            if name.startswith('Fresh'):
+                return name.replace('Fresh', '')
+            full_name = getattr(item, 'full_name', '')
+            if full_name.startswith('Fresh'):
+                return full_name.replace('Fresh', '')
+            return None
 
         def chopped_base_name(item):
             if item is None:
+                return None
+            if getattr(item, 'is_held', False):
                 return None
             if hasattr(item, 'is_chopped') and item.is_chopped():
                 contents = getattr(item, 'contents', [])
@@ -967,11 +989,16 @@ class CSPAgent:
             if verb == 'chop':
                 tile_map = {"lettuce": "FreshLettuceTile", "onion": "FreshOnionTile", "tomato": "FreshTomatoTile"}
                 ing_pos_list = env.get_pos_by_obj_gs(gs=tile_map.get(obj, ""))
-                holding_raw_positions = get_holding_positions(
-                    lambda holding: getattr(holding, 'name', '').lower() == obj
-                )
-                if holding_raw_positions:
-                    ing_pos = holding_raw_positions[0]
+                raw_candidates = []
+                for pos, world_obj in env.pos_obj.items():
+                    if world_obj is None:
+                        continue
+                    base_name = raw_base_name(world_obj)
+                    if base_name is not None and base_name.lower() == obj:
+                        raw_candidates.append(pos)
+
+                if raw_candidates:
+                    ing_pos = self._nearest_by_path(env, default_start_pos, raw_candidates) or get_nearest(default_start_pos, raw_candidates)
                 else:
                     ing_pos = ing_pos_list[0] if ing_pos_list else default_start_pos
 
@@ -1000,12 +1027,6 @@ class CSPAgent:
                     base_name = chopped_base_name(world_obj)
                     if base_name is not None and base_name.lower() in needed_ings:
                         start_candidates.append(pos)
-
-                start_candidates.extend(
-                    get_holding_positions(
-                        lambda holding: chopped_base_name(holding) is not None and chopped_base_name(holding).lower() in needed_ings
-                    )
-                )
 
                 if start_candidates:
                     start_pos = self._nearest_by_path(env, default_start_pos, start_candidates) or get_nearest(default_start_pos, start_candidates)
@@ -1104,18 +1125,23 @@ class CSPAgent:
     def _task_duration_frames(self, env, verb, obj, order_idx, assigned_counter=None):
         resources = self._get_resources(env)
 
-        def get_holding_positions(predicate):
-            positions = []
-            for agent in getattr(env, 'agents', []):
-                holding = getattr(agent, 'holding', None)
-                if holding is not None and predicate(holding):
-                    pos = getattr(agent, 'location', None)
-                    if pos is not None:
-                        positions.append(pos)
-            return positions
+        def raw_base_name(item):
+            if item is None:
+                return None
+            if getattr(item, 'is_held', False):
+                return None
+            name = getattr(item, 'name', '')
+            if name.startswith('Fresh'):
+                return name.replace('Fresh', '')
+            full_name = getattr(item, 'full_name', '')
+            if full_name.startswith('Fresh'):
+                return full_name.replace('Fresh', '')
+            return None
 
         def chopped_base_name(item):
             if item is None:
+                return None
+            if getattr(item, 'is_held', False):
                 return None
             if hasattr(item, 'is_chopped') and item.is_chopped():
                 contents = getattr(item, 'contents', [])
@@ -1134,14 +1160,20 @@ class CSPAgent:
         if verb == 'chop':
             tile_map = {"lettuce": "FreshLettuceTile", "onion": "FreshOnionTile", "tomato": "FreshTomatoTile"}
             ing_pos_list = env.get_pos_by_obj_gs(gs=tile_map.get(obj, ""))
-            holding_raw_positions = get_holding_positions(
-                lambda holding: getattr(holding, 'name', '').lower() == obj
-            )
-            if holding_raw_positions:
-                ing_pos = holding_raw_positions[0]
-                pickup_cost = 0
+            raw_candidates = []
+            for pos, world_obj in env.pos_obj.items():
+                if world_obj is None:
+                    continue
+                base_name = raw_base_name(world_obj)
+                if base_name is not None and base_name.lower() == obj:
+                    raw_candidates.append(pos)
+
+            if raw_candidates:
+                ing_pos = get_nearest(resources['cutboards'][0] if resources['cutboards'] else None, raw_candidates)
+                pickup_cost = 1
             else:
-                if not ing_pos_list: return None
+                if not ing_pos_list:
+                    return None
                 ing_pos = ing_pos_list[0]
                 pickup_cost = 1
 
@@ -1202,12 +1234,6 @@ class CSPAgent:
                 base_name = chopped_base_name(world_obj)
                 if base_name is not None and base_name.lower() in needed_ings:
                     start_candidates.append(pos)
-
-            start_candidates.extend(
-                get_holding_positions(
-                    lambda holding: chopped_base_name(holding) is not None and chopped_base_name(holding).lower() in needed_ings
-                )
-            )
 
             if start_candidates:
                 start_pos = get_nearest(pot_pos, start_candidates)
@@ -1393,6 +1419,35 @@ class CSPAgent:
 
             return False
 
+        def choose_counter_for_order(ingredient_names, current_counter=None):
+            best_counter = None
+            best_score = None
+
+            for pos, pos_stock in available_chopped_by_pos.items():
+                valid_count = 0
+                has_unwanted = False
+                for stock_name, stock_count in pos_stock.items():
+                    if stock_count <= 0:
+                        continue
+                    if stock_name in ingredient_names:
+                        valid_count += stock_count
+                    else:
+                        has_unwanted = True
+
+                if valid_count <= 0:
+                    continue
+
+                score = (
+                    0 if has_unwanted else 1,
+                    valid_count,
+                    1 if pos == current_counter else 0,
+                )
+                if best_score is None or score > best_score:
+                    best_score = score
+                    best_counter = pos
+
+            return best_counter
+
         if hasattr(env, 'world_all'):
             all_objects = env.world_all
         elif hasattr(env, 'world'):
@@ -1449,6 +1504,21 @@ class CSPAgent:
                 env,
                 order_uid,
             )
+
+            if assigned_counter is not None and env.pos_obj.get(assigned_counter) is None:
+                reassigned_counter = choose_counter_for_order(ings_cap, current_counter=assigned_counter)
+                if reassigned_counter is not None and reassigned_counter != assigned_counter:
+                    self._set_assigned_counter(order_uid, reassigned_counter)
+                    self._log_counter_policy(order_uid, "reassign", reassigned_counter, f"reason=counter_empty prev={assigned_counter}")
+                    if assigned_counter in used_counters:
+                        used_counters.remove(assigned_counter)
+                    assigned_counter = reassigned_counter
+                elif reassigned_counter is None:
+                    if assigned_counter in used_counters:
+                        used_counters.remove(assigned_counter)
+                    self._set_assigned_counter(order_uid, None)
+                    self._log_counter_policy(order_uid, "release", assigned_counter, "reason=counter_empty")
+                    assigned_counter = None
 
             if assigned_counter is None and not released_for_cook:
                 assigned_counter = self._calculate_dynamic_merge_point(env, ings_lower, order_idx, pot_locs, used_counters)

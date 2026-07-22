@@ -23,6 +23,17 @@ class TaskAgent:
         
         #print(f"[TaskAgent] タスクで初期化: {self.task_name}")
 
+    def _is_available_object(self, obj):
+        return obj is not None and not getattr(obj, 'is_held', False)
+
+    def _filter_unheld_positions(self, env, positions):
+        filtered = []
+        for pos in positions:
+            obj = env.pos_obj.get(pos)
+            if obj is None or not getattr(obj, 'is_held', False):
+                filtered.append(pos)
+        return filtered
+
     def choose_random_chop_task_name(self, env):
         """現在の注文から chop 対象を 1 つランダムに選ぶ"""
         candidates = []
@@ -458,7 +469,7 @@ class TaskAgent:
             if assigned_plate:
                 plate_locs = [assigned_plate]
             else:
-                plate_locs = env.get_pos_by_obj_gs(obj='Plate')
+                plate_locs = self._filter_unheld_positions(env, env.get_pos_by_obj_gs(obj='Plate'))
                 if not plate_locs:
                     plate_locs = env.get_pos_by_obj_gs(gs='PlateTile')
             
@@ -571,7 +582,7 @@ class TaskAgent:
                     min_dist = float('inf')
                     local_target_merge_loc = None
                     for pos, obj in env.pos_obj.items():
-                        if obj:
+                        if self._is_available_object(obj):
                             obj_name = getattr(obj, 'full_name', '')
                             parts = obj_name.replace('Cooking', 'Chopped').replace('Cooked', 'Chopped').replace('Charred', 'Chopped').split('-')
 
@@ -596,19 +607,21 @@ class TaskAgent:
                 return self._handle_counter_fallback("共有置き場ID未割当のため待機中", fallback_func)
                 
         # 5. 手が空の場合 -> 足りない食材のいずれかを探すが、すでにマージが進んでいるものを優先する
-        target_ing_loc = None
-        best_score = -float('inf')
-        assigned_counter_candidate = None
-        assigned_counter_score = -float('inf')
-        
-        for pos, obj in env.pos_obj.items():
-            if obj:
-                if assigned_counter and pos != assigned_counter:
+        def find_best_ingredient_target(only_assigned_counter):
+            local_target_ing_loc = None
+            local_best_score = -float('inf')
+            local_assigned_counter_candidate = None
+            local_assigned_counter_score = -float('inf')
+
+            for pos, obj in env.pos_obj.items():
+                if not self._is_available_object(obj):
+                    continue
+                if only_assigned_counter and assigned_counter and pos != assigned_counter:
                     continue
 
                 obj_name = getattr(obj, 'full_name', '')
                 parts = obj_name.replace('Cooking', 'Chopped').replace('Cooked', 'Chopped').replace('Charred', 'Chopped').split('-')
-                
+
                 valid_count = 0
                 has_unwanted = False
                 for p in parts:
@@ -621,14 +634,28 @@ class TaskAgent:
                     dist = abs(self_pos[0] - pos[0]) + abs(self_pos[1] - pos[1])
                     score = (valid_count * 100) - dist
                     if assigned_counter and pos == assigned_counter and 0 < valid_count < len(missing_ings):
-                        if score > assigned_counter_score:
-                            assigned_counter_score = score
-                            assigned_counter_candidate = pos
+                        if score > local_assigned_counter_score:
+                            local_assigned_counter_score = score
+                            local_assigned_counter_candidate = pos
                         continue
 
-                    if score > best_score:
-                        best_score = score
-                        target_ing_loc = pos
+                    if score > local_best_score:
+                        local_best_score = score
+                        local_target_ing_loc = pos
+
+            return local_target_ing_loc, local_best_score, local_assigned_counter_candidate, local_assigned_counter_score
+
+        target_ing_loc = None
+        best_score = -float('inf')
+        assigned_counter_candidate = None
+        assigned_counter_score = -float('inf')
+
+        if assigned_counter:
+            target_ing_loc, best_score, assigned_counter_candidate, assigned_counter_score = find_best_ingredient_target(True)
+            if target_ing_loc is None and assigned_counter_candidate is None:
+                target_ing_loc, best_score, assigned_counter_candidate, assigned_counter_score = find_best_ingredient_target(False)
+        else:
+            target_ing_loc, best_score, assigned_counter_candidate, assigned_counter_score = find_best_ingredient_target(False)
 
         print(f"[DEBUG] cook:candidates target_ing_loc={target_ing_loc} best_score={best_score} assigned_counter_candidate={assigned_counter_candidate} assigned_counter_score={assigned_counter_score} missing={missing_ings}")
 
@@ -801,7 +828,7 @@ class TaskAgent:
         min_dist = float('inf')
         
         for pos, obj in env.pos_obj.items():
-            if obj and target_ing_name in obj.full_name:
+            if self._is_available_object(obj) and target_ing_name in obj.full_name:
                 dist = abs(self_pos[0]-pos[0]) + abs(self_pos[1]-pos[1])
                 if dist < min_dist:
                     min_dist = dist
