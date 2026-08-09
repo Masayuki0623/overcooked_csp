@@ -24,6 +24,7 @@ import gym
 import os
 from copy import deepcopy
 from dataclasses import dataclass
+import time
 
 CollisionRepr = namedtuple("CollisionRepr", "time agent_names agent_locations")
 
@@ -202,6 +203,8 @@ class OvercookedEnvironment(gym.Env):
         # self.obs_tm1 = copy.copy(self)
 
         self.state = state = self.get_current_state()
+        # pending instructions attached by GamePlay: list of dicts with keys id, task, target_idx, accepted_time, execution_logged
+        self._pending_instructions = []
         return state
         # return copy.copy(self)
 
@@ -466,12 +469,41 @@ class OvercookedEnvironment(gym.Env):
 
     def execute_navigation(self):
         events = []
-        for agent in self.sim_agents:
+        for i, agent in enumerate(self.sim_agents):
             result = interact(agent=agent, world=self.world,
                               current_time=self.current_time)
             if result.event != 'No-op':
                 self.interact_history.append(result)
                 events.append(result)
+
+                # If there is a pending instruction for this agent index, and it hasn't been logged as started yet,
+                # consider this event as the execution start and log it.
+                try:
+                    if hasattr(self, '_pending_instructions') and self._pending_instructions:
+                        for pending in list(self._pending_instructions):
+                                if (not pending.get('execution_logged', False)) and pending.get('target_idx', None) == i:
+                                    pending['execution_logged'] = True
+                                    wall_time = time.time()
+                                    # Try to extract structured task id (verb,obj,order) if payload present
+                                    task_field = pending.get('task')
+                                    task_tid = None
+                                    if isinstance(task_field, (list, tuple)):
+                                        # payload may be in index 1
+                                        payload = task_field[1] if len(task_field) >= 2 else task_field[0]
+                                        if isinstance(payload, (list, tuple)) and len(payload) >= 3:
+                                            task_tid = tuple(payload[:3])
+                                        elif isinstance(payload, dict):
+                                            task_tid = (payload.get('verb'), payload.get('obj'), payload.get('order') or payload.get('order_uid') or payload.get('order_id'))
+                                    # fallback: no structured tid
+                                    if task_tid is not None:
+                                        print(f"[Instruction] execution_start id={pending['id']:.6f} task={pending['task']} tid={task_tid} env_time={self.current_time:.6f} wall_time={wall_time:.6f} agent_idx={i} agent_name={agent.name} event={result.event}")
+                                    else:
+                                        print(f"[Instruction] execution_start id={pending['id']:.6f} task={pending['task']} env_time={self.current_time:.6f} wall_time={wall_time:.6f} agent_idx={i} agent_name={agent.name} event={result.event}")
+                                    # keep the pending entry for possible later analysis, but mark it executed
+                                    break
+                except Exception as e:
+                    print(f"[Environment] Failed to log execution_start: {e}")
+
             self.agent_actions[agent.name] = agent.action
             if self.chg_grid is not None and self.chg_grid in result.event:
                 self.process_chg()

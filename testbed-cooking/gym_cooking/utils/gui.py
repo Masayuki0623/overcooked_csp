@@ -54,7 +54,15 @@ def popup_choice(description: str, choices: list[str]) -> str | None:
     return ret
 
 
-def popup_task_choice(description: str, choices: list[str]) -> str | None:
+def popup_task_choice(description: str, choices: list) -> str | None:
+    """
+    Show a task selection UI.
+
+    Choices may be either plain strings (legacy) or tuples/lists of (display_str, payload).
+    Returns the selected item as follows:
+      - If input items are plain strings, returns the selected string (unchanged).
+      - If input items are (display, payload), returns the tuple (display, payload).
+    """
     if not choices:
         return None
 
@@ -69,7 +77,9 @@ def popup_task_choice(description: str, choices: list[str]) -> str | None:
         selected = listbox.curselection()
         if not selected:
             return
-        ret = choices[selected[0]]
+        choice = choices[selected[0]]
+        # Return the original structure: string or tuple
+        ret = choice
         root.destroy()
 
     label = Label(text=description, font=('Times New Roman', 13, 'bold'))
@@ -78,7 +88,11 @@ def popup_task_choice(description: str, choices: list[str]) -> str | None:
     listbox.configure(yscrollcommand=scrollbar.set)
 
     for item in choices:
-        listbox.insert(END, item)
+        if isinstance(item, (list, tuple)) and len(item) >= 1:
+            display = item[0]
+        else:
+            display = str(item)
+        listbox.insert(END, display)
 
     if choices:
         listbox.selection_set(0)

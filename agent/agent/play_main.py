@@ -60,6 +60,10 @@ def parse_arguments():
         "--order", type=str, default='sample',
         help="Order definition file name without extension, or a path (e.g. sample)"
     )
+    parser.add_argument(
+        "--deadline", type=float, default=None,
+        help="Hard deadline d in seconds to apply to instructed tasks (single value)"
+    )
 
     return parser.parse_args()
 
@@ -137,7 +141,7 @@ def init_env_replay(map_name, agent0_name, agent1_name, task_name=None, no_resch
             except Exception as e:
                 print(f"Failed to configure settings via GUI: {e}")
         else:
-            ai = CSPAgent(agent_set.speed, replay, no_reschedule=no_reschedule, sc_2agent=True)
+            ai = CSPAgent(agent_set.speed, replay, no_reschedule=no_reschedule, sc_2agent=True, deadline_seconds=arglist.deadline)
             ai_idx = 1
             if agent0_name == "human":
                 human_idx = 0
@@ -158,7 +162,7 @@ def init_env_replay(map_name, agent0_name, agent1_name, task_name=None, no_resch
             except Exception as e:
                 print(f"Failed to configure settings via GUI: {e}")
     elif agent0_name == "CSP":
-        ai = CSPAgent(agent_set.speed, replay, no_reschedule=no_reschedule, sc_2agent=False)
+        ai = CSPAgent(agent_set.speed, replay, no_reschedule=no_reschedule, sc_2agent=False, deadline_seconds=arglist.deadline)
         ai_idx = 0
         if agent1_name == "human":
             human_idx = 1

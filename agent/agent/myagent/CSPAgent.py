@@ -19,7 +19,7 @@ class CSPAgent:
     """
     CSP(制約充足問題)ベースのエージェント
     """
-    def __init__(self, speed=2.5, replay=None, no_reschedule=False, sc_2agent=False):
+    def __init__(self, speed=2.5, replay=None, no_reschedule=False, sc_2agent=False, deadline_seconds: float | None = None):
         self.speed = speed
         self.replay = replay
         self.no_reschedule = no_reschedule
@@ -35,8 +35,9 @@ class CSPAgent:
 
         # FPS
         self.fps = 10
-        # 期限
-        self.deadline_frames = 75 * self.fps
+        # 期限 (frames)
+        self.deadline_seconds = deadline_seconds
+        self.deadline_frames = int(75 * self.fps) if deadline_seconds is None else int(deadline_seconds * self.fps)
         # 30秒の選択予算
         self.budget_frames = 30 * self.fps
         # 実行状態管理
@@ -332,8 +333,11 @@ class CSPAgent:
                 
         return remaining_tids
 
+    def _make_fixed_task_id(self, verb, obj, order_uid):
+        return ("task", str(verb), str(obj), int(order_uid))
+
     def get_instruction_candidates(self, env):
-        """現在の環境で未実行のタスク候補を文字列で返す。"""
+        """現在の環境で未実行のタスク候補を固定 ID 付きで返す。"""
         current_orders = self._build_order_tasks(env)
         remaining_tids = self.get_remaining_tids(env, current_orders)
 
@@ -345,10 +349,30 @@ class CSPAgent:
 
         candidates = []
         for verb, obj, order_uid in sorted_tids:
-            task_token = f"{verb}_{obj.replace(' ', '').replace('-', '_')}"
-            candidates.append(f"{task_token} (order:{order_uid})")
+            display = f"{verb}_{obj.replace(' ', '').replace('-', '_')} (order:{order_uid})"
+            fixed_task_id = self._make_fixed_task_id(verb, obj, order_uid)
+            payload = {
+                'fixed_task_id': fixed_task_id,
+                'verb': verb,
+                'obj': obj,
+                'order_uid': order_uid,
+            }
+            candidates.append((display, payload))
 
         return candidates
+
+    def high_level_infer(self, env, chat: str):
+        """Handle a high-level chat/instruction input from gameplay.
+
+        Minimal implementation to avoid AttributeError when GUI/Gameplay
+        calls this on all agents. Records the instruction in `_int_hist`.
+        """
+        try:
+            if not hasattr(self, '_int_hist'):
+                self._int_hist = []
+            self._int_hist.append({'time': time.time(), 'chat': chat})
+        except Exception as e:
+            print(f"[CSPAgent] high_level_infer error: {e}")
 
     def _stabilize_task_ids_for_held_progress(self, env, current_task_ids):
         def get_holding_name(agent_idx):
@@ -1593,6 +1617,89 @@ class CSPAgent:
         self.assigned_counters_display_map = assigned_counters_display_map
         return orders
 
+    def _apply_instruction_deadline_constraints(self, model, tasks, starts_by_idx, env):
+        """保留指示に基づく締切制約を CP-SAT モデルへ反映する。"""
+        try:
+            pending_instr = list(getattr(env, '_pending_instructions', []))
+            agent_pending = getattr(self, '_pending_instructions', [])
+            if agent_pending:
+                for pending in agent_pending:
+                    if not any(existing.get('id') == pending.get('id') for existing in pending_instr):
+                        pending_instr.append(pending)
+            if pending_instr:
+                print(f"[CSPAgent] 適用可能な保留指示数: {len(pending_instr)}")
+
+            task_index_by_fixed_id = {}
+            for idx, t in enumerate(tasks):
+                fixed_task_id = t.get('fixed_task_id')
+                if fixed_task_id is None:
+                    fixed_task_id = self._make_fixed_task_id(
+                        t.get('verb', ''),
+                        t.get('obj', ''),
+                        t.get('order', 0),
+                    )
+                    t['fixed_task_id'] = fixed_task_id
+                task_index_by_fixed_id[fixed_task_id] = idx
+
+            for pending in list(pending_instr):
+                try:
+                    if pending.get('deadline_constraint_applied', False):
+                        continue
+
+                    selected_task = pending.get('task')
+                    payload = None
+                    if isinstance(selected_task, (list, tuple)) and len(selected_task) >= 2:
+                        payload = selected_task[1]
+                    elif isinstance(selected_task, dict):
+                        payload = selected_task
+                    else:
+                        payload = selected_task
+
+                    fixed_task_id = None
+                    if isinstance(payload, dict):
+                        fixed_task_id = payload.get('fixed_task_id')
+                    elif isinstance(payload, (list, tuple)) and len(payload) >= 1:
+                        fixed_task_id = payload[0]
+                    else:
+                        fixed_task_id = payload
+
+                    if fixed_task_id is None:
+                        print(f"[CSPAgent] 指示の固定 ID がないためスキップ: {payload}")
+                        pending['deadline_constraint_applied'] = True
+                        continue
+
+                    matched_idx = task_index_by_fixed_id.get(fixed_task_id)
+                    if matched_idx is None:
+                        print(f"[CSPAgent] 対応するタスクが見つかりません: fixed_id={fixed_task_id}")
+                        pending['deadline_constraint_applied'] = True
+                        continue
+
+                    accepted_env_time = pending.get('accepted_env_time', None)
+                    if accepted_env_time is None:
+                        print(f"[CSPAgent] 指示の環境時刻情報がないためスキップ: {pending}")
+                        pending['deadline_constraint_applied'] = True
+                        continue
+
+                    accepted_frame = int(accepted_env_time * self.fps)
+                    d_frames = int(self.deadline_seconds * self.fps) if getattr(self, 'deadline_seconds', None) is not None else self.deadline_frames
+                    bound = accepted_frame + d_frames
+                    start_var = starts_by_idx.get(matched_idx)
+                    if start_var is None:
+                        pending['deadline_constraint_applied'] = True
+                        continue
+
+                    if d_frames <= 0:
+                        model.Add(start_var == accepted_frame)
+                        print(f"[CSPAgent] 期限制約を追加: fixed_id={fixed_task_id} start = {accepted_frame} (env_time={accepted_env_time})")
+                    else:
+                        model.Add(start_var <= bound)
+                        print(f"[CSPAgent] 期限制約を追加: fixed_id={fixed_task_id} start <= {bound} (env_time={accepted_env_time}, d_frames={d_frames})")
+                    pending['deadline_constraint_applied'] = True
+                except Exception as e:
+                    print(f"[CSPAgent] 保留指示反映中に例外: {e}")
+        except Exception as e:
+            print(f"[CSPAgent] 指示による締切制約の追加で失敗: {e}")
+
     def solve_csp_scheduling(self, env, orders):
         """
         OR-Tools CP-SAT を用いたスケジューリング（移動コスト込み）。
@@ -1919,6 +2026,9 @@ class CSPAgent:
                         for ast in after_starts:
                             model.Add(ast >= be)
 
+        # ============ 指示によるハード締切制約 ============
+        self._apply_instruction_deadline_constraints(model, tasks, starts, env)
+
         # Makespan 最小化
         makespan = model.NewIntVar(0, horizon, 'makespan')
         task_ends = [ends[i] for i in range(num_tasks)]
@@ -1932,7 +2042,8 @@ class CSPAgent:
 
         solver = cp_model.CpSolver()
         status = solver.Solve(model)
-        print(f"[CSPAgent] ソルバー状態: {solver.StatusName(status)}")
+        status_name = solver.StatusName(status)
+        print(f"[CSPAgent] ソルバー状態: {status_name}")
 
         schedule = []
         if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
@@ -1995,7 +2106,10 @@ class CSPAgent:
                 schedule.sort(key=lambda x: x['start'])
                 
         else:
-            print(f"[CSPAgent] 解が見つかりませんでした。")
+            if status_name == 'INFEASIBLE':
+                print(f"[CSPAgent] ソルバー結果: INFEASIBLE (締切制約などにより解なし) — そのまま継続します。")
+            else:
+                print(f"[CSPAgent] 解が見つかりませんでした。 状態={status_name}")
             
         return schedule
 

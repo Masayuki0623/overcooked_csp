@@ -156,8 +156,54 @@ class GamePlay(Game):
                     s = popup_text("Say to AI:")
 
                 if s is not None:
-                    self._q_env.put(('ChatIn', {"chat": s, "mode": "text"}))
-                    self._q_ai.put(('Chat', dict(chat=s)))
+                    # Record instruction and forward to env/AI
+                    inst_id = time.time()
+                    # get environment time (seconds) snapshot for correlation with CSP frames
+                    accepted_env_time = self._latest_env_state.time if getattr(self, '_latest_env_state', None) is not None else 0.0
+                    # target agent index for AI (default to configured ai_agent_idx or 0)
+                    target_idx = self.ai_agent_idx if self.ai_agent_idx is not None else 0
+                    # support structured return from popup: (display, payload)
+                    display_text = s[0] if isinstance(s, (list, tuple)) and len(s) >= 1 else str(s)
+                    pending_payload = s
+                    if isinstance(s, (list, tuple)) and len(s) >= 2:
+                        pending_payload = s[1]
+                    # attach pending instruction to env for later correlation with events
+                    pending_entry = {'id': inst_id, 'task': pending_payload, 'target_idx': target_idx, 'accepted_env_time': accepted_env_time, 'execution_logged': False, 'deadline_constraint_applied': False}
+                    try:
+                        if not hasattr(self.env, '_pending_instructions'):
+                            self.env._pending_instructions = []
+                        self.env._pending_instructions.append(pending_entry)
+                    except Exception as e:
+                        print(f"[GamePlay] Failed to attach pending instruction to env: {e}")
+
+                    try:
+                        if hasattr(self, 'ai') and self.ai is not None:
+                            if not hasattr(self.ai, '_pending_instructions'):
+                                self.ai._pending_instructions = []
+                            self.ai._pending_instructions.append(pending_entry)
+                    except Exception as e:
+                        print(f"[GamePlay] Failed to attach pending instruction to agent: {e}")
+
+                    # replay log for instruction accepted
+                    try:
+                        # log display text for human-readable logs, keep payload in pending entry
+                        self.replay.log('instruction_accepted', {'id': inst_id, 'task': display_text, 'accepted_time_wall': inst_id, 'accepted_time_env': accepted_env_time, 'target_idx': target_idx})
+                    except Exception:
+                        pass
+
+                    # Print to debug log (will be captured in debug_*.log)
+                    print(f"[Instruction] accepted id={inst_id:.6f} task={display_text} agent_idx={target_idx} env_time={accepted_env_time:.6f} wall_time={inst_id:.6f}")
+
+                    # Signal AI to reschedule due to new instruction
+                    try:
+                        if hasattr(self, 'ai') and self.ai is not None:
+                            self.ai._mark_reschedule_needed('instruction_accepted')
+                    except Exception as e:
+                        print(f"[GamePlay] Failed to notify AI of instruction: {e}")
+
+                    # send human-readable display to chat queues
+                    self._q_env.put(('ChatIn', {"chat": display_text, "mode": "text"}))
+                    self._q_ai.put(('Chat', dict(chat=display_text)))
 
                 self._q_env.put(('Continue', {}))
 
