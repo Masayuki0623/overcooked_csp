@@ -122,63 +122,59 @@ def init_env_replay(map_name, agent0_name, agent1_name, task_name=None, no_resch
     ai_idx = None
     human_idx = None
 
+    use_two_agent_mode = bool(arglist.sc_2agent)
+
     if agent1_name == "CSP":
         if agent0_name == "choponly":
             chop_agent = ChopOnlyAgent(agent_set.speed, replay)
-            csp_agent = CSPAgent(agent_set.speed, replay, no_reschedule=no_reschedule, sc_2agent=True)
+            csp_agent = CSPAgent(agent_set.speed, replay, no_reschedule=no_reschedule, sc_2agent=use_two_agent_mode, skip_budget=int(arglist.deadline) if arglist.deadline is not None else None)
             ai = DualAgentController(chop_agent, csp_agent)
             ai_idx = None
             human_idx = None
             try:
-                from agent.myagent.gui import configure_agent_settings
-                print("Opening Agent Configuration GUI...")
-                settings = configure_agent_settings(env)
-                csp_agent.priority_weights = settings['weights']
-                csp_agent.gui_text_input = settings['text_input']
-                csp_agent.gui_constraint_input = settings.get('constraint_input', "")
-                csp_agent.active_constraints = settings.get('constraints', [])
-                print("Settings configured:", settings)
+                print("Skipping agent configuration GUI for CSP startup")
+                csp_agent.priority_weights = {}
+                csp_agent.gui_text_input = ""
+                csp_agent.gui_constraint_input = ""
+                csp_agent.active_constraints = []
             except Exception as e:
-                print(f"Failed to configure settings via GUI: {e}")
+                print(f"Failed to initialize default CSP settings: {e}")
         else:
-            ai = CSPAgent(agent_set.speed, replay, no_reschedule=no_reschedule, sc_2agent=True, deadline_seconds=arglist.deadline)
+            ai = CSPAgent(agent_set.speed, replay, no_reschedule=no_reschedule, sc_2agent=use_two_agent_mode, deadline_seconds=arglist.deadline, skip_budget=int(arglist.deadline) if arglist.deadline is not None else None)
             ai_idx = 1
             if agent0_name == "human":
                 human_idx = 0
-                ai.use_predicted_human_model = True
+                ai.human_counterpart_mode = use_two_agent_mode
+                ai.own_agent_idx = 1
             elif agent0_name == "CSP":
                 human_idx = None
             else:
                 raise NotImplementedError("--agent1 CSP currently supports only agent0 human/CSP/choponly.")
             try:
-                from agent.myagent.gui import configure_agent_settings
-                print("Opening Agent Configuration GUI...")
-                settings = configure_agent_settings(env)
-                ai.priority_weights = settings['weights']
-                ai.gui_text_input = settings['text_input']
-                ai.gui_constraint_input = settings.get('constraint_input', "")
-                ai.active_constraints = settings.get('constraints', [])
-                print("Settings configured:", settings)
+                print("Skipping agent configuration GUI for CSP startup")
+                ai.priority_weights = {}
+                ai.gui_text_input = ""
+                ai.gui_constraint_input = ""
+                ai.active_constraints = []
             except Exception as e:
-                print(f"Failed to configure settings via GUI: {e}")
+                print(f"Failed to initialize default CSP settings: {e}")
     elif agent0_name == "CSP":
-        ai = CSPAgent(agent_set.speed, replay, no_reschedule=no_reschedule, sc_2agent=False, deadline_seconds=arglist.deadline)
+        ai = CSPAgent(agent_set.speed, replay, no_reschedule=no_reschedule, sc_2agent=use_two_agent_mode, deadline_seconds=arglist.deadline, skip_budget=int(arglist.deadline) if arglist.deadline is not None else None)
         ai_idx = 0
         if agent1_name == "human":
             human_idx = 1
+            ai.human_counterpart_mode = use_two_agent_mode
+            ai.own_agent_idx = 0
         else:
             raise NotImplementedError("--agent0 CSP currently supports only agent1 human.")
         try:
-            from agent.myagent.gui import configure_agent_settings
-            print("Opening Agent Configuration GUI...")
-            settings = configure_agent_settings(env)
-            ai.priority_weights = settings['weights']
-            ai.gui_text_input = settings['text_input']
-            ai.gui_constraint_input = settings.get('constraint_input', "")
-            ai.active_constraints = settings.get('constraints', [])
-            print("Settings configured:", settings)
+            print("Skipping agent configuration GUI for CSP startup")
+            ai.priority_weights = {}
+            ai.gui_text_input = ""
+            ai.gui_constraint_input = ""
+            ai.active_constraints = []
         except Exception as e:
-            print(f"Failed to configure settings via GUI: {e}")
+            print(f"Failed to initialize default CSP settings: {e}")
     else:
         if agent0_name != "human" and agent1_name == "human":
             ai = _create_single_agent(agent0_name, agent_set.speed, replay, init_env_state, env, task_name=task_name, no_reschedule=no_reschedule)

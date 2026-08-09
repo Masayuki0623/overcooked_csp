@@ -499,7 +499,8 @@ class OvercookedEnvironment(gym.Env):
                                         print(f"[Instruction] execution_start id={pending['id']:.6f} task={pending['task']} tid={task_tid} env_time={self.current_time:.6f} wall_time={wall_time:.6f} agent_idx={i} agent_name={agent.name} event={result.event}")
                                     else:
                                         print(f"[Instruction] execution_start id={pending['id']:.6f} task={pending['task']} env_time={self.current_time:.6f} wall_time={wall_time:.6f} agent_idx={i} agent_name={agent.name} event={result.event}")
-                                    # keep the pending entry for possible later analysis, but mark it executed
+                                    # keep the pending entry for possible later analysis, but do not mark it as executed
+                                    # based on unrelated environment events; the scheduler should infer progress from real task state.
                                     break
                 except Exception as e:
                     print(f"[Environment] Failed to log execution_start: {e}")

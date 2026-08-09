@@ -168,7 +168,8 @@ class GamePlay(Game):
                     if isinstance(s, (list, tuple)) and len(s) >= 2:
                         pending_payload = s[1]
                     # attach pending instruction to env for later correlation with events
-                    pending_entry = {'id': inst_id, 'task': pending_payload, 'target_idx': target_idx, 'accepted_env_time': accepted_env_time, 'execution_logged': False, 'deadline_constraint_applied': False}
+                    skip_budget_val = getattr(self.ai, 'skip_budget', None) if hasattr(self, 'ai') and self.ai is not None else None
+                    pending_entry = {'id': inst_id, 'task': pending_payload, 'target_idx': target_idx, 'accepted_env_time': accepted_env_time, 'execution_logged': False, 'deadline_constraint_applied': False, 'status': 'pending', 'skip_budget': skip_budget_val, 'remaining_skip_budget': skip_budget_val, 'tasks_before_target_log': []}
                     try:
                         if not hasattr(self.env, '_pending_instructions'):
                             self.env._pending_instructions = []
@@ -307,6 +308,43 @@ class GamePlay(Game):
                 self.replay.log('on_render', {'paused': paused, 'chat': chat})
             self.on_render(paused=paused, chat=chat, debug_info=debug_info)
 
+    def _refresh_instruction_states(self, env):
+        """実行開始/完了に応じて pending instruction の状態を更新する。"""
+        try:
+            pending_instr = getattr(env, '_pending_instructions', [])
+            if not pending_instr:
+                return
+            for pending in pending_instr:
+                if pending.get('status') in {'done', 'expired', 'canceled'}:
+                    continue
+                task_payload = pending.get('task')
+                if isinstance(task_payload, (list, tuple)) and len(task_payload) >= 2:
+                    payload = task_payload[1]
+                else:
+                    payload = task_payload
+                fixed_task_id = None
+                if isinstance(payload, dict):
+                    fixed_task_id = payload.get('fixed_task_id')
+                elif isinstance(payload, (list, tuple)) and len(payload) >= 1:
+                    fixed_task_id = payload[0]
+                else:
+                    fixed_task_id = payload
+                if fixed_task_id is None:
+                    continue
+
+                if hasattr(self.ai, 'get_active_task_ids'):
+                    active_ids = self.ai.get_active_task_ids()
+                elif hasattr(self.ai, '_get_active_task_ids'):
+                    active_ids = self.ai._get_active_task_ids()
+                else:
+                    active_ids = set()
+
+                if fixed_task_id in active_ids:
+                    pending['execution_logged'] = True
+                    pending['deadline_constraint_applied'] = True
+        except Exception as e:
+            print(f"[GamePlay] Failed to refresh instruction state: {e}")
+
     def _run_ai(self):
         time_per_step = 1 / self.fps_ai
         time_last = time.time()
@@ -337,6 +375,7 @@ class GamePlay(Game):
                 chat = ''
 
             if env_update:
+                self._refresh_instruction_states(env)
                 move, chat_ret = self.ai(env)
 
                 # sleep

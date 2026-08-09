@@ -19,7 +19,7 @@ class CSPAgent:
     """
     CSP(制約充足問題)ベースのエージェント
     """
-    def __init__(self, speed=2.5, replay=None, no_reschedule=False, sc_2agent=False, deadline_seconds: float | None = None):
+    def __init__(self, speed=2.5, replay=None, no_reschedule=False, sc_2agent=False, deadline_seconds: float | None = None, skip_budget: int | None = None):
         self.speed = speed
         self.replay = replay
         self.no_reschedule = no_reschedule
@@ -38,6 +38,9 @@ class CSPAgent:
         # 期限 (frames)
         self.deadline_seconds = deadline_seconds
         self.deadline_frames = int(75 * self.fps) if deadline_seconds is None else int(deadline_seconds * self.fps)
+        # skip_budget: 指示タスク前に同エージェントが実行してよい他タスクの上限個数 (None=使用しない)
+        # 秒数ベースの deadline_seconds / deadline_frames は当面未使用だが削除しない
+        self.skip_budget = skip_budget
         # 30秒の選択予算
         self.budget_frames = 30 * self.fps
         # 実行状態管理
@@ -70,6 +73,11 @@ class CSPAgent:
         self.active_constraints = []
         self.use_predicted_human_model = False
         self.predicted_human_tasks = []
+        self.human_counterpart_mode = False
+        # CSP が実際に操作するプレイヤー番号 (0 or 1)。
+        # sc_2agent=True かつ human_counterpart_mode=True のとき有効。
+        # play_main.py が ai_idx を設定する。
+        self.own_agent_idx = 0
 
         print("[CSPAgent] 初期化完了")
 
@@ -91,6 +99,358 @@ class CSPAgent:
         if hasattr(self, 'schedule') and self.schedule and isinstance(self.current_task_idx, int) and self.current_task_idx < len(self.schedule):
             return {self.schedule[self.current_task_idx]['id']}
         return set()
+
+    def _extract_instruction_fixed_task_id(self, pending):
+        task_payload = pending.get('task')
+        if isinstance(task_payload, (list, tuple)) and len(task_payload) >= 2:
+            payload = task_payload[1]
+        elif isinstance(task_payload, dict):
+            payload = task_payload
+        else:
+            payload = task_payload
+
+        if isinstance(payload, dict):
+            return payload.get('fixed_task_id')
+        if isinstance(payload, (list, tuple)) and len(payload) >= 1:
+            return payload[0]
+        return payload
+
+    def _derive_fixed_task_id(self, task):
+        if task is None:
+            return None
+
+        fixed_task_id = task.get('fixed_task_id')
+        if fixed_task_id is not None:
+            return fixed_task_id
+
+        task_id = task.get('id')
+        if isinstance(task_id, (list, tuple)) and len(task_id) >= 3:
+            return self._make_fixed_task_id(task_id[0], task_id[1], task_id[2])
+
+        verb = task.get('verb')
+        obj = task.get('obj')
+        order = task.get('order')
+        if order is None:
+            order = task.get('order_uid')
+        if verb is None or obj is None or order is None:
+            return None
+        return self._make_fixed_task_id(verb, obj, order)
+
+    def _find_schedule_index_by_fixed_id(self, schedule, fixed_task_id):
+        if not schedule:
+            return None
+        for idx, task in enumerate(schedule):
+            task_fixed_id = self._derive_fixed_task_id(task)
+            if task_fixed_id is None:
+                continue
+            if task_fixed_id == fixed_task_id:
+                task['fixed_task_id'] = task_fixed_id
+                return idx
+        return None
+
+    def _classify_instruction_deadline(self, pending, current_env_time, deadline_seconds):
+        if deadline_seconds is None:
+            return {'mode': 'unspecified', 'priority_boost': False}
+
+        accepted_env_time = pending.get('accepted_env_time', None)
+        if accepted_env_time is None:
+            return {'mode': 'unspecified', 'priority_boost': False}
+
+        elapsed_seconds = max(0.0, float(current_env_time) - float(accepted_env_time))
+        remaining_deadline_seconds = max(0.0, float(deadline_seconds) - elapsed_seconds)
+        if float(deadline_seconds) <= 0.0:
+            return {'mode': 'urgent', 'priority_boost': True}
+        if remaining_deadline_seconds <= 0.0:
+            return {'mode': 'urgent', 'priority_boost': True}
+        return {'mode': 'deadline', 'priority_boost': False, 'remaining_seconds': remaining_deadline_seconds}
+
+    # ──────────────────────────────────────────────────────────
+    # skip_budget (タスク数ベース) 関連メソッド
+    # ──────────────────────────────────────────────────────────
+
+    def _is_urgent_by_skip_budget(self, pending):
+        """remaining_skip_budget が 0 以下のとき urgent とみなす。"""
+        if self.skip_budget is None:
+            return False
+        remaining = pending.get('remaining_skip_budget', self.skip_budget)
+        return remaining is not None and remaining <= 0
+
+    def _get_dep_indices_for_target(self, tasks, matched_idx):
+        """対象タスクの依存タスク(前提)のインデックス集合を返す。
+        同じ order_uid 内で、動詞優先度(chop<cook<serve)が低いタスクを依存とみなす。"""
+        dep_indices = set()
+        target = tasks[matched_idx]
+        target_order = target.get('order')
+        verb_priority = {'chop': 0, 'cook': 1, 'serve': 2}
+        target_prio = verb_priority.get(target.get('verb', ''), 9)
+        for j, t in enumerate(tasks):
+            if j == matched_idx:
+                continue
+            if t.get('order') != target_order:
+                continue
+            if verb_priority.get(t.get('verb', ''), 9) < target_prio:
+                dep_indices.add(j)
+        return dep_indices
+
+    def _apply_instruction_skip_budget_constraints(self, model, tasks, starts_by_idx, env, is_a1=None):
+        """skip_budget(タスク数)ベースの順序制約を CP-SAT モデルへ反映する。
+        is_a1: 2エージェントモードの割り当て変数リスト(BoolVar) or None(1エージェント)。"""
+        try:
+            pending_instr = list(getattr(env, '_pending_instructions', []))
+            agent_pending = getattr(self, '_pending_instructions', [])
+            if agent_pending:
+                for p in agent_pending:
+                    if not any(e.get('id') == p.get('id') for e in pending_instr):
+                        pending_instr.append(p)
+            if not pending_instr:
+                return
+            print(f"[SkipBudget] 保留指示数: {len(pending_instr)}")
+
+            task_index_by_fixed_id = {}
+            for idx, t in enumerate(tasks):
+                fid = t.get('fixed_task_id')
+                if fid is None:
+                    fid = self._make_fixed_task_id(t.get('verb', ''), t.get('obj', ''), t.get('order', 0))
+                    t['fixed_task_id'] = fid
+                task_index_by_fixed_id[fid] = idx
+
+            for pending in list(pending_instr):
+                try:
+                    if pending.get('status') in {'done', 'canceled'}:
+                        continue
+                    init_budget = pending.get('skip_budget')
+                    if init_budget is None:
+                        continue
+                    remaining = pending.get('remaining_skip_budget', init_budget)
+                    if remaining is None:
+                        remaining = init_budget
+
+                    fixed_task_id = self._extract_instruction_fixed_task_id(pending)
+                    if fixed_task_id is None:
+                        continue
+                    matched_idx = task_index_by_fixed_id.get(fixed_task_id)
+                    if matched_idx is None:
+                        pending['status'] = 'done'
+                        continue
+                    if tasks[matched_idx].get('id') in self.completed_task_ids:
+                        pending['status'] = 'done'
+                        continue
+
+                    dep_indices = self._get_dep_indices_for_target(tasks, matched_idx)
+                    target_start = starts_by_idx[matched_idx]
+                    counts_vars = []
+
+                    for j in range(len(tasks)):
+                        if j == matched_idx or j in dep_indices:
+                            continue
+                        if starts_by_idx.get(j) is None:
+                            continue
+
+                        prec_j = model.NewBoolVar(f'prec_sb_{matched_idx}_{j}')
+                        model.Add(starts_by_idx[j] <= target_start - 1).OnlyEnforceIf(prec_j)
+                        model.Add(starts_by_idx[j] >= target_start).OnlyEnforceIf(prec_j.Not())
+
+                        if is_a1 is None:
+                            # 1エージェント: すべて同エージェント
+                            counts_vars.append(prec_j)
+                        else:
+                            # 2エージェント: 同エージェント割り当てのみカウント
+                            a1_t = is_a1[matched_idx]
+                            a1_j = is_a1[j]
+                            if a1_t is None or a1_j is None:
+                                continue
+                            same_j = model.NewBoolVar(f'same_ag_{matched_idx}_{j}')
+                            # same_j=1 iff is_a1[target]==is_a1[j] (両方0か両方1)
+                            model.Add(a1_t - a1_j == 0).OnlyEnforceIf(same_j)
+                            model.Add(a1_t + a1_j == 1).OnlyEnforceIf(same_j.Not())
+                            count_j = model.NewBoolVar(f'count_sb_{matched_idx}_{j}')
+                            model.AddBoolAnd([prec_j, same_j]).OnlyEnforceIf(count_j)
+                            model.AddBoolOr([prec_j.Not(), same_j.Not()]).OnlyEnforceIf(count_j.Not())
+                            counts_vars.append(count_j)
+
+                    budget_bound = max(0, remaining)
+                    overage = max(0, -remaining)
+                    if counts_vars:
+                        model.Add(sum(counts_vars) <= budget_bound)
+                    if overage > 0:
+                        print(f"[SkipBudget] 警告: fixed_id={fixed_task_id} 超過中(超過量={overage}), 最善優先化")
+                    else:
+                        print(f"[SkipBudget] 制約: fixed_id={fixed_task_id} 残りbudget={remaining}, 対象前タスク≤{budget_bound} (非依存{len(counts_vars)}個)")
+                    pending['skip_budget_constraint_applied'] = True
+                except Exception as e:
+                    print(f"[SkipBudget] 指示制約で例外: {e}")
+        except Exception as e:
+            print(f"[SkipBudget] skip_budget制約の追加に失敗: {e}")
+
+    def _update_skip_budget_on_completion(self, completed_tid, completed_agent_idx, completed_dur_frames):
+        """タスク完了時に pending_instructions の remaining_skip_budget を更新しログする。"""
+        pending_instr = list(getattr(self, '_pending_instructions', []))
+        for pending in pending_instr:
+            if pending.get('status') in {'done', 'canceled'}:
+                continue
+            if pending.get('skip_budget') is None:
+                continue
+            fixed_task_id = self._extract_instruction_fixed_task_id(pending)
+            if fixed_task_id is None:
+                continue
+            # fixed_task_id = ("task", verb, obj, order_uid) → target_tid = (verb, obj, order_uid)
+            if not (isinstance(fixed_task_id, (list, tuple)) and len(fixed_task_id) >= 4):
+                continue
+            target_tid = (str(fixed_task_id[1]), str(fixed_task_id[2]), int(fixed_task_id[3]))
+
+            # 対象タスク自体が完了した場合
+            if completed_tid == target_tid:
+                pending['status'] = 'done'
+                continue
+
+            # エージェントが異なる場合はカウントしない
+            target_agent_idx = None
+            if self.sc_2agent and hasattr(self, 'schedule_per_agent'):
+                for aidx in [0, 1]:
+                    for t in self.schedule_per_agent.get(aidx, []):
+                        if t.get('id') == target_tid:
+                            target_agent_idx = aidx
+                            break
+                    if target_agent_idx is not None:
+                        break
+            else:
+                target_agent_idx = 0
+            if target_agent_idx != completed_agent_idx:
+                continue
+
+            # 依存タスク(同じ注文で動詞優先度が低い)はカウントしない
+            verb_prio = {'chop': 0, 'cook': 1, 'serve': 2}
+            if (len(completed_tid) >= 3 and len(target_tid) >= 3 and
+                    completed_tid[2] == target_tid[2] and
+                    verb_prio.get(completed_tid[0], 9) < verb_prio.get(target_tid[0], 9)):
+                continue
+
+            # remaining_skip_budget を減らす
+            old_remaining = pending.get('remaining_skip_budget', pending.get('skip_budget', 0))
+            if old_remaining is None:
+                old_remaining = 0
+            pending['remaining_skip_budget'] = old_remaining - 1
+            new_remaining = pending['remaining_skip_budget']
+            completed_secs = completed_dur_frames / float(self.fps) if self.fps > 0 else 0.0
+            log_list = pending.setdefault('tasks_before_target_log', [])
+            log_list.append({'task_id': completed_tid, 'duration_seconds': completed_secs})
+            initial_budget = pending.get('skip_budget', 0)
+            overage = max(0, -new_remaining)
+            print(
+                f"[SkipBudget] 対象前完了: {completed_tid} ({completed_secs:.1f}s) "
+                f"初期d={initial_budget} 残り={new_remaining} 超過={overage} 累計={len(log_list)}件"
+            )
+            if overage > 0:
+                print("[SkipBudget] 警告: skip_budget超過 → 次回再計画で即時優先化")
+                self._mark_reschedule_needed('skip_budget_exceeded')
+
+    def _get_immediate_instruction_preempt(self, env):
+        pending_instr = list(getattr(env, '_pending_instructions', []))
+        agent_pending = getattr(self, '_pending_instructions', [])
+        if agent_pending:
+            for pending in agent_pending:
+                if not any(existing.get('id') == pending.get('id') for existing in pending_instr):
+                    pending_instr.append(pending)
+
+        if not pending_instr:
+            return None
+
+        deadline_seconds = self.deadline_seconds
+        if deadline_seconds is None:
+            deadline_seconds = self.deadline_frames / float(self.fps)
+
+        current_env_time = getattr(env, 'time', None)
+        if current_env_time is None:
+            current_env_time = getattr(env, 'current_time', None)
+        if current_env_time is None:
+            return None
+
+        for pending in pending_instr:
+            if pending.get('status') != 'pending':
+                continue
+
+            fixed_task_id = self._extract_instruction_fixed_task_id(pending)
+            if fixed_task_id is None:
+                continue
+
+            deadline_info = self._classify_instruction_deadline(pending, current_env_time, deadline_seconds)
+            if self.skip_budget is not None:
+                is_urgent = self._is_urgent_by_skip_budget(pending)
+            else:
+                is_urgent = (deadline_info.get('mode') == 'urgent')
+            if not is_urgent:
+                continue
+
+            target_idx = self._find_schedule_index_by_fixed_id(getattr(self, 'schedule', []), fixed_task_id)
+            if target_idx is None:
+                continue
+
+            if isinstance(self.current_task_idx, int) and self.current_task_idx == target_idx:
+                continue
+
+            return pending, fixed_task_id, target_idx
+
+        return None
+
+    def _get_instruction_preempt_target(self, env):
+        pending_instr = list(getattr(env, '_pending_instructions', []))
+        agent_pending = getattr(self, '_pending_instructions', [])
+        if agent_pending:
+            for pending in agent_pending:
+                if not any(existing.get('id') == pending.get('id') for existing in pending_instr):
+                    pending_instr.append(pending)
+
+        if not pending_instr:
+            return None
+
+        deadline_seconds = self.deadline_seconds
+        if deadline_seconds is None:
+            deadline_seconds = self.deadline_frames / float(self.fps)
+
+        current_env_time = getattr(env, 'time', None)
+        if current_env_time is None:
+            current_env_time = getattr(env, 'current_time', None)
+        if current_env_time is None:
+            return None
+
+        for pending in pending_instr:
+            if pending.get('status') != 'pending':
+                continue
+
+            fixed_task_id = self._extract_instruction_fixed_task_id(pending)
+            if fixed_task_id is None:
+                continue
+
+            deadline_info = self._classify_instruction_deadline(pending, current_env_time, deadline_seconds)
+            if self.skip_budget is not None:
+                is_urgent = self._is_urgent_by_skip_budget(pending)
+            else:
+                is_urgent = (deadline_info.get('mode') == 'urgent')
+            if not is_urgent:
+                continue
+
+            if not self.sc_2agent:
+                target_idx = self._find_schedule_index_by_fixed_id(getattr(self, 'schedule', []), fixed_task_id)
+                if target_idx is None:
+                    continue
+                if isinstance(self.current_task_idx, int) and self.current_task_idx == target_idx:
+                    continue
+                return pending, fixed_task_id, None, target_idx
+
+            schedule_per_agent = getattr(self, 'schedule_per_agent', None)
+            if not schedule_per_agent:
+                continue
+
+            for agent_idx in [0, 1]:
+                schedule = schedule_per_agent.get(agent_idx, [])
+                if not schedule:
+                    continue
+                target_idx = self._find_schedule_index_by_fixed_id(schedule, fixed_task_id)
+                if target_idx is None:
+                    continue
+                return pending, fixed_task_id, agent_idx, target_idx
+
+        return None
 
     def _get_reschedule_reason(self, current_task_ids, added, removed):
         if not self.initialized:
@@ -120,12 +480,15 @@ class CSPAgent:
             if self.sc_2agent:
                 for agent_idx in [0, 1]:
                     sc = getattr(self, 'schedule_per_agent', {}).get(agent_idx, [])
-                    task_idx = getattr(self, 'current_task_idx', {}).get(agent_idx, 0)
+                    task_idx_val = getattr(self, 'current_task_idx', {})
+                    task_idx = task_idx_val.get(agent_idx, 0) if isinstance(task_idx_val, dict) else 0
                     if task_idx < len(sc):
                         yield agent_idx, sc[task_idx]
             else:
                 schedule = getattr(self, 'schedule', [])
                 task_idx = getattr(self, 'current_task_idx', 0)
+                if not isinstance(task_idx, int):
+                    task_idx = 0
                 if task_idx < len(schedule):
                     yield 0, schedule[task_idx]
 
@@ -390,11 +753,17 @@ class CSPAgent:
             if not holding_name:
                 return
 
-            verb, obj, order_uid = task['id']
+            task_id = None
+            if isinstance(task, dict):
+                task_id = task.get('id')
+            if not isinstance(task_id, tuple):
+                return
+
+            verb, obj, order_uid = task_id
             if verb == 'chop':
                 chopped_name = f"Chopped{obj.capitalize()}"
                 if chopped_name in holding_name:
-                    current_task_ids.add(task['id'])
+                    current_task_ids.add(task_id)
             elif verb == 'cook':
                 for ing in obj.replace(' soup', '').split('-'):
                     chopped_name = f"Chopped{ing.capitalize()}"
@@ -404,7 +773,8 @@ class CSPAgent:
         if self.sc_2agent:
             for agent_idx in [0, 1]:
                 sc = getattr(self, 'schedule_per_agent', {}).get(agent_idx, [])
-                task_idx = getattr(self, 'current_task_idx', {}).get(agent_idx, 0)
+                task_idx_val = getattr(self, 'current_task_idx', {})
+                task_idx = task_idx_val.get(agent_idx, 0) if isinstance(task_idx_val, dict) else 0
                 task = sc[task_idx] if task_idx < len(sc) else None
                 apply_for_task(agent_idx, task)
                 carry_task = getattr(self, 'carry_task_by_agent', {}).get(agent_idx) if isinstance(getattr(self, 'carry_task_by_agent', None), dict) else None
@@ -412,6 +782,8 @@ class CSPAgent:
         else:
             schedule = getattr(self, 'schedule', [])
             task_idx = getattr(self, 'current_task_idx', 0)
+            if not isinstance(task_idx, int):
+                task_idx = 0
             task = schedule[task_idx] if task_idx < len(schedule) else None
             apply_for_task(0, task)
             apply_for_task(0, getattr(self, 'carry_task_by_agent', None))
@@ -644,6 +1016,43 @@ class CSPAgent:
                 else:
                     self.current_task_idx = 0
 
+                if self.sc_2agent:
+                    preempt_target = self._get_instruction_preempt_target(env)
+                    if preempt_target is not None:
+                        pending, fixed_task_id, agent_idx, target_idx = preempt_target
+                        if isinstance(self.current_task_idx, dict):
+                            if self.current_task_idx.get(agent_idx, 0) != target_idx:
+                                self.current_task_idx[agent_idx] = target_idx
+                                self.carry_task_by_agent[agent_idx] = None
+                                task_agent = self.task_agents[agent_idx]
+                                task_agent.assigned_counter = None
+                                task_agent.assigned_cutboard = None
+                                task_agent.assigned_pot = None
+                                task_agent.assigned_plate = None
+                                task_agent.assigned_serve_loc = None
+                                pending['status'] = 'started'
+                                pending['execution_logged'] = True
+                                pending['deadline_constraint_applied'] = True
+                                self._mark_reschedule_needed('instruction_preempt')
+                                print(f"[CSPAgent] 2エージェント即時切替: fixed_id={fixed_task_id} agent={agent_idx} idx={target_idx}")
+                else:
+                    preempt_target = self._get_immediate_instruction_preempt(env)
+                    if preempt_target is not None:
+                        pending, fixed_task_id, target_idx = preempt_target
+                        if self.current_task_idx != target_idx:
+                            self.current_task_idx = target_idx
+                            self.carry_task_by_agent = None
+                            self.task_agent.assigned_counter = None
+                            self.task_agent.assigned_cutboard = None
+                            self.task_agent.assigned_pot = None
+                            self.task_agent.assigned_plate = None
+                            self.task_agent.assigned_serve_loc = None
+                            pending['status'] = 'started'
+                            pending['execution_logged'] = True
+                            pending['deadline_constraint_applied'] = True
+                            self._mark_reschedule_needed('instruction_preempt')
+                            print(f"[CSPAgent] 期限0指示により即時切替: fixed_id={fixed_task_id} idx={target_idx}")
+
                 self.pending_reschedule_reason = None
                 if self.sc_2agent:
                     self.stall_counts = {0: 0, 1: 0}
@@ -659,8 +1068,9 @@ class CSPAgent:
 
         self.prev_task_ids = current_task_ids
 
-        # スケジュール実行
+        # ====== スケジュール実行 ======
         if not self.sc_2agent:
+            # 単一エージェントモード
             if not hasattr(self, 'schedule') or not self.schedule or self.current_task_idx >= len(self.schedule):
                 return (0, 0), "タスクなし"
 
@@ -671,7 +1081,6 @@ class CSPAgent:
             verb, obj, order_uid = tid
             res = task['res'] 
 
-            # Construct Task Name
             task_name = None
             if verb == 'chop':
                 task_name = f"chop_{obj}"
@@ -695,17 +1104,16 @@ class CSPAgent:
                     f"hold_before={hold_before} hold_hint={hold_hint} counter={self.task_agent.assigned_counter}"
                 )
                 
-                # Check completion
                 if "Done" in reason or "done" in reason or "完了" in reason:
                     print(f"[CSPAgent] タスク {task_name} 完了。次へ移動。")
                     if verb == 'serve':
                         print(f"[SERVE] AI task={task_name} tid={tid} completed=True")
                     self.completed_task_ids.add(tid)
+                    self._update_skip_budget_on_completion(tid, 0, scheduled_task.get('dur', 0))
                     if tid == scheduled_tid:
                         self.current_task_idx += 1
                     self._mark_reschedule_needed("task_completed_single")
                     self.carry_task_by_agent = None
-                    # Reset assignments
                     self.task_agent.assigned_cutboard = None
                     self.task_agent.assigned_pot = None
                     self.task_agent.assigned_plate = None
@@ -714,14 +1122,22 @@ class CSPAgent:
                 
                 return action, reason
 
-            return (0,0), "アイドル"
+            return (0, 0), "アイドル"
+
         else:
+            # ====== 2エージェントモード ======
+            # human_counterpart_mode=True のときは CSP は own_agent_idx の行動だけ返す。
+            # human_counterpart_mode=False のときは両方の行動を返す。
             if not hasattr(self, 'schedule_per_agent') or not self.schedule_per_agent:
+                if self.human_counterpart_mode:
+                    return {f"ai_{self.own_agent_idx}": (0, 0)}, "タスクなし"
                 return {"ai_0": (0, 0), "ai_1": (0, 0)}, "タスクなし"
-            
+
+            exec_indices = [self.own_agent_idx] if self.human_counterpart_mode else [0, 1]
+
             actions = {}
             reasons = []
-            for agent_idx in [0, 1]:
+            for agent_idx in exec_indices:
 
                 sc = self.schedule_per_agent.get(agent_idx, [])
                 t_idx = self.current_task_idx[agent_idx]
@@ -843,6 +1259,7 @@ class CSPAgent:
                         if verb == 'serve':
                             print(f"[SERVE] AI{agent_idx} task={task_name} tid={tid} completed=True")
                         self.completed_task_ids.add(tid)
+                        self._update_skip_budget_on_completion(tid, agent_idx, scheduled_task.get('dur', 0))
                         if tid == scheduled_tid:
                             self.current_task_idx[agent_idx] += 1
                         self._mark_reschedule_needed(f"task_completed_agent_{agent_idx}")
@@ -1618,7 +2035,7 @@ class CSPAgent:
         return orders
 
     def _apply_instruction_deadline_constraints(self, model, tasks, starts_by_idx, env):
-        """保留指示に基づく締切制約を CP-SAT モデルへ反映する。"""
+        """保留指示に基づく締切制約を CP-SAT モデルへ反映する。再スケジューリングごとに経過時間を反映する。"""
         try:
             pending_instr = list(getattr(env, '_pending_instructions', []))
             agent_pending = getattr(self, '_pending_instructions', [])
@@ -1641,9 +2058,12 @@ class CSPAgent:
                     t['fixed_task_id'] = fixed_task_id
                 task_index_by_fixed_id[fixed_task_id] = idx
 
+            active_task_ids = set(self._get_active_task_ids()) if hasattr(self, '_get_active_task_ids') else set()
+
             for pending in list(pending_instr):
                 try:
-                    if pending.get('deadline_constraint_applied', False):
+                    status = pending.get('status', 'pending')
+                    if status in {'done', 'canceled'}:
                         continue
 
                     selected_task = pending.get('task')
@@ -1665,35 +2085,64 @@ class CSPAgent:
 
                     if fixed_task_id is None:
                         print(f"[CSPAgent] 指示の固定 ID がないためスキップ: {payload}")
+                        pending['status'] = 'canceled'
                         pending['deadline_constraint_applied'] = True
                         continue
 
                     matched_idx = task_index_by_fixed_id.get(fixed_task_id)
                     if matched_idx is None:
-                        print(f"[CSPAgent] 対応するタスクが見つかりません: fixed_id={fixed_task_id}")
+                        print(f"[CSPAgent] 対応するタスクがなくなったため完了扱い: fixed_id={fixed_task_id}")
+                        pending['status'] = 'done'
                         pending['deadline_constraint_applied'] = True
                         continue
+
+                    target_task = tasks[matched_idx]
+                    target_tid = target_task.get('id')
+                    if target_tid in self.completed_task_ids:
+                        print(f"[CSPAgent] 指示対象タスクは完了済み: fixed_id={fixed_task_id} tid={target_tid}")
+                        pending['status'] = 'done'
+                        pending['deadline_constraint_applied'] = True
+                        continue
+
+                    # execution_logged はイベントログのフラグであって、対象タスクの実際の進行状態を表すものではない。
+                    # そのため、execution_logged が立っていても、実際にタスクが開始/完了していなければ保留状態のまま扱う。
 
                     accepted_env_time = pending.get('accepted_env_time', None)
+                    current_env_time = None
+                    if hasattr(env, 'time'):
+                        current_env_time = getattr(env, 'time')
+                    elif hasattr(env, 'current_time'):
+                        current_env_time = getattr(env, 'current_time')
+                    if current_env_time is None:
+                        current_env_time = accepted_env_time if accepted_env_time is not None else 0.0
                     if accepted_env_time is None:
                         print(f"[CSPAgent] 指示の環境時刻情報がないためスキップ: {pending}")
+                        pending['status'] = 'canceled'
                         pending['deadline_constraint_applied'] = True
                         continue
 
-                    accepted_frame = int(accepted_env_time * self.fps)
-                    d_frames = int(self.deadline_seconds * self.fps) if getattr(self, 'deadline_seconds', None) is not None else self.deadline_frames
-                    bound = accepted_frame + d_frames
+                    elapsed_seconds = max(0.0, float(current_env_time) - float(accepted_env_time))
+                    deadline_seconds = self.deadline_seconds
+                    if deadline_seconds is None:
+                        deadline_seconds = self.deadline_frames / float(self.fps)
+                    deadline_info = self._classify_instruction_deadline(pending, current_env_time, deadline_seconds)
+                    remaining_deadline_seconds = deadline_info.get('remaining_seconds', 0.0)
+
+                    accepted_frame = int(float(accepted_env_time) * self.fps)
                     start_var = starts_by_idx.get(matched_idx)
                     if start_var is None:
                         pending['deadline_constraint_applied'] = True
                         continue
 
-                    if d_frames <= 0:
-                        model.Add(start_var == accepted_frame)
-                        print(f"[CSPAgent] 期限制約を追加: fixed_id={fixed_task_id} start = {accepted_frame} (env_time={accepted_env_time})")
+                    if deadline_info.get('mode') == 'urgent':
+                        urgent_frame = int(float(current_env_time) * self.fps)
+                        model.Add(start_var <= urgent_frame + 1)
+                        print(f"[CSPAgent] 指示を最優先で実行: fixed_id={fixed_task_id} start <= {urgent_frame + 1} (env_time={current_env_time})")
                     else:
+                        remaining_frames = int(remaining_deadline_seconds * self.fps)
+                        bound = accepted_frame + remaining_frames
                         model.Add(start_var <= bound)
-                        print(f"[CSPAgent] 期限制約を追加: fixed_id={fixed_task_id} start <= {bound} (env_time={accepted_env_time}, d_frames={d_frames})")
+                        print(f"[CSPAgent] 期限制約を追加: fixed_id={fixed_task_id} start <= {bound} (env_time={current_env_time}, remaining_seconds={remaining_deadline_seconds:.3f})")
                     pending['deadline_constraint_applied'] = True
                 except Exception as e:
                     print(f"[CSPAgent] 保留指示反映中に例外: {e}")
@@ -1706,6 +2155,8 @@ class CSPAgent:
         Circuit制約を用いて順序依存のセットアップ時間（移動時間）を正確にモデル化する。
         """
         print(f"[CSPAgent] CSPスケジューリング開始 ({len(orders)} 注文)...")
+        previous_schedule = getattr(self, 'schedule', None)
+        previous_schedule_per_agent = getattr(self, 'schedule_per_agent', None)
         model = cp_model.CpModel()
         
         # 1. タスクのリスト化とリソース位置の固定
@@ -1846,7 +2297,8 @@ class CSPAgent:
         # 割り当てるかを決定変数として扱う。
         # これにより依存待ち時間中に別タスクを実行できる解が見つかるようになる。
         # =====================================================
-        
+        is_a1 = None  # 2エージェントモード時にのみ設定される割り当てBoolVarリスト
+
         if self.sc_2agent:
             if predicted_human_task_ids:
                 is_a1 = [None] * num_tasks
@@ -2026,8 +2478,11 @@ class CSPAgent:
                         for ast in after_starts:
                             model.Add(ast >= be)
 
-        # ============ 指示によるハード締切制約 ============
-        self._apply_instruction_deadline_constraints(model, tasks, starts, env)
+        # ============ 指示による制約 (skip_budget ベース) ============
+        # 旧: 秒数ベース制約 (当面は呼び出さない — メソッドは残す)
+        # self._apply_instruction_deadline_constraints(model, tasks, starts, env)
+        if self.skip_budget is not None:
+            self._apply_instruction_skip_budget_constraints(model, tasks, starts, env, is_a1=is_a1)
 
         # Makespan 最小化
         makespan = model.NewIntVar(0, horizon, 'makespan')
@@ -2070,7 +2525,8 @@ class CSPAgent:
                                     'end': solver.Value(ends[j]),
                                     'res': t.get('fixed_res'),
                                     'assigned_counter': t.get('assigned_counter'),
-                                    'display_order': t.get('display_order', t.get('slot_idx', t['order']))
+                                    'display_order': t.get('display_order', t.get('slot_idx', t['order'])),
+                                    'fixed_task_id': self._make_fixed_task_id(t['verb'], t['obj'], t['order'])
                                 })
                                 print(f" -> {t['verb']} {t['obj']}")
                             current_node = j
@@ -2095,7 +2551,8 @@ class CSPAgent:
                         'res': t.get('fixed_res'),
                         'assigned_counter': t.get('assigned_counter'),
                         'display_order': t.get('display_order', t.get('slot_idx', t['order'])),
-                        'agent_idx': agent_idx
+                        'agent_idx': agent_idx,
+                        'fixed_task_id': self._make_fixed_task_id(t['verb'], t['obj'], t['order'])
                     })
                 # 各エージェントのタスクを開始時刻順に並べる
                 for agent_idx in [0, 1]:
@@ -2107,7 +2564,15 @@ class CSPAgent:
                 
         else:
             if status_name == 'INFEASIBLE':
-                print(f"[CSPAgent] ソルバー結果: INFEASIBLE (締切制約などにより解なし) — そのまま継続します。")
+                print(f"[CSPAgent] ソルバー結果: INFEASIBLE (締切制約などにより解なし) — 直前のスケジュールへフォールバックします。")
+                if self.sc_2agent and previous_schedule_per_agent:
+                    self.schedule_per_agent = previous_schedule_per_agent
+                    fallback_schedule = previous_schedule_per_agent[0] + previous_schedule_per_agent[1]
+                    fallback_schedule.sort(key=lambda x: x['start'])
+                    return fallback_schedule
+                if previous_schedule:
+                    self.schedule = previous_schedule
+                    return previous_schedule
             else:
                 print(f"[CSPAgent] 解が見つかりませんでした。 状態={status_name}")
             
