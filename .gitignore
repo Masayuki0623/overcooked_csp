@@ -37,6 +37,7 @@ ENV/
 # Project specific
 agent/agent/replay/*
 agent/agent/logs/*
+agent/agent/myagent/rl_models/
 
 # API Keys
 google_api_key.txt
