@@ -1184,10 +1184,17 @@ class CSPAgent:
                     f"hold_before={hold_before} hold_hint={hold_hint} counter={self.task_agent.assigned_counter}"
                 )
                 
-                if "Done" in reason or "done" in reason or "完了" in reason:
+                # chop/serve の "(完了)" は「置く/配膳すると決定した瞬間」に返される信号であり、
+                # 実際に環境へ反映された(=本当に手放した)ことの確認ではない。これを即座に
+                # 完了扱いにすると、非同期反映が追いつく前に次のタスクへ進んでしまい、
+                # 持っている食材が別の置き場へ付け替えられて「置いては別の場所へ運び直す」
+                # 挙動を引き起こす。cook の "(Done)" は鍋の中身という実観測に基づくため、
+                # 即座に完了扱いにして問題ない。chop/serve は実際に手放したことを確認できる
+                # イベント(event_history の Put_/Deliver_)に基づく既存の再スケジュール検知に任せ、
+                # ここでは先走って completed_task_ids やタスク進行を進めない。
+                reason_is_done = "Done" in reason or "done" in reason or "完了" in reason
+                if reason_is_done and verb not in ('chop', 'serve'):
                     self._emit_counter_debug(f"[CSPAgent] タスク {task_name} 完了。次へ移動。")
-                    if verb == 'serve':
-                        self._emit_counter_debug(f"[SERVE] AI task={task_name} tid={tid} completed=True")
                     self.completed_task_ids.add(tid)
                     self._update_skip_budget_on_completion(tid, 0, scheduled_task.get('dur', 0))
                     if tid == scheduled_tid and not preempted_this_frame:
@@ -1336,10 +1343,14 @@ class CSPAgent:
                     self._update_stall_state(agent_idx, action, reason)
 
                     
-                    if reason.endswith("(Done)") or reason.endswith("(完了)"):
+                    # chop/serve の "(完了)" は「置く/配膳すると決定した瞬間」の信号であり、
+                    # 実際に環境へ反映された確認ではない(cook の "(Done)" は鍋の中身という
+                    # 実観測に基づくため即時確定してよい)。詳細は単一エージェント側の
+                    # 同じ分岐のコメントを参照。ここで先走って完了扱いにしないことで、
+                    # 手放す前に次のタスクへ進み食材の置き場が付け替わってしまう不具合を防ぐ。
+                    reason_is_done = reason.endswith("(Done)") or reason.endswith("(完了)")
+                    if reason_is_done and verb not in ('chop', 'serve'):
                         self._emit_counter_debug(f"[CSPAgent] AI{agent_idx} タスク {task_name} 完了。")
-                        if verb == 'serve':
-                            self._emit_counter_debug(f"[SERVE] AI{agent_idx} task={task_name} tid={tid} completed=True")
                         self.completed_task_ids.add(tid)
                         self._update_skip_budget_on_completion(tid, agent_idx, scheduled_task.get('dur', 0))
                         if tid == scheduled_tid:
@@ -1352,7 +1363,7 @@ class CSPAgent:
                         ta.assigned_serve_loc = None
                         ta.assigned_counter = None
                         ta.assigned_task_id = None
-                        
+
                     actions[f"ai_{agent_idx}"] = action
                     reasons.append(reason)
                 else:
@@ -2247,6 +2258,72 @@ class CSPAgent:
             if getattr(agent, 'holding', None) is not None
         }
 
+        # エージェントが今まさに手に持っている「刻んだ食材」の在庫。
+        # 世界(カウンター上など)に置かれた食材は available_chopped_by_pos で
+        # 数えているが、held_object_ids はそこから保持中アイテムを除外しているため、
+        # 「鍋へ運んでいる最中の刻んだ食材」がどの注文からも見えなくなり、
+        # 既に確保済みなのに再度 chop タスクが追加されてしまう不具合があった。
+        # 複数の注文が同じ食材を必要としている場合、どの注文向けかを取り違えると
+        # 別の注文がその分を横取りしてしまい、結局 chop タスクが復活して同じ問題が
+        # 別の食材で再発するため、「このエージェントは今どの注文向けに動いているか」
+        # (carry_task または現在のスケジュール済みタスクの order) に紐づけて管理する。
+        # 紐づけ先が分からない場合のみ、注文を問わない共有プールにフォールバックする。
+        held_chopped_by_order = {}
+        held_chopped_unassigned = {}
+
+        def _infer_agent_order(agent_idx):
+            carry_task = None
+            sched = []
+            idx = 0
+            if self.sc_2agent:
+                carry_by_agent = getattr(self, 'carry_task_by_agent', None)
+                if isinstance(carry_by_agent, dict):
+                    carry_task = carry_by_agent.get(agent_idx)
+                sched = getattr(self, 'schedule_per_agent', {}).get(agent_idx, [])
+                idx_by_agent = getattr(self, 'current_task_idx', {})
+                idx = idx_by_agent.get(agent_idx, 0) if isinstance(idx_by_agent, dict) else 0
+            elif agent_idx == 0:
+                carry_task = getattr(self, 'carry_task_by_agent', None)
+                sched = getattr(self, 'schedule', [])
+                idx = getattr(self, 'current_task_idx', 0)
+                if not isinstance(idx, int):
+                    idx = 0
+
+            for task in (carry_task, sched[idx] if idx < len(sched) else None):
+                if not task:
+                    continue
+                task_id = task.get('id')
+                if isinstance(task_id, tuple) and len(task_id) >= 3:
+                    return task_id[2]
+            return None
+
+        for agent_idx, agent in enumerate(getattr(env, 'agents', [])):
+            holding = getattr(agent, 'holding', None)
+            if holding is None:
+                continue
+
+            ing_names = []
+            if hasattr(holding, 'is_chopped') and holding.is_chopped():
+                for food in getattr(holding, 'contents', []):
+                    food_name = getattr(food, 'name', None)
+                    if food_name:
+                        ing_names.append(food_name)
+            else:
+                holding_name = getattr(holding, 'name', '')
+                if holding_name.startswith('Chopped'):
+                    ing_names.append(holding_name.replace('Chopped', ''))
+
+            if not ing_names:
+                continue
+
+            order_for_agent = _infer_agent_order(agent_idx)
+            for ing_name in ing_names:
+                if order_for_agent is not None:
+                    bucket = held_chopped_by_order.setdefault(order_for_agent, {})
+                else:
+                    bucket = held_chopped_unassigned
+                bucket[ing_name] = bucket.get(ing_name, 0) + 1
+
         def register_chopped_item(item, location=None):
             if item is None:
                 return
@@ -2270,7 +2347,7 @@ class CSPAgent:
                 base_name = name.replace('Chopped', '')
                 add_chopped(base_name)
 
-        def consume_chopped(ingredient_name, assigned_counter, reserved_counters):
+        def consume_chopped(ingredient_name, assigned_counter, reserved_counters, order_uid=None):
             preferred_positions = []
             if assigned_counter is not None:
                 preferred_positions.append(assigned_counter)
@@ -2292,6 +2369,24 @@ class CSPAgent:
                 available_chopped[ingredient_name] -= 1
                 if available_chopped[ingredient_name] <= 0:
                     del available_chopped[ingredient_name]
+                return True
+
+            # 世界(カウンター等)に見つからなくても、この注文向けに動いているエージェントが
+            # 既に手に持っているなら chop 要求は満たされているとみなす。座標に紐づかないため
+            # assigned_counter の一致は問わない。まずこの注文向けと分かっている分だけを見て、
+            # 他の注文の分を横取りしないようにする。持ち主の注文が特定できなかった分だけ
+            # 共有プールから消費する。
+            own_bucket = held_chopped_by_order.get(order_uid, {}) if order_uid is not None else {}
+            if own_bucket.get(ingredient_name, 0) > 0:
+                own_bucket[ingredient_name] -= 1
+                if own_bucket[ingredient_name] <= 0:
+                    del own_bucket[ingredient_name]
+                return True
+
+            if held_chopped_unassigned.get(ingredient_name, 0) > 0:
+                held_chopped_unassigned[ingredient_name] -= 1
+                if held_chopped_unassigned[ingredient_name] <= 0:
+                    del held_chopped_unassigned[ingredient_name]
                 return True
 
             return False
@@ -2456,7 +2551,7 @@ class CSPAgent:
                     counter for counter in used_counters
                     if counter is not None and counter != assigned_counter
                 }
-                if consume_chopped(ing, assigned_counter, reserved_other_counters):
+                if consume_chopped(ing, assigned_counter, reserved_other_counters, order_uid=order_uid):
                     continue
                 dur = self._task_duration_frames(env, 'chop', ing.lower(), order_idx, assigned_counter)
                 if dur is None:
@@ -3126,13 +3221,13 @@ class CSPAgent:
             if aid not in agents_sched:
                 agents_sched[aid] = []
             agents_sched[aid].append(item)
-            total_frames = max(total_frames, item['end'])
-            
+            total_frames = max(total_frames, item.get('end', 0))
+
         for aid in sorted(agents_sched.keys()):
             print(f"\nAI{aid}")
             for item in agents_sched[aid]:
-                tid = item['id']; start=item['start']; end=item['end']; res=item['res']
-                verb,obj,order = tid
+                tid = item.get('id'); start = item.get('start'); end = item.get('end'); res = item.get('res')
+                verb, obj, order = tid
                 display_order = item.get('display_order', order)
                 print(f"{verb} {obj} (注文{display_order+1}) : 開始={start}, 終了={end}, 資源={res}")
 

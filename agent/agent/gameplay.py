@@ -239,6 +239,8 @@ class GamePlay(Game):
                         action_dict[self.sim_agents[self.ai_agent_idx].name] = args['action']
                     elif args['agent'] == "ai_0":
                         action_dict[self.sim_agents[0].name] = args['action']
+                        if self.debug_mode:
+                            print(f"[ENVTRACE] recv_action wall={time.time():.4f} agent=ai_0 action={args['action']}")
                     elif args['agent'] == "ai_1":
                         if len(self.sim_agents) > 1:
                             action_dict[self.sim_agents[1].name] = args['action']
@@ -257,9 +259,17 @@ class GamePlay(Game):
             if not paused:
                 ad = {k: v if v is not None else (
                     0, 0) for k, v in action_dict.items()}
+                if self.debug_mode:
+                    a0 = self.sim_agents[0]
+                    print(f"[ENVTRACE] step_begin wall={time.time():.4f} pos_before={a0.location} "
+                          f"applied_action={ad.get(a0.name)} hold_before={a0.get_holding()}")
                 self.replay.log(
                     'env.step', {'action_dict': ad, 'passed_time': seconds_per_step})
                 _, _, done, _ = self.env.step(ad, passed_time=seconds_per_step)
+                if self.debug_mode:
+                    a0 = self.sim_agents[0]
+                    print(f"[ENVTRACE] step_end   wall={time.time():.4f} pos_after={a0.location} "
+                          f"hold_after={a0.get_holding()}")
                 if done:
                     self._success = True
                     self._q_control.put(('Quit', {}))
@@ -277,7 +287,11 @@ class GamePlay(Game):
 
                 # 毎ステップAIへ最新状態を送る。
                 # 人間の操作だけで状態が変わった場合でも、CSPの再計画を即時に起こすため。
-                self._q_ai.put(('Env', {"EnvState": dcopy(e)}))
+                # applied_actions: このステップで各エージェントに実際に適用したaction。
+                # _run_ai 側が「自分が送ったコマンドが本当に反映されたか」を確認するために使う
+                # (非同期キューのため、反映前に同じ状況を見て同じコマンドを二重に送ってしまい、
+                #  移動が1マス行き過ぎたり、拾う/置くを繰り返してしまう不具合があったため)。
+                self._q_ai.put(('Env', {"EnvState": dcopy(e), "applied_actions": dict(ad)}))
                 action_dict = {agent.name: None for agent in self.sim_agents}
 
             sleep_time = max(seconds_per_step - (time.time() - last_t), 0)
@@ -343,6 +357,37 @@ class GamePlay(Game):
         except Exception as e:
             print(f"[GamePlay] Failed to refresh instruction state: {e}")
 
+    def _target_idx_for_agent_id(self, agent_id):
+        if agent_id == "ai_0":
+            return 0
+        if agent_id == "ai_1":
+            return 1
+        return self.ai_agent_idx if self.ai_agent_idx is not None else 0
+
+    def _dispatch_agent_action(self, agent_id, action, env, awaiting_confirm):
+        """agent_id 宛ての action を _q_env に送る。ただし、直前にこのエージェントへ送った
+        コマンドがまだ実際に環境へ適用されたと確認できていない場合は送らずスキップする。
+
+        _run_ai と _run_env は非同期スレッド+キューで繋がっており、_run_ai は自分が送った
+        コマンドの効果(座標の変化・所持品の変化など)が反映されるより前に、まだ古い状態を
+        見て次の判断をしてしまうことがある。これにより:
+        - 移動コマンドが2回連続で送られ、目的地を1マス通り過ぎてしまう
+        - 「拾う」action が既に成功しているのに、もう一度同じ方向へのコマンドが送られて
+          今度は逆に「置く」として作用し、拾っては置くを繰り返してしまう
+        といった不具合が起きていた。(0,0) は状態を変えないため対象外。
+        """
+        target_idx = self._target_idx_for_agent_id(agent_id)
+        if self.human_agent_idx is not None and target_idx == self.human_agent_idx:
+            return
+        if action != (0, 0) and awaiting_confirm.get(agent_id) is not None:
+            # 直前に送ったコマンドの結果がまだ確認できていない -> 二重送信を防ぐため今回はスキップ
+            return
+        if action != (0, 0):
+            awaiting_confirm[agent_id] = action
+        if self.debug_mode and agent_id == "ai_0":
+            print(f"[AITRACE] push_action wall={time.time():.4f} pos_seen={env.self_pos} action={action}")
+        self._q_env.put(('Action', {"agent": agent_id, "action": action}))
+
     def _run_ai(self):
         time_per_step = 1 / self.fps_ai
         time_last = time.time()
@@ -350,6 +395,9 @@ class GamePlay(Game):
         env = None
         env_update = False
         chat = ''
+        # agent_id -> 直前に送信し、まだ実際に環境へ適用されたと確認できていない action。
+        # None(未送信)になって初めて次のコマンドを送る。
+        awaiting_confirm = {}
         while True:
             event = self._q_ai.get()
             while True:
@@ -357,6 +405,16 @@ class GamePlay(Game):
                 if event_type == 'Env':
                     env = args['EnvState']
                     env_update = True
+                    applied_actions = args.get('applied_actions') or {}
+                    for agent_id in list(awaiting_confirm.keys()):
+                        target_idx = self._target_idx_for_agent_id(agent_id)
+                        agents = getattr(env, 'agents', None)
+                        if not agents or target_idx >= len(agents):
+                            continue
+                        agent_name = agents[target_idx].name
+                        if applied_actions.get(agent_name) == awaiting_confirm[agent_id]:
+                            # このステップで実際に適用されたことを確認できた -> 次のコマンドを送ってよい
+                            awaiting_confirm.pop(agent_id, None)
                 elif event_type == 'Chat':
                     chat = args['chat']
                 elif event_type == "Action":
@@ -374,7 +432,13 @@ class GamePlay(Game):
 
             if env_update:
                 self._refresh_instruction_states(env)
+                if self.debug_mode:
+                    hold_seen = getattr(env, 'hold', None)
+                    hold_seen_name = getattr(hold_seen, 'full_name', None) if hold_seen is not None else None
+                    print(f"[AITRACE] decide_begin wall={time.time():.4f} pos_seen={env.self_pos} hold_seen={hold_seen_name}")
                 move, chat_ret = self.ai(env)
+                if self.debug_mode:
+                    print(f"[AITRACE] decide_end   wall={time.time():.4f} pos_seen={env.self_pos} move={move}")
 
                 # sleep
                 sleep_time = max(time_per_step - (time.time() - time_last), 0)
@@ -383,22 +447,13 @@ class GamePlay(Game):
 
                 if chat_ret:
                     self._q_env.put(('ChatOut', {"chat": chat_ret}))
-                    
+
                 if isinstance(move, dict):
                     for agent_id, m in move.items():
-                        if agent_id == "ai_0":
-                            target_idx = 0
-                        elif agent_id == "ai_1":
-                            target_idx = 1
-                        else:
-                            target_idx = self.ai_agent_idx if self.ai_agent_idx is not None else 0
-                        if self.human_agent_idx is not None and target_idx == self.human_agent_idx:
-                            continue
-                        self._q_env.put(('Action', {"agent": agent_id, "action": m}))
+                        self._dispatch_agent_action(agent_id, m, env, awaiting_confirm)
                 else:
                     target_idx = self.ai_agent_idx if self.ai_agent_idx is not None else 0
-                    if self.human_agent_idx is None or target_idx != self.human_agent_idx:
-                        self._q_env.put(('Action', {"agent": f"ai_{target_idx}", "action": move}))
+                    self._dispatch_agent_action(f"ai_{target_idx}", move, env, awaiting_confirm)
                 human_act = False
                 env_update = False
 

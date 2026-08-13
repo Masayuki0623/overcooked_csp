@@ -223,7 +223,7 @@ class TaskAgent:
                 # 通常のコストは1、他のエージェントが居る場合はペナルティを与える（迂回を優先させる）
                 step_cost = 1
                 if neighbor in dynamic_obstacles:
-                    step_cost = 20  # ここを通るなら20マス遠回りしてでも避けるプランを採用する
+                    step_cost = self.DYNAMIC_OBSTACLE_PENALTY  # ここを通るなら大きく遠回りしてでも避けるプランを採用する
 
                 tentative_g = g_score[current] + step_cost
                 if neighbor not in g_score or tentative_g < g_score[neighbor]:
@@ -233,10 +233,17 @@ class TaskAgent:
                     heapq.heappush(open_set, (f_score[neighbor], neighbor))
         return None, float('inf')
 
+    # 動的障害物(相手プレイヤー)が経路上にいるときのペナルティコスト。
+    DYNAMIC_OBSTACLE_PENALTY = 20
+
     # 隣接進入マスの選択を切り替えるために必要な最小コスト差。
-    # これ未満の差なら、相手プレイヤーの移動による一時的なコスト変動とみなし、
-    # 前回選んだ進入マスに留まる（揺れ防止）。
-    ADJACENT_GOAL_STICKY_MARGIN = 4
+    # 相手プレイヤーが自分の進行ルート上のたった1マスに一時的に重なっただけでも
+    # DYNAMIC_OBSTACLE_PENALTY 分コストが跳ね上がるため、このマージンを
+    # ペナルティ以上に設定しないと「相手が動くたびに毎フレーム左右のルートが
+    # 入れ替わって揺れる」挙動を防げない。ペナルティ超過分だけは、
+    # 実際に長time経路が塞がれた/明確に短いルートが空いた場合とみなし
+    # 切り替えを許可する。
+    ADJACENT_GOAL_STICKY_MARGIN = DYNAMIC_OBSTACLE_PENALTY + 1
 
     def _deadlock_escape_step(self, env, self_pos, dynamic_obstacles):
         """15フレーム以上待機した場合の退避ステップ(お見合い防止)。動けなければ None。"""
@@ -253,55 +260,26 @@ class TaskAgent:
         return random.choice(escapes)
 
     def move_to(self, env, target_pos, dynamic_obstacles=None):
+        # 経路は毎フレーム、実際の現在地(self_pos)から作り直す。
+        # このゲームは speed パラメータによる連続的な移動を扱っており、
+        # 「1回のアクションで必ず1マス分ちょうど進む」とは限らない。
+        # そのため経路を跨フレームでキャッシュして辿ろうとすると、
+        # 想定した位置と実際の self_pos がズレたときに1マスを超える
+        # 不正な移動ベクトルを返してしまう(過去に実際に発生した不具合)。
+        # 経路そのものは常に再計算しつつ、「どちらの隣接マスから近づくか」
+        # の選択だけを固執させることで、対称な地形(環状通路など)での
+        # 左右往復(揺れ)を防止する。
         dynamic_obstacles = dynamic_obstacles or set()
+        self.planned_path = [] # リセット
         self_pos = env.self_pos
         dist = abs(self_pos[0] - target_pos[0]) + abs(self_pos[1] - target_pos[1])
         if dist == 1:
             self.wait_count = 0
-            self.planned_path = []
             self._last_move_target_pos = None
             self._last_adjacent_goal = None
             #print(f"  [MoveTo] ターゲット {target_pos} に隣接。インタラクトします。")
             return (target_pos[0] - self_pos[0], target_pos[1] - self_pos[1])
 
-        # ターゲットが変わったときだけ、既存の計画・固執先をリセットする。
-        if target_pos != self._last_move_target_pos:
-            self._last_move_target_pos = target_pos
-            self._last_adjacent_goal = None
-            self.planned_path = []
-
-        # 既に確定した経路が残っていれば、それをそのまま辿って前進を続ける。
-        # 毎フレーム経路を作り直すと、環状通路のような対称な地形で相手プレイヤーの
-        # 位置がわずかに変わるだけで最短ルート(時計回り/反時計回り等)が入れ替わり、
-        # その場で前後に揺れて見える挙動になるため、詰まらない限り再計算しない。
-        if self.planned_path:
-            if self.planned_path[0] == self_pos:
-                self.planned_path.pop(0)
-
-        if self.planned_path:
-            next_step = self.planned_path[0]
-            still_walkable = (
-                0 <= next_step[0] < env.world_width and 0 <= next_step[1] < env.world_height
-                and env.to_grid_a[next_step[0]][next_step[1]] == 1
-            )
-            if still_walkable:
-                if next_step in dynamic_obstacles:
-                    self.wait_count += 1
-                    if self.wait_count > 15:
-                        escape = self._deadlock_escape_step(env, self_pos, dynamic_obstacles)
-                        if escape is not None:
-                            self.planned_path = []  # 退避後は状況が変わるため経路を作り直す
-                            return escape
-                    return (0, 0)
-
-                self.wait_count = 0
-                self.planned_path.pop(0)
-                return (next_step[0] - self_pos[0], next_step[1] - self_pos[1])
-
-            # 計画上の次マスが歩行不可になっていた場合のみ再計算する
-            self.planned_path = []
-
-        # ここに来るのは、経路計画がない場合のみ = 新規に1回だけ経路を選び直す
         adjacents = []
         for dx, dy in [(0,1),(0,-1),(1,0),(-1,0)]:
             nx, ny = target_pos[0]+dx, target_pos[1]+dy
@@ -310,7 +288,14 @@ class TaskAgent:
 
         if not adjacents:
             #print(f"  [MoveTo] ターゲット {target_pos} の歩行可能な隣接セルがありません (to_grid_a で確認)")
+            self._last_move_target_pos = None
+            self._last_adjacent_goal = None
             return (0,0)
+
+        # ターゲット自体が変わったときだけ、固執していた進入マスをリセットする
+        if target_pos != self._last_move_target_pos:
+            self._last_move_target_pos = target_pos
+            self._last_adjacent_goal = None
 
         # ターゲットの隣接マスのうち、コスト(距離＋障害物ペナルティ)が最小のルート(プラン)を採用する
         costs = {}
@@ -328,14 +313,19 @@ class TaskAgent:
         min_cost = costs[best_adj]
 
         # 振動防止: 前回選んだ進入マスがまだ有効(コスト差がわずか)なら、そちらを優先して維持する。
+        # これにより、相手プレイヤーの移動でコストが僅かに変わるたびに
+        # 進入マス(≒接近する向き)が入れ替わって前後に揺れる挙動を防ぐ。
+        # 経路自体は毎回 self_pos から再計算するため、実際の移動量とのズレは生じない。
         chosen_adj = best_adj
         sticky_adj = self._last_adjacent_goal
         if sticky_adj in costs and costs[sticky_adj] <= min_cost + self.ADJACENT_GOAL_STICKY_MARGIN:
             chosen_adj = sticky_adj
 
         self._last_adjacent_goal = chosen_adj
-        self.planned_path = paths[chosen_adj]
-        next_step = self.planned_path[0]
+        best_path = paths[chosen_adj]
+
+        self.planned_path = best_path
+        next_step = best_path[0]
 
         # もし次の一歩が他のエージェントの現在位置なら、通り過ぎるのを待機する
         if next_step in dynamic_obstacles:
@@ -346,14 +336,12 @@ class TaskAgent:
             if self.wait_count > 15:
                 escape = self._deadlock_escape_step(env, self_pos, dynamic_obstacles)
                 if escape is not None:
-                    self.planned_path = []
                     # print(f"[{env.agent_idx}:{self.task_name}] お見合いが長すぎたため退避します！")
                     return escape
 
             return (0, 0)
 
         self.wait_count = 0
-        self.planned_path.pop(0)
         return (next_step[0] - self_pos[0], next_step[1] - self_pos[1])
         
         # 目的地が塞がれている場合：到達可能な範囲内で目的地に最も近い「空きマス（一時的な目的地）」を探す
@@ -987,8 +975,13 @@ class TaskAgent:
 
         if target_loc:
             #print(f"  -> {target_loc} から {target_ing_name} を取得しに行きます")
-            self._log_chop_debug(env, ing_name, holding_name, assigned_cutboard, assigned_counter, "fetch_fresh", target=target_loc)
-            return self.move_to(env, target_loc, dynamic_obstacles=dynamic_obstacles), f"{target_ing_name} の取得"
+            action = self.move_to(env, target_loc, dynamic_obstacles=dynamic_obstacles)
+            self._log_chop_debug(
+                env, ing_name, holding_name, assigned_cutboard, assigned_counter, "fetch_fresh",
+                target=target_loc,
+                reason=f"self_pos={self_pos} action={action} planned_path={list(self.planned_path)}",
+            )
+            return action, f"{target_ing_name} の取得"
 
         self._log_chop_debug(env, ing_name, holding_name, assigned_cutboard, assigned_counter, "wait_no_fresh", reason=f"{target_ing_name}_not_found")
         return (0,0), f"{target_ing_name} が見つかりません"
