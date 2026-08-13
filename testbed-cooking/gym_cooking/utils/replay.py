@@ -1,6 +1,7 @@
 import pickle
 import time
 import threading
+from pathlib import Path
 
 
 class Replay:
@@ -20,7 +21,10 @@ class Replay:
         return self
 
     def save(self, filename):
-        pickle.dump(self._d, open(filename, 'wb'))
+        path = Path(filename)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open('wb') as file_handle:
+            pickle.dump(self._d, file_handle)
 
     def __getitem__(self, item):
         return self._d['dict'][item]

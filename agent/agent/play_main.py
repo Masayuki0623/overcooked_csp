@@ -74,13 +74,13 @@ def _create_single_agent(agent_name, speed, replay, init_env_state, env, task_na
         ai._compute_all_distances(init_env_state)
         ai.extract_tasks_from_current_orders(init_env_state)
         graph = ai.generate_task_graph(init_env_state)
-        print("=== タスクグラフ（ノード, コスト） ===")
-        for node, cost in graph:
-            print(node, ":", cost)
-        print("===============================")
-        print("=== タスク間遷移コスト ===")
+        # print("=== タスクグラフ（ノード, コスト） ===")
+        # for node, cost in graph:
+        #     print(node, ":", cost)
+        # print("===============================")
+        # print("=== タスク間遷移コスト ===")
         ai.print_task_transition_costs(init_env_state)
-        print("===============================")
+        # print("===============================")
         return ai
     if agent_name == "Greedy":
         ai = GreedyAgent(speed, replay)
@@ -132,13 +132,14 @@ def init_env_replay(map_name, agent0_name, agent1_name, task_name=None, no_resch
             ai_idx = None
             human_idx = None
             try:
-                print("Skipping agent configuration GUI for CSP startup")
+                # print("Skipping agent configuration GUI for CSP startup")
                 csp_agent.priority_weights = {}
                 csp_agent.gui_text_input = ""
                 csp_agent.gui_constraint_input = ""
                 csp_agent.active_constraints = []
             except Exception as e:
-                print(f"Failed to initialize default CSP settings: {e}")
+                # print(f"Failed to initialize default CSP settings: {e}")
+                pass
         else:
             ai = CSPAgent(agent_set.speed, replay, no_reschedule=no_reschedule, sc_2agent=use_two_agent_mode, deadline_seconds=arglist.deadline, skip_budget=int(arglist.deadline) if arglist.deadline is not None else None)
             ai_idx = 1
@@ -151,13 +152,14 @@ def init_env_replay(map_name, agent0_name, agent1_name, task_name=None, no_resch
             else:
                 raise NotImplementedError("--agent1 CSP currently supports only agent0 human/CSP/choponly.")
             try:
-                print("Skipping agent configuration GUI for CSP startup")
+                # print("Skipping agent configuration GUI for CSP startup")
                 ai.priority_weights = {}
                 ai.gui_text_input = ""
                 ai.gui_constraint_input = ""
                 ai.active_constraints = []
             except Exception as e:
-                print(f"Failed to initialize default CSP settings: {e}")
+                # print(f"Failed to initialize default CSP settings: {e}")
+                pass
     elif agent0_name == "CSP":
         ai = CSPAgent(agent_set.speed, replay, no_reschedule=no_reschedule, sc_2agent=use_two_agent_mode, deadline_seconds=arglist.deadline, skip_budget=int(arglist.deadline) if arglist.deadline is not None else None)
         ai_idx = 0
@@ -168,13 +170,14 @@ def init_env_replay(map_name, agent0_name, agent1_name, task_name=None, no_resch
         else:
             raise NotImplementedError("--agent0 CSP currently supports only agent1 human.")
         try:
-            print("Skipping agent configuration GUI for CSP startup")
+            # print("Skipping agent configuration GUI for CSP startup")
             ai.priority_weights = {}
             ai.gui_text_input = ""
             ai.gui_constraint_input = ""
             ai.active_constraints = []
         except Exception as e:
-            print(f"Failed to initialize default CSP settings: {e}")
+            # print(f"Failed to initialize default CSP settings: {e}")
+            pass
     else:
         if agent0_name != "human" and agent1_name == "human":
             ai = _create_single_agent(agent0_name, agent_set.speed, replay, init_env_state, env, task_name=task_name, no_reschedule=no_reschedule)
@@ -210,15 +213,18 @@ if __name__ == '__main__':
         ok = game.on_execute()
         
         if ok is True:
-            print("Game End!")
+            # print("Game End!")
+            pass
         else:
-            print("Game Failed!")
+            # print("Game Failed!")
+            pass
 
     except KeyboardInterrupt:
-        print("\nGame interrupted by user.")
+        # print("\nGame interrupted by user.")
+        pass
 
     finally:
-        print(replay['order_result'])
+        # print(replay['order_result'])
         repdir = Path(__file__).resolve().parent / 'replay'
         replay.save(repdir / f'{arglist.map}-{agent0_name}-{agent1_name or "human"}-{datetime.now().strftime("%Y%m%d_%H%M%S")}.rep')
-        print(f"Replay saved to {repdir}")
+        # print(f"Replay saved to {repdir}")

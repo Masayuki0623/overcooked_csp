@@ -50,10 +50,9 @@ class Game:
             (self.container_scale * np.asarray(self.holding_size)).astype(int))
         # self.font = pygame.font.SysFont('arialttf', 10)
 
-        self.small_font = pygame.font.SysFont('Times', int(self.scale * 0.35))
-        self.font = pygame.font.SysFont('Times', int(self.scale * 0.7))
-        self.large_font = pygame.font.SysFont('Times', int(self.scale * 1.5))
-        self.order_display_labels = []
+        self.small_font = pygame.font.SysFont('Times', 12)
+        self.font = pygame.font.SysFont('Times', 16)
+        self.large_font = pygame.font.SysFont('Times', 40)
 
         self.__plot_elements = []
 
@@ -71,8 +70,14 @@ class Game:
             self._running = False
 
     def on_render(self, paused=False, chat='', replay=False, debug_info=None):
+        # Refresh references from env (in case of reset)
+        self.world = self.env.world
+        self.sim_agents = self.env.sim_agents
+        self.order_scheduler = self.env.order_scheduler
+        if len(self.sim_agents) > 0:
+            self.current_agent = self.sim_agents[0]
+        
         self.__plot_elements = []
-        self.order_display_labels = debug_info.get('order_labels', []) if debug_info else []
         try:
             self.screen.fill(Color.FLOOR)
         except:
@@ -124,13 +129,9 @@ class Game:
         for o in objs['chopping']:
             self.draw_chopping_object(o)
 
-        # Draw current orders
+        # UI elements disabled for RL training - only show game
         self.draw_current_orders()
-
-        # Draw soup hint
         self.draw_soup_hint()
-
-        # Draw current time
         self.draw_current_time()
 
         if debug_info:
@@ -149,35 +150,38 @@ class Game:
 
     def draw_debug_overlay(self, debug_info):
         """Draw debug information overlay."""
-        if 'counters' in debug_info:
-            for order_label, loc in debug_info['counters'].items():
-                if not loc: continue
-                sl = self.scaled_location(loc)
-                
-                # Draw red frame
-                pygame.draw.rect(self.screen, (255, 0, 0), (sl[0], sl[1], self.scale, self.scale), 3)
-                
-                # Draw text
-                text = f"Order {order_label}"
-                # Render text with white background for readability
-                t = self.small_font.render(text, True, (255, 0, 0), (255, 255, 255))
-                self.screen.blit(t, (sl[0], sl[1] - 20))
-                
-        if 'tasks' in debug_info:
-            # 画面下部の中央付近（ScoreやTimeに被らない位置）にタスクを表示
-            start_x = (self.world.width / 2.0 - 1.0) * self.tile_size[0]
-            start_y = (self.world.height + 0.2) * self.tile_size[1]
-            
-            y_offset = 0
-            for agent_name, task_name in debug_info['tasks'].items():
-                if not task_name: task_name = "Idle"
-                formatted_task = task_name.replace('_', ' ').capitalize()
-                text = f"{agent_name}: {formatted_task}"
-                
-                # テキストの描画
-                t = self.small_font.render(text, True, (10, 10, 10), (255, 255, 255))
-                self.screen.blit(t, (start_x, start_y + y_offset))
-                y_offset += int(self.scale * 0.45) # フォントサイズに合わせた行間
+        if not isinstance(debug_info, dict):
+            return
+
+        counters = debug_info.get('counters', debug_info)
+        if not isinstance(counters, dict):
+            return
+
+        for order_idx, loc in counters.items():
+            if not loc:
+                continue
+
+            # 将来の拡張で loc が dict になる場合に備え、代表座標を吸収する。
+            if isinstance(loc, dict):
+                loc = loc.get('counter') or loc.get('location') or loc.get('pos')
+
+            if not (isinstance(loc, (tuple, list)) and len(loc) == 2):
+                continue
+
+            sl = self.scaled_location(loc)
+
+            # Draw red frame
+            pygame.draw.rect(self.screen, (255, 0, 0), (sl[0], sl[1], self.scale, self.scale), 3)
+
+            # Draw text
+            if isinstance(order_idx, int):
+                label = order_idx
+            else:
+                label = str(order_idx)
+            text = f"Order {label}"
+            # Render text with white background for readability
+            t = self.small_font.render(text, True, (255, 0, 0), (255, 255, 255))
+            self.screen.blit(t, (sl[0], sl[1] - 20))
 
     def draw_gridsquare(self, gs):
         sl = self.scaled_location(gs.location)
@@ -330,18 +334,21 @@ class Game:
         self.draw(path, size, loc)
 
     def draw_current_orders(self):
-        if self.world.arglist.user_recipy and self.order_scheduler is not None:
-            for i, (order, restTime, timeLimit, bonus) in enumerate(self.order_scheduler.current_orders):
-                order_label = self.order_display_labels[i] if i < len(self.order_display_labels) else (i + 1)
-                self.draw_current_order(i, copy.deepcopy(order), restTime, order_label)
+        # Always get fresh references from env to avoid stale references after reset
+        current_order_scheduler = self.env.order_scheduler if hasattr(self.env, 'order_scheduler') else self.order_scheduler
+        current_world = self.env.world if hasattr(self.env, 'world') else self.world
+        
+        if current_order_scheduler is not None:
+            for i, (order, restTime, timeLimit, bonus) in enumerate(current_order_scheduler.current_orders):
+                self.draw_current_order(i, copy.deepcopy(order), restTime)
 
         # draw success and failed ones
         self.put_text(self.small_font, "Score", (40, 80, 180),
-                      ((0 + 0.15) * self.tile_size[0], (self.world.height + 1.6) * self.tile_size[1]))
-        self.put_text(self.font, str(self.order_scheduler.reward), (40, 80, 180),
-                      ((0.5 + 0.3) * self.tile_size[0], (self.world.height + 1.4) * self.tile_size[1]))
+                      ((0 + 0.15) * self.tile_size[0], (current_world.height + 1.6) * self.tile_size[1]))
+        self.put_text(self.font, str(current_order_scheduler.reward), (40, 80, 180),
+                      ((0.5 + 0.3) * self.tile_size[0], (current_world.height + 1.4) * self.tile_size[1]))
 
-    def draw_current_order(self, idx, obj, t, order_label=None):
+    def draw_current_order(self, idx, obj, t):
         # order
         obj_loc = (idx, self.world.height)
         if any([isinstance(c, Plate) for c in obj.contents]):
@@ -354,10 +361,24 @@ class Game:
         else:
             self.draw(obj.full_name, self.tile_size,
                       self.scaled_location(obj_loc))
-        pos = self.scaled_location(obj_loc)
-        if order_label is not None:
-            label_surface = self.small_font.render(str(order_label), True, (180, 20, 20), (255, 255, 255))
-            self.screen.blit(label_surface, (pos[0] + 2, pos[1] + 2))
+        colors = {
+            0: (220, 70, 1),
+            0.25: (249, 168, 37),
+            0.5: (255, 201, 40),
+            0.75: (124, 178, 66),
+            1.0: (0, 138, 122),
+        }
+        w = t / MAX_ORDER_LENGTH_SECONDS
+        color = (0, 0, 0)
+        for l, r in zip([0., 0.25, 0.5, 0.75], [0.25, 0.5, 0.75, 1.0]):
+            if l - 1e-3 <= w and w <= r + 1e-3:
+                color = np.array(
+                    colors[l]) + (np.array(colors[r]) - np.array(colors[l])) * (w - l) / (r - l)
+        self.draw_bar((idx + 0.1) * self.tile_size[0], (self.world.height + 1) * self.tile_size[1],
+                      int(self.tile_size[0] * 0.9 * t / MAX_ORDER_LENGTH_SECONDS), self.tile_size[1] // 5, color)
+
+        # Order name display removed for cleaner UI
+        pass
 
     def draw_soup_hint(self):
         if self.world.arglist.user_recipy:
@@ -387,8 +408,9 @@ class Game:
         pass
 
     def draw_current_time(self):
-        # time_render = f"Time: {self.env.current_time: .1f}/{60: .1f}"
-        time_render = f"Time: {self.env.current_time: .1f}/{self.env.arglist.max_num_timesteps: .1f}"
+        # Use step counter (self.env.t) instead of current_time
+        current_step = self.env.t if hasattr(self.env, 't') else 0
+        time_render = f"Step: {current_step}/1024"
         self.put_text(self.small_font, time_render, (220, 70, 1),
                       ((self.world.width - 2.0) * self.tile_size[0], (self.world.height + 1.6) * self.tile_size[1]))
 

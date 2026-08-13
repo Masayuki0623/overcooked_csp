@@ -275,11 +275,9 @@ class GamePlay(Game):
                              chg_grid=info['chg_grid'])
                 self._latest_env_state = dcopy(e)
 
-                if self.ai_agent_idx is None:
-                    if any(action_dict[agent.name] is not None for agent in self.sim_agents):
-                        self._q_ai.put(('Env', {"EnvState": dcopy(e)}))
-                elif action_dict[self.sim_agents[self.ai_agent_idx].name] is not None:
-                    self._q_ai.put(('Env', {"EnvState": dcopy(e)}))
+                # 毎ステップAIへ最新状態を送る。
+                # 人間の操作だけで状態が変わった場合でも、CSPの再計画を即時に起こすため。
+                self._q_ai.put(('Env', {"EnvState": dcopy(e)}))
                 action_dict = {agent.name: None for agent in self.sim_agents}
 
             sleep_time = max(seconds_per_step - (time.time() - last_t), 0)

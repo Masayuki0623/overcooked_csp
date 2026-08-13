@@ -15,11 +15,16 @@ class TaskAgent:
         self.assigned_plate = None
         self.assigned_serve_loc = None
         self.assigned_counter = None 
+        self.assigned_task_id = None
         self.protected_counters = set()
         
         # 経路予約用（Cooperative A*）
         self.planned_path = []
         self.wait_count = 0  # 待機カウンターを追加
+
+        # move_to() の振動防止用（前回選んだ目的地/進入マスを記憶する）
+        self._last_move_target_pos = None
+        self._last_adjacent_goal = None
         
         #print(f"[TaskAgent] タスクで初期化: {self.task_name}")
 
@@ -60,7 +65,46 @@ class TaskAgent:
             return None, None
 
         counter_obj = env.pos_obj.get(assigned_counter)
-        if counter_obj is None or mergeable(holding, counter_obj):
+        if counter_obj is None:
+            return assigned_counter, None
+
+        holding_name = getattr(holding, 'full_name', '') if holding is not None else ''
+        counter_name = getattr(counter_obj, 'full_name', '') if counter_obj is not None else ''
+        if not counter_name:
+            return assigned_counter, None
+
+        def extract_ingredients(name):
+            if not name:
+                return set()
+            candidates = []
+            for token in name.replace('-', ' ').replace('_', ' ').replace('/', ' ').split():
+                normalized = token.strip().lower()
+                for prefix in ('fresh', 'chopped', 'cooked', 'cooking', 'raw', 'cut'):
+                    if normalized.startswith(prefix):
+                        normalized = normalized[len(prefix):]
+                        break
+                if normalized in ('lettuce', 'onion', 'tomato'):
+                    candidates.append(normalized)
+            return set(candidates)
+
+        holding_ings = extract_ingredients(holding_name)
+        counter_ings = extract_ingredients(counter_name)
+
+        # assigned counter はその注文専用の保持場所とみなすが、
+        # 「必要な食材が既に counter 上にある」か「same ingredient overlap がある」場合は
+        # 安全な partial state とみなし、再割り当てや待機を起こさない。
+        if holding_ings or counter_ings:
+            valid_ingredients = {'lettuce', 'onion', 'tomato'}
+            if holding_ings <= valid_ingredients and counter_ings <= valid_ingredients:
+                if holding_ings & counter_ings or holding_ings or counter_ings:
+                    return assigned_counter, None
+
+        if holding_ings and counter_ings:
+            shared = holding_ings & counter_ings
+            if shared:
+                return assigned_counter, None
+
+        if mergeable(holding, counter_obj):
             return assigned_counter, None
 
         content_name = self._get_counter_content_name(env, assigned_counter)
@@ -70,6 +114,23 @@ class TaskAgent:
         if self.strict_counter_management:
             return (0, 0), wait_reason
         return fallback_func()
+
+    def _log_chop_debug(self, env, ing_name, holding_name, assigned_cutboard, assigned_counter, stage, target=None, reason=None):
+        current_time = getattr(env, 'time', None)
+        parts = [
+            f"[TaskAgent][CHOP] time={current_time}",
+            f"agent={getattr(env, 'agent_idx', None)}",
+            f"ing={ing_name}",
+            f"hold={holding_name}",
+            f"cutboard={assigned_cutboard}",
+            f"counter={assigned_counter}",
+            f"stage={stage}",
+        ]
+        if target is not None:
+            parts.append(f"target={target}")
+        if reason:
+            parts.append(f"reason={reason}")
+        print(" ".join(parts))
 
     def astar_path(self, env, start, goal, dynamic_obstacles=None):
         if dynamic_obstacles is None:
@@ -172,63 +233,127 @@ class TaskAgent:
                     heapq.heappush(open_set, (f_score[neighbor], neighbor))
         return None, float('inf')
 
+    # 隣接進入マスの選択を切り替えるために必要な最小コスト差。
+    # これ未満の差なら、相手プレイヤーの移動による一時的なコスト変動とみなし、
+    # 前回選んだ進入マスに留まる（揺れ防止）。
+    ADJACENT_GOAL_STICKY_MARGIN = 4
+
+    def _deadlock_escape_step(self, env, self_pos, dynamic_obstacles):
+        """15フレーム以上待機した場合の退避ステップ(お見合い防止)。動けなければ None。"""
+        import random
+        escapes = []
+        for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+            nx, ny = self_pos[0] + dx, self_pos[1] + dy
+            if 0 <= nx < env.world_width and 0 <= ny < env.world_height and env.to_grid_a[nx][ny] == 1:
+                if (nx, ny) not in dynamic_obstacles:
+                    escapes.append((dx, dy))
+        if not escapes:
+            return None
+        self.wait_count = 0
+        return random.choice(escapes)
+
     def move_to(self, env, target_pos, dynamic_obstacles=None):
-        self.planned_path = [] # リセット
+        dynamic_obstacles = dynamic_obstacles or set()
         self_pos = env.self_pos
         dist = abs(self_pos[0] - target_pos[0]) + abs(self_pos[1] - target_pos[1])
         if dist == 1:
             self.wait_count = 0
+            self.planned_path = []
+            self._last_move_target_pos = None
+            self._last_adjacent_goal = None
             #print(f"  [MoveTo] ターゲット {target_pos} に隣接。インタラクトします。")
             return (target_pos[0] - self_pos[0], target_pos[1] - self_pos[1])
-        
+
+        # ターゲットが変わったときだけ、既存の計画・固執先をリセットする。
+        if target_pos != self._last_move_target_pos:
+            self._last_move_target_pos = target_pos
+            self._last_adjacent_goal = None
+            self.planned_path = []
+
+        # 既に確定した経路が残っていれば、それをそのまま辿って前進を続ける。
+        # 毎フレーム経路を作り直すと、環状通路のような対称な地形で相手プレイヤーの
+        # 位置がわずかに変わるだけで最短ルート(時計回り/反時計回り等)が入れ替わり、
+        # その場で前後に揺れて見える挙動になるため、詰まらない限り再計算しない。
+        if self.planned_path:
+            if self.planned_path[0] == self_pos:
+                self.planned_path.pop(0)
+
+        if self.planned_path:
+            next_step = self.planned_path[0]
+            still_walkable = (
+                0 <= next_step[0] < env.world_width and 0 <= next_step[1] < env.world_height
+                and env.to_grid_a[next_step[0]][next_step[1]] == 1
+            )
+            if still_walkable:
+                if next_step in dynamic_obstacles:
+                    self.wait_count += 1
+                    if self.wait_count > 15:
+                        escape = self._deadlock_escape_step(env, self_pos, dynamic_obstacles)
+                        if escape is not None:
+                            self.planned_path = []  # 退避後は状況が変わるため経路を作り直す
+                            return escape
+                    return (0, 0)
+
+                self.wait_count = 0
+                self.planned_path.pop(0)
+                return (next_step[0] - self_pos[0], next_step[1] - self_pos[1])
+
+            # 計画上の次マスが歩行不可になっていた場合のみ再計算する
+            self.planned_path = []
+
+        # ここに来るのは、経路計画がない場合のみ = 新規に1回だけ経路を選び直す
         adjacents = []
         for dx, dy in [(0,1),(0,-1),(1,0),(-1,0)]:
             nx, ny = target_pos[0]+dx, target_pos[1]+dy
             if 0 <= nx < env.world_width and 0 <= ny < env.world_height and env.to_grid_a[nx][ny] == 1:
                 adjacents.append((nx, ny))
-        
+
         if not adjacents:
             #print(f"  [MoveTo] ターゲット {target_pos} の歩行可能な隣接セルがありません (to_grid_a で確認)")
             return (0,0)
 
-        best_path = None
-        min_cost = float('inf')
-        
         # ターゲットの隣接マスのうち、コスト(距離＋障害物ペナルティ)が最小のルート(プラン)を採用する
+        costs = {}
+        paths = {}
         for adj in adjacents:
             path, cost = self.astar_path_cost(env, self_pos, adj, dynamic_obstacles=dynamic_obstacles)
-            if path and cost < min_cost:
-                min_cost = cost
-                best_path = path
+            if path:
+                costs[adj] = cost
+                paths[adj] = path
 
-        if not best_path:
+        if not costs:
             return (0, 0)
 
-        self.planned_path = best_path
-        next_step = best_path[0]
-        
+        best_adj = min(costs, key=costs.get)
+        min_cost = costs[best_adj]
+
+        # 振動防止: 前回選んだ進入マスがまだ有効(コスト差がわずか)なら、そちらを優先して維持する。
+        chosen_adj = best_adj
+        sticky_adj = self._last_adjacent_goal
+        if sticky_adj in costs and costs[sticky_adj] <= min_cost + self.ADJACENT_GOAL_STICKY_MARGIN:
+            chosen_adj = sticky_adj
+
+        self._last_adjacent_goal = chosen_adj
+        self.planned_path = paths[chosen_adj]
+        next_step = self.planned_path[0]
+
         # もし次の一歩が他のエージェントの現在位置なら、通り過ぎるのを待機する
-        if next_step in (dynamic_obstacles or set()):
+        if next_step in dynamic_obstacles:
             self.wait_count += 1
-            print(f"[{env.agent_idx}:{self.task_name}] 最短距離上の障害物を避ける迂回ルートがない(またはコスト高すぎる)と判断し待機 (wait={self.wait_count}, cost={min_cost})")
-            
+            # print(f"[{env.agent_idx}:{self.task_name}] 最短距離上の障害物を避ける迂回ルートがない(またはコスト高すぎる)と判断し待機 (wait={self.wait_count}, cost={min_cost})")
+
             # デッドロック（お互いにお見合いで同じ場所で立ち往生する）防止策
             if self.wait_count > 15:
-                import random
-                escapes = []
-                for dx, dy in [(0,1), (0,-1), (1,0), (-1,0)]:
-                    nx, ny = self_pos[0]+dx, self_pos[1]+dy
-                    if 0 <= nx < env.world_width and 0 <= ny < env.world_height and env.to_grid_a[nx][ny] == 1:
-                        if (nx, ny) not in (dynamic_obstacles or set()):
-                            escapes.append((dx, dy))
-                if escapes:
-                    self.wait_count = 0
-                    print(f"[{env.agent_idx}:{self.task_name}] お見合いが長すぎたため退避します！")
-                    return random.choice(escapes)
+                escape = self._deadlock_escape_step(env, self_pos, dynamic_obstacles)
+                if escape is not None:
+                    self.planned_path = []
+                    # print(f"[{env.agent_idx}:{self.task_name}] お見合いが長すぎたため退避します！")
+                    return escape
 
             return (0, 0)
-        
+
         self.wait_count = 0
+        self.planned_path.pop(0)
         return (next_step[0] - self_pos[0], next_step[1] - self_pos[1])
         
         # 目的地が塞がれている場合：到達可能な範囲内で目的地に最も近い「空きマス（一時的な目的地）」を探す
@@ -349,7 +474,7 @@ class TaskAgent:
             # 次タスクが不明なら現在地に最も近い候補（なるべく動かない）
             target = min(candidates, key=lambda p: abs(p[0]-self_pos[0]) + abs(p[1]-self_pos[1]))
 
-        print(f"  [SafeWait] {self_pos} → {target} (避けているリソース={blocking_task.get('res') if blocking_task else None})")
+        # print(f"  [SafeWait] {self_pos} → {target} (避けているリソース={blocking_task.get('res') if blocking_task else None})")
         return self.move_to(env, target, dynamic_obstacles=dynamic_obstacles)
 
 
@@ -491,7 +616,7 @@ class TaskAgent:
             return (0, 0), "調理する食材が指定されていません"
             
         target_ing_names = sorted([f"Chopped{i}" for i in ingredients])
-        print(f"[DEBUG] cook:start agent={env.agent_idx} task={self.task_name} pos={self_pos} holding={holding_name} target={target_ing_names} assigned_counter={assigned_counter} assigned_pot={assigned_pot}")
+        # print(f"[DEBUG] cook:start agent={env.agent_idx} task={self.task_name} pos={self_pos} holding={holding_name} target={target_ing_names} assigned_counter={assigned_counter} assigned_pot={assigned_pot}")
         
         pots = [assigned_pot] if assigned_pot else env.get_pos_by_obj_gs(gs='Pot')
         if env.agent_idx == 1:
@@ -526,11 +651,11 @@ class TaskAgent:
                             missing_ings.remove(p)
                     break
 
-        print(f"[DEBUG] cook:pot_state target_pot={target_pot_loc} missing={missing_ings}")
+        # print(f"[DEBUG] cook:pot_state target_pot={target_pot_loc} missing={missing_ings}")
                     
         if not target_pot_loc:
             if blocked_pot_loc:
-                print(f"[DEBUG] cook:wait_for_pot blocked_pot={blocked_pot_loc}")
+                # print(f"[DEBUG] cook:wait_for_pot blocked_pot={blocked_pot_loc}")
                 return self.move_to(env, blocked_pot_loc, dynamic_obstacles=dynamic_obstacles), "鍋が空くまで待機中"
             return (0, 0), "利用可能な鍋がありません"
             
@@ -547,18 +672,19 @@ class TaskAgent:
                     
         if holding_name and len(held_ings) < len(holding_parts):
             # 不要なものを持っている場合は捨てる
-            print(f"[DEBUG] cook:drop_unwanted holding_parts={holding_parts} held_ings={held_ings} missing={missing_ings}")
+            # print(f"[DEBUG] cook:drop_unwanted holding_parts={holding_parts} held_ings={held_ings} missing={missing_ings}")
             return self.drop_unwanted_item(env, holding, reason=f"不要なもの({holding_name})を持っています", dynamic_obstacles=dynamic_obstacles)
             
         # 3. 必要な全てを持っていれば鍋へ
         if set(held_ings) == set(missing_ings):
-            print(f"[DEBUG] cook:to_pot held_ings={held_ings} missing={missing_ings} target_pot={target_pot_loc}")
+            # print(f"[DEBUG] cook:to_pot held_ings={held_ings} missing={missing_ings} target_pot={target_pot_loc}")
             return self.move_to(env, target_pot_loc, dynamic_obstacles=dynamic_obstacles), "完成した食材を鍋に入れる"
             
         # 4. 手に一部の食材だけを持っている -> 他の未調理食材の場所に行き、それを置いてマージする！
         if holding_name:
             remaining_ings = list(set(missing_ings) - set(held_ings))
             target_merge_loc = None
+            order_allowed_names = {f"Chopped{i.capitalize()}" for i in ingredients}
             
             # 常にCSPで指定された特定のカウンター(assigned_counter) をマージ先とする
             target_merge_loc, blocked_details = self._resolve_assigned_counter_target(
@@ -569,12 +695,12 @@ class TaskAgent:
             )
                     
             if target_merge_loc:
-                print(f"[DEBUG] cook:merge_place holding={holding_name} remaining={remaining_ings} target_merge_loc={target_merge_loc}")
+                # print(f"[DEBUG] cook:merge_place holding={holding_name} remaining={remaining_ings} target_merge_loc={target_merge_loc}")
                 action = self.move_to(env, target_merge_loc, dynamic_obstacles=dynamic_obstacles)
                 return action, "指定テーブルにて食材をマージさせるために置く"
             elif assigned_counter:
                 # 指定テーブルが使えない（他注文の食材が乗っている等）場合は待機
-                print(f"[DEBUG] cook: assigned_counter={assigned_counter} がブロック holding='{holding_name}'")
+                # print(f"[DEBUG] cook: assigned_counter={assigned_counter} がブロック holding='{holding_name}'")
                 return (0, 0), blocked_details or "指定テーブルが使用中のため待機中"
             else:
                 # フォールバック: 指定テーブルがない場合は今まで通り一番近くに探す
@@ -589,9 +715,9 @@ class TaskAgent:
                             is_valid_target = False
                             has_unwanted = False
                             for p in parts:
-                                if p in remaining_ings:
+                                if p in remaining_ings or p in order_allowed_names:
                                     is_valid_target = True
-                                if p not in missing_ings or p in held_ings:
+                                if p not in order_allowed_names:
                                     has_unwanted = True
 
                             if is_valid_target and not has_unwanted:
@@ -624,8 +750,9 @@ class TaskAgent:
 
                 valid_count = 0
                 has_unwanted = False
+                order_allowed_names = {f"Chopped{i.capitalize()}" for i in ingredients}
                 for p in parts:
-                    if p in missing_ings:
+                    if p in order_allowed_names:
                         valid_count += 1
                     else:
                         has_unwanted = True
@@ -657,18 +784,18 @@ class TaskAgent:
         else:
             target_ing_loc, best_score, assigned_counter_candidate, assigned_counter_score = find_best_ingredient_target(False)
 
-        print(f"[DEBUG] cook:candidates target_ing_loc={target_ing_loc} best_score={best_score} assigned_counter_candidate={assigned_counter_candidate} assigned_counter_score={assigned_counter_score} missing={missing_ings}")
+        # print(f"[DEBUG] cook:candidates target_ing_loc={target_ing_loc} best_score={best_score} assigned_counter_candidate={assigned_counter_candidate} assigned_counter_score={assigned_counter_score} missing={missing_ings}")
 
         if target_ing_loc is None and assigned_counter_candidate is not None:
             target_ing_loc = assigned_counter_candidate
-            print(f"[DEBUG] cook:use_assigned_counter_candidate pos={target_ing_loc}")
+            # print(f"[DEBUG] cook:use_assigned_counter_candidate pos={target_ing_loc}")
                         
         if target_ing_loc:
-            print(f"[DEBUG] cook:pickup_target pos={target_ing_loc} obj={getattr(env.pos_obj.get(target_ing_loc), 'full_name', None)}")
+            # print(f"[DEBUG] cook:pickup_target pos={target_ing_loc} obj={getattr(env.pos_obj.get(target_ing_loc), 'full_name', None)}")
             return self.move_to(env, target_ing_loc, dynamic_obstacles=dynamic_obstacles), "食材の取得"
             
-        print(f"[DEBUG] cook: 必要食材が見つからない missing={missing_ings} counter={assigned_counter}")
-        print(f"[DEBUG]   カウンター上: { {p: env.pos_obj[p].full_name for p in env.get_pos_by_obj_gs('Counter') if env.pos_obj.get(p)} }")
+        # print(f"[DEBUG] cook: 必要食材が見つからない missing={missing_ings} counter={assigned_counter}")
+        # print(f"[DEBUG]   カウンター上: { {p: env.pos_obj[p].full_name for p in env.get_pos_by_obj_gs('Counter') if env.pos_obj.get(p)} }")
         return (0, 0), "必要な食材 (Chopped) を待機中"
 
     def drop_unwanted_item(self, env, holding, reason="", dynamic_obstacles=None, allow_strict_override=False):
@@ -707,6 +834,8 @@ class TaskAgent:
         self_pos = env.self_pos
         holding = env.hold
         holding_name = holding.full_name if holding else None
+
+        self._log_chop_debug(env, ing_name, holding_name, assigned_cutboard, assigned_counter, "start")
         
         target_ing_name = f"Fresh{ing_name}"
         chopping_ing_name = f"Chopping{ing_name}"
@@ -737,6 +866,7 @@ class TaskAgent:
             if assigned_counter and target_table is None:
                 content_name = getattr(counter_obj, 'full_name', '') if counter_obj is not None else ''
                 if chopped_ing_name in content_name:
+                    self._log_chop_debug(env, ing_name, holding_name, assigned_cutboard, assigned_counter, "drop_unwanted", target=assigned_counter, reason="already_on_shared_counter")
                     return self.drop_unwanted_item(
                         env,
                         holding,
@@ -744,7 +874,8 @@ class TaskAgent:
                         dynamic_obstacles=dynamic_obstacles,
                         allow_strict_override=True,
                     )
-                print(f"[DEBUG] chop: assigned_counter={assigned_counter} がブロック holding='{holding_name}'")
+                # print(f"[DEBUG] chop: assigned_counter={assigned_counter} がブロック holding='{holding_name}'")
+                self._log_chop_debug(env, ing_name, holding_name, assigned_cutboard, assigned_counter, "wait_blocked", reason=blocked_details or "assigned_counter_blocked")
                 return (0, 0), blocked_details or "指定テーブルが使用中(マージ不可)のため待機"
             
             if not target_table and not assigned_counter:
@@ -765,8 +896,11 @@ class TaskAgent:
                     if local_target_table:
                         dist = abs(self_pos[0]-local_target_table[0]) + abs(self_pos[1]-local_target_table[1])
                         if dist == 1:
+                            self._log_chop_debug(env, ing_name, holding_name, assigned_cutboard, assigned_counter, "fallback_place_done", target=local_target_table)
                             return self.move_to(env, local_target_table, dynamic_obstacles=dynamic_obstacles), f"{chopped_ing_name} を置く (完了)"
+                        self._log_chop_debug(env, ing_name, holding_name, assigned_cutboard, assigned_counter, "fallback_place_move", target=local_target_table)
                         return self.move_to(env, local_target_table, dynamic_obstacles=dynamic_obstacles), f"{chopped_ing_name} を置く"
+                    self._log_chop_debug(env, ing_name, holding_name, assigned_cutboard, assigned_counter, "fallback_wait", reason="no_empty_counter")
                     return (0,0), "適切なテーブルが見つかりません"
 
                 return self._handle_counter_fallback("共有置き場ID未割当のため待機中", fallback_func)
@@ -775,9 +909,12 @@ class TaskAgent:
                 #print(f"  -> {chopped_ing_name} を {target_table} に置きます")
                 dist = abs(self_pos[0]-target_table[0]) + abs(self_pos[1]-target_table[1])
                 if dist == 1:
+                    self._log_chop_debug(env, ing_name, holding_name, assigned_cutboard, assigned_counter, "place_done", target=target_table)
                     return self.move_to(env, target_table, dynamic_obstacles=dynamic_obstacles), f"{chopped_ing_name} を置く (完了)"
+                self._log_chop_debug(env, ing_name, holding_name, assigned_cutboard, assigned_counter, "place_move", target=target_table)
                 return self.move_to(env, target_table, dynamic_obstacles=dynamic_obstacles), f"{chopped_ing_name} を置く"
             else:
+                self._log_chop_debug(env, ing_name, holding_name, assigned_cutboard, assigned_counter, "wait_no_table", reason="no_target_table")
                 return (0,0), "適切なテーブルが見つかりません"
 
         # 1. Check Cutboards
@@ -787,6 +924,7 @@ class TaskAgent:
             if obj and chopped_ing_name in obj.full_name:
                 #print(f"  [まな板確認] {loc} で {chopped_ing_name} を発見")
                 if not holding:
+                    self._log_chop_debug(env, ing_name, holding_name, assigned_cutboard, assigned_counter, "pickup_chopped", target=loc)
                     return self.move_to(env, loc, dynamic_obstacles=dynamic_obstacles), f"{chopped_ing_name} を拾う"
 
         if assigned_cutboard:
@@ -799,6 +937,7 @@ class TaskAgent:
             if obj:
                 if target_ing_name in obj.full_name or chopping_ing_name in obj.full_name:
                     #print(f"  [まな板確認] {loc} で {obj.full_name} を発見")
+                    self._log_chop_debug(env, ing_name, holding_name, assigned_cutboard, assigned_counter, "move_to_cutboard", target=loc)
                     return self.move_to(env, loc, dynamic_obstacles=dynamic_obstacles), f"{ing_name} を切る"
         
         # 2. If holding Fresh Ingredient -> Place on Cutboard
@@ -819,8 +958,10 @@ class TaskAgent:
             
             if best_cb:
                 #print(f"  -> {target_ing_name} をまな板 {best_cb} に置きます")
+                self._log_chop_debug(env, ing_name, holding_name, assigned_cutboard, assigned_counter, "place_fresh", target=best_cb)
                 return self.move_to(env, best_cb, dynamic_obstacles=dynamic_obstacles), f"{target_ing_name} を置く"
             else:
+                self._log_chop_debug(env, ing_name, holding_name, assigned_cutboard, assigned_counter, "wait_no_cutboard", reason="no_free_cutboard")
                 return (0,0), "空いているまな板がありません"
 
         # 3. Fetch Fresh Ingredient
@@ -846,6 +987,8 @@ class TaskAgent:
 
         if target_loc:
             #print(f"  -> {target_loc} から {target_ing_name} を取得しに行きます")
+            self._log_chop_debug(env, ing_name, holding_name, assigned_cutboard, assigned_counter, "fetch_fresh", target=target_loc)
             return self.move_to(env, target_loc, dynamic_obstacles=dynamic_obstacles), f"{target_ing_name} の取得"
 
+        self._log_chop_debug(env, ing_name, holding_name, assigned_cutboard, assigned_counter, "wait_no_fresh", reason=f"{target_ing_name}_not_found")
         return (0,0), f"{target_ing_name} が見つかりません"
