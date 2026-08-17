@@ -27,8 +27,10 @@ TEXT_SUB = (122, 118, 112)
 ICON_BG = (243, 240, 234)
 
 COUNTDOWN_SECONDS = 5.0
-CARD_HEIGHT = 56
 CARD_GAP = 8
+MIN_CARD_W = 104
+MIN_CARD_H = 44
+MAX_CARD_H = 84
 TIMER_RADIUS = 30
 TIMER_THICKNESS = 9
 
@@ -157,8 +159,6 @@ class InstructionPanel:
         self.candidates = candidates or []
         self.env_summary = env_summary or {}
         self.card_rects = []
-        self.scroll = 0
-        self._view_height = 0
 
     def _draw_env_strip(self, surface, rect):
         pygame.draw.rect(surface, (238, 244, 238), rect, border_radius=8)
@@ -179,61 +179,106 @@ class InstructionPanel:
             surface.blit(body_font.render(detail, True, TEXT_SUB),
                          (rect.x + 12, rect.y + 25))
 
-    def card_span(self):
-        return CARD_HEIGHT + CARD_GAP
+    def plan_layout(self, view_w, view_h):
+        """候補が全部収まる列数とカードサイズを事前に計算する。
 
-    def max_scroll(self, visible_height):
-        total = len(self.candidates) * self.card_span()
-        return max(0, total - visible_height)
+        1〜3列を試し、すべてのカードが view に収まる中で一番大きくなる構成を選ぶ。
+        列が増えるとカードは横に細くなるので、幅と高さの小さい方(=見た目の窮屈さ)
+        が最大になる構成を採用する。
+        """
+        n = len(self.candidates)
+        if n == 0:
+            return 1, 0, 0
+        best = None
+        for cols in (1, 2, 3):
+            if cols > n:
+                break
+            rows = (n + cols - 1) // cols
+            card_w = (view_w - CARD_GAP * (cols - 1)) // cols
+            card_h = (view_h - CARD_GAP * (rows - 1)) // rows
+            if card_w < MIN_CARD_W or card_h < MIN_CARD_H:
+                continue
+            card_h = min(card_h, MAX_CARD_H)
+            score = min(card_w, card_h * 2)
+            if best is None or score > best[0]:
+                best = (score, cols, card_w, card_h)
+        if best is None:
+            # どう並べても最小サイズに満たないときは、最小値より小さくなっても
+            # view からはみ出さないことを優先する(はみ出す方が実害が大きい)。
+            cols = 3 if n > 6 else 2
+            rows = (n + cols - 1) // cols
+            card_w = (view_w - CARD_GAP * (cols - 1)) // cols
+            card_h = max(24, (view_h - CARD_GAP * (rows - 1)) // rows)
+            return cols, card_w, card_h
+        return best[1], best[2], best[3]
+
+    @staticmethod
+    def _shrink_to_fit(text, max_width, max_size, min_size, color, bold=False):
+        """収まる範囲で一番大きいフォントを選ぶ。それでも無理なら末尾を省略する。"""
+        for size in range(max_size, min_size - 1, -1):
+            font = _jp_font(size, bold=bold)
+            if font.size(text)[0] <= max_width:
+                return font.render(text, True, color)
+        return InstructionPanel._fit_text(_jp_font(min_size, bold=bold), text, max_width, color)
+
+    @staticmethod
+    def _fit_text(font, text, max_width, color):
+        """max_width に収まるように末尾を省略して描画用 Surface を返す。"""
+        if font.size(text)[0] <= max_width:
+            return font.render(text, True, color)
+        ellipsis = "…"
+        trimmed = text
+        while trimmed and font.size(trimmed + ellipsis)[0] > max_width:
+            trimmed = trimmed[:-1]
+        return font.render((trimmed + ellipsis) if trimmed else ellipsis, True, color)
+
+    def _draw_card(self, surface, rect, verb, obj, hovered):
+        """アイコン(左, 円形) + ラベル・アクション文(右, 縦2行)。
+
+        列数が変わってもレイアウトは同じで、フォントとアイコン径だけを
+        カードの大きさに合わせて縮める。文字は幅に収まらなければ省略する。
+        """
+        pygame.draw.rect(surface, CARD_BG_HOVER if hovered else CARD_BG, rect, border_radius=10)
+        pygame.draw.rect(surface, CARD_BORDER_HOVER if hovered else CARD_BORDER,
+                         rect, 2 if hovered else 1, border_radius=10)
+
+        # 幅が狭いときはアイコンを小さくして、文字に使える幅を確保する
+        radius = max(9, min((rect.height - 14) // 2, 26, (rect.width - 80) // 2))
+        label_font = _jp_font(max(9, min(rect.height // 5, 13)))
+
+        _draw_circular_icon(surface, _load_icon(card_icon_name(verb, obj), radius * 2),
+                            (rect.x + 8 + radius, rect.centery), radius)
+
+        text_x = rect.x + 8 + radius * 2 + 8
+        text_w = max(20, rect.right - 8 - text_x)
+        lt = self._fit_text(label_font, card_label(verb, obj), text_w, TEXT_SUB)
+        # アクション文はカードの主役なので、省略よりフォント縮小を優先する
+        at = self._shrink_to_fit(card_action(verb), text_w,
+                                 max(12, min(rect.height // 3, 20)), 10, TEXT_MAIN, bold=True)
+        top = rect.centery - (lt.get_height() + at.get_height()) // 2
+        surface.blit(lt, (text_x, top))
+        surface.blit(at, (text_x, top + lt.get_height()))
 
     def _draw_cards(self, surface, top, panel_rect, mouse_pos):
         self.card_rects = []
-        label_font = _jp_font(12)
-        action_font = _jp_font(18, bold=True)
+        if not self.candidates:
+            return
 
-        # カード一覧はビューポート内でクリップし、はみ出す分はホイールでスクロールする
-        view = pygame.Rect(panel_rect.x, top, panel_rect.width, panel_rect.bottom - 26 - top)
-        prev_clip = surface.get_clip()
-        surface.set_clip(view)
+        view_x = panel_rect.x + 14
+        view_w = panel_rect.width - 28
+        view_h = panel_rect.bottom - 24 - top
+        cols, card_w, card_h = self.plan_layout(view_w, view_h)
 
-        card_h = CARD_HEIGHT
-        gap = CARD_GAP
-        y = top - self.scroll
-        for display, payload in self.candidates:
-            rect = pygame.Rect(panel_rect.x + 16, y, panel_rect.width - 32, card_h)
-            if rect.bottom < view.top or rect.top > view.bottom:
-                y += card_h + gap
-                continue
-            hovered = rect.collidepoint(mouse_pos) and view.collidepoint(mouse_pos)
-            pygame.draw.rect(surface, CARD_BG_HOVER if hovered else CARD_BG, rect, border_radius=12)
-            pygame.draw.rect(surface, CARD_BORDER_HOVER if hovered else CARD_BORDER,
-                             rect, 2 if hovered else 1, border_radius=12)
-
+        for i, (display, payload) in enumerate(self.candidates):
+            row, col = divmod(i, cols)
+            rect = pygame.Rect(view_x + col * (card_w + CARD_GAP),
+                               top + row * (card_h + CARD_GAP), card_w, card_h)
             verb = payload.get('verb') if isinstance(payload, dict) else None
             obj = payload.get('obj') if isinstance(payload, dict) else None
             if verb is None or obj is None:
                 verb, obj = 'chop', str(display)
-
-            radius = (card_h - 20) // 2
-            icon = _load_icon(card_icon_name(verb, obj), radius * 2)
-            _draw_circular_icon(surface, icon, (rect.x + 14 + radius, rect.centery), radius)
-
-            text_x = rect.x + 14 + radius * 2 + 14
-            surface.blit(label_font.render(card_label(verb, obj), True, TEXT_SUB),
-                         (text_x, rect.y + 9))
-            surface.blit(action_font.render(card_action(verb), True, TEXT_MAIN),
-                         (text_x, rect.y + 26))
-
+            self._draw_card(surface, rect, verb, obj, rect.collidepoint(mouse_pos))
             self.card_rects.append((rect, (display, payload)))
-            y += card_h + gap
-
-        surface.set_clip(prev_clip)
-        self._view_height = view.height
-
-        # スクロールできることが分かるように、下端にグラデーションの目印を出す
-        if self.max_scroll(view.height) > self.scroll:
-            pygame.draw.line(surface, CARD_BORDER,
-                             (view.x + 16, view.bottom - 1), (view.right - 16, view.bottom - 1), 2)
 
     def run(self, screen, game_snapshot):
         """モーダルに描画してユーザーの選択を待つ。
@@ -259,9 +304,6 @@ class InstructionPanel:
                     return None
                 if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                     return None
-                if event.type == pygame.MOUSEWHEEL:
-                    limit = self.max_scroll(self._view_height)
-                    self.scroll = max(0, min(limit, self.scroll - event.y * self.card_span()))
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     for rect, choice in self.card_rects:
                         if rect.collidepoint(event.pos):
@@ -289,7 +331,7 @@ class InstructionPanel:
 
             self._draw_cards(screen, strip.bottom + 14, panel_rect, mouse_pos)
 
-            screen.blit(hint_font.render("クリックで選択 / ホイールでスクロール / Esc でキャンセル", True, TEXT_SUB),
+            screen.blit(hint_font.render("クリックで選択 / Esc でキャンセル", True, TEXT_SUB),
                         (panel_rect.x + 16, panel_rect.bottom - 22))
 
             pygame.display.flip()

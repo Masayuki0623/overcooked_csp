@@ -135,6 +135,10 @@ class GamePlay(Game):
         self._success = False
         self._finalized = False
         self._latest_env_state = None
+        # 指示パネル表示中は _run_env スレッド側の描画を止める。
+        # on_render は screen.fill -> display.flip まで行うため、パネルの描画と
+        # 交互に画面全体を上書きし合って激しく点滅してしまう。
+        self._instruction_panel_active = False
 
     def _get_unexecuted_task_candidates(self):
         env_state = self._latest_env_state
@@ -178,12 +182,15 @@ class GamePlay(Game):
             return popup_task_choice("AIへの指示タスクを選択してください", candidates)
 
         old_size = (snapshot.get_width(), snapshot.get_height())
-        panel_width = max(300, old_size[0])
+        # カードが3列でも窮屈にならない幅を確保する(選択中だけ広げるので実害はない)
+        panel_width = max(360, old_size[0])
+        self._instruction_panel_active = True
         try:
             widened = pygame.display.set_mode((old_size[0] + panel_width, old_size[1]))
             panel = InstructionPanel(candidates, env_summary=self._build_env_summary())
             return panel.run(widened, snapshot)
         finally:
+            self._instruction_panel_active = False
             # 閉じたら元の窓サイズへ戻し、ゲーム画面を描き直す
             self.screen = pygame.display.set_mode(old_size)
             self.screen.blit(snapshot, (0, 0))
@@ -400,7 +407,11 @@ class GamePlay(Game):
 
             if not paused:
                 self.replay.log('on_render', {'paused': paused, 'chat': chat})
-            self.on_render(paused=paused, chat=chat, debug_info=debug_info)
+            # 指示パネル表示中はこのスレッドから描画しない。
+            # on_render は screen.fill -> display.flip まで行うため、パネル側の
+            # 描画と交互に画面全体を上書きし合って激しく点滅してしまう。
+            if not self._instruction_panel_active:
+                self.on_render(paused=paused, chat=chat, debug_info=debug_info)
 
     def _refresh_instruction_states(self, env):
         """実行開始/完了に応じて pending instruction の状態を更新する。"""
