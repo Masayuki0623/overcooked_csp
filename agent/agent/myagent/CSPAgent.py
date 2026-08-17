@@ -1452,6 +1452,8 @@ class CSPAgent:
             if task_name:
                 self.task_agent.task_name = task_name
                 self.task_agent.assigned_task_id = tid
+                # 「切らずに運ぶだけ」の指定(既に切られた物が別テーブルにある場合)
+                self.task_agent.carry_from = task.get('carry_from') if verb == 'chop' else None
                 action, reason = self.task_agent(env)
                 hold_before = self._hold_before_for_log(env)
                 hold_hint = self._hold_hint_for_log(hold_before, reason)
@@ -1617,7 +1619,9 @@ class CSPAgent:
                 if getattr(ta, 'assigned_task_id', None) != tid or getattr(ta, 'assigned_counter', None) is None:
                     ta.assigned_counter = task.get('assigned_counter')
                 ta.assigned_task_id = tid
-                
+                # 「切らずに運ぶだけ」の指定(既に切られた物が別テーブルにある場合)
+                ta.carry_from = task.get('carry_from') if verb == 'chop' else None
+
                 if verb == 'chop':
                     task_name = f"chop_{obj}"
                 elif verb == 'cook':
@@ -2813,6 +2817,9 @@ class CSPAgent:
                 base_name = name.replace('Chopped', '')
                 add_chopped(base_name)
 
+        # この注文で「切らずに運ぶだけ」にできる食材 -> 運び元カウンター
+        carry_sources = {}
+
         def consume_chopped(ingredient_name, assigned_counter, reserved_counters, order_uid=None):
             preferred_positions = []
             if assigned_counter is not None:
@@ -2822,6 +2829,17 @@ class CSPAgent:
                     pos for pos in available_chopped_by_pos.keys()
                     if pos not in reserved_counters
                 )
+
+            # 自分の置き場に無い場合、どの注文の置き場でもない「自由な」カウンターに
+            # 既に切られた物があるなら、切り直さずそこから運べばよい。
+            # 他注文の置き場(reserved_counters)からは絶対に取らない(取り合いと
+            # テーブル間の移動合戦を防ぐため)。
+            if assigned_counter is not None:
+                for pos in available_chopped_by_pos.keys():
+                    if pos == assigned_counter or pos in reserved_counters:
+                        continue
+                    if available_chopped_by_pos.get(pos, {}).get(ingredient_name, 0) > 0:
+                        preferred_positions.append(pos)
 
             for pos in preferred_positions:
                 pos_stock = available_chopped_by_pos.get(pos, {})
@@ -2835,6 +2853,12 @@ class CSPAgent:
                 available_chopped[ingredient_name] -= 1
                 if available_chopped[ingredient_name] <= 0:
                     del available_chopped[ingredient_name]
+                if pos != assigned_counter:
+                    # 自分の置き場ではない = 運んで合流させる必要がある
+                    self._emit_counter_debug(
+                        f"[ConsumeChopped] order={order_uid} ing={ingredient_name} source=carry pos={pos}")
+                    carry_sources[ingredient_name] = pos
+                    return False
                 self._emit_counter_debug(f"[ConsumeChopped] order={order_uid} ing={ingredient_name} source=world pos={pos}")
                 return True
 
@@ -3069,7 +3093,10 @@ class CSPAgent:
                 dur = self._task_duration_frames(env, 'chop', ing.lower(), order_idx, assigned_counter)
                 if dur is None:
                     continue
+                # 既に切られた物が別のテーブルにあるなら、切らずに運ぶだけでよい
+                carry_from = carry_sources.pop(ing, None)
                 tasks.append({
+                    'carry_from': carry_from,
                     'id': ('chop', ing.lower(), order_uid),
                     'verb': 'chop', 'obj': ing.lower(), 'order': order_uid,
                     'slot_idx': order_idx,

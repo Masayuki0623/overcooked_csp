@@ -4,6 +4,8 @@ from gym_cooking.utils.core import mergeable
 
 class TaskAgent:
     def __init__(self, speed=2.5, replay=None, task_name=None):
+        # 「切らずに運ぶだけ」の運び元カウンター(CSPAgent が毎フレーム設定する)
+        self.carry_from = None
         self.speed = speed
         self.replay = replay
         self.task_name = task_name
@@ -935,6 +937,20 @@ class TaskAgent:
             else:
                 self._log_chop_debug(env, ing_name, holding_name, assigned_cutboard, assigned_counter, "wait_no_table", reason="no_target_table")
                 return (0,0), "適切なテーブルが見つかりません"
+
+        # 0.5 既に切られた物が別のテーブルにあるなら、切らずにそれを取りに行くだけでよい。
+        # (例: レタス+玉ねぎの置き場と、トマトだけの置き場が別々にある場合、
+        #  トマトを切り直すのではなく運んで合流させる)
+        # 運び先は必ず assigned_counter なので、運び元と運び先が入れ替わる往復は起きない。
+        carry_from = getattr(self, 'carry_from', None)
+        if carry_from is not None and carry_from != assigned_counter:
+            source_obj = env.pos_obj.get(carry_from)
+            source_name = getattr(source_obj, 'full_name', '') if source_obj is not None else ''
+            if chopped_ing_name in source_name:
+                self._log_chop_debug(env, ing_name, holding_name, assigned_cutboard,
+                                     assigned_counter, "carry_pickup", target=carry_from)
+                return (self.move_to(env, carry_from, dynamic_obstacles=dynamic_obstacles),
+                        f"{chopped_ing_name} を取りに行く (切らずに運ぶ)")
 
         # 1. Check Cutboards
         all_cutboards = env.get_pos_by_obj_gs(gs='Cutboard')
