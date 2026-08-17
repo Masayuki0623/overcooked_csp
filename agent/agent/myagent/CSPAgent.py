@@ -145,6 +145,38 @@ class CSPAgent:
             return payload[0]
         return payload
 
+    def _extract_instruction_action(self, pending):
+        """指示から (動詞, 対象) を取り出す。注文番号は持たない。"""
+        task_payload = pending.get('task')
+        if isinstance(task_payload, (list, tuple)) and len(task_payload) >= 2:
+            payload = task_payload[1]
+        else:
+            payload = task_payload
+        if isinstance(payload, dict):
+            verb, obj = payload.get('verb'), payload.get('obj')
+            if verb is not None and obj is not None:
+                return str(verb), str(obj)
+        # 旧形式(単一の fixed_task_id = ("task", verb, obj, order_uid))からの復元
+        fixed_task_id = self._extract_instruction_fixed_task_id(pending)
+        if isinstance(fixed_task_id, (list, tuple)) and len(fixed_task_id) >= 3:
+            return str(fixed_task_id[1]), str(fixed_task_id[2])
+        return None
+
+    def _find_group_task_indices(self, tasks, action):
+        """指示された行動 (動詞, 対象) に一致するタスクを全部探す。
+
+        「cut onion が2つあるなら、そのどちらか1つを d 以内に」を実現するための
+        グループ。注文番号は見ない。
+        """
+        if not action:
+            return []
+        verb, obj = action
+        indices = []
+        for idx, t in enumerate(tasks):
+            if str(t.get('verb', '')) == verb and str(t.get('obj', '')) == obj:
+                indices.append(idx)
+        return indices
+
     def _derive_fixed_task_id(self, task):
         if task is None:
             return None
@@ -166,9 +198,22 @@ class CSPAgent:
             return None
         return self._make_fixed_task_id(verb, obj, order)
 
-    def _find_schedule_index_by_fixed_id(self, schedule, fixed_task_id):
+    def _find_schedule_index_by_fixed_id(self, schedule, fixed_task_id, action=None):
+        """指示に対応するタスクをスケジュールから探す。
+
+        action=(動詞, 対象) が与えられた場合は注文番号を問わずそれに一致する
+        最初のタスクを返す(指示は行動単位で、どの注文のものでもよいため)。
+        """
         if not schedule:
             return None
+        if action is not None:
+            verb, obj = action
+            for idx, task in enumerate(schedule):
+                task_id = task.get('id')
+                if isinstance(task_id, tuple) and len(task_id) >= 2:
+                    if str(task_id[0]) == verb and str(task_id[1]) == obj:
+                        task['fixed_task_id'] = self._derive_fixed_task_id(task)
+                        return idx
         for idx, task in enumerate(schedule):
             task_fixed_id = self._derive_fixed_task_id(task)
             if task_fixed_id is None:
@@ -255,53 +300,78 @@ class CSPAgent:
                     if remaining is None:
                         remaining = init_budget
 
-                    fixed_task_id = self._extract_instruction_fixed_task_id(pending)
-                    if fixed_task_id is None:
-                        continue
-                    matched_idx = task_index_by_fixed_id.get(fixed_task_id)
-                    if matched_idx is None:
+                    # 指示は「(動詞, 対象)」単位。同じ行動のタスクが複数の注文に
+                    # またがっている場合(例: cut onion が2つ)は、そのうち
+                    # 「どれか1つ」が d 以内に実行されればよい。
+                    action = self._extract_instruction_action(pending)
+                    group_indices = self._find_group_task_indices(tasks, action)
+                    if not group_indices:
+                        fixed_task_id = self._extract_instruction_fixed_task_id(pending)
+                        matched_idx = task_index_by_fixed_id.get(fixed_task_id)
+                        if matched_idx is None:
+                            pending['status'] = 'done'
+                            continue
+                        group_indices = [matched_idx]
+
+                    group_indices = [
+                        idx for idx in group_indices
+                        if tasks[idx].get('id') not in self.completed_task_ids
+                        and starts_by_idx.get(idx) is not None
+                    ]
+                    if not group_indices:
                         pending['status'] = 'done'
                         continue
-                    if tasks[matched_idx].get('id') in self.completed_task_ids:
-                        pending['status'] = 'done'
-                        continue
-
-                    dep_indices = self._get_dep_indices_for_target(tasks, matched_idx)
-                    target_start = starts_by_idx[matched_idx]
-                    counts_vars = []
-
-                    for j in range(len(tasks)):
-                        if j == matched_idx or j in dep_indices:
-                            continue
-                        if starts_by_idx.get(j) is None:
-                            continue
-
-                        prec_j = model.NewBoolVar(f'prec_sb_{matched_idx}_{j}')
-                        model.Add(starts_by_idx[j] <= target_start - 1).OnlyEnforceIf(prec_j)
-                        model.Add(starts_by_idx[j] >= target_start).OnlyEnforceIf(prec_j.Not())
-
-                        if is_a1 is None:
-                            # 1エージェント: すべて同エージェント
-                            counts_vars.append(prec_j)
-                        else:
-                            # 2エージェント: 同エージェント割り当てのみカウント
-                            a1_t = is_a1[matched_idx]
-                            a1_j = is_a1[j]
-                            if a1_t is None or a1_j is None:
-                                continue
-                            same_j = model.NewBoolVar(f'same_ag_{matched_idx}_{j}')
-                            # same_j=1 iff is_a1[target]==is_a1[j] (両方0か両方1)
-                            model.Add(a1_t - a1_j == 0).OnlyEnforceIf(same_j)
-                            model.Add(a1_t + a1_j == 1).OnlyEnforceIf(same_j.Not())
-                            count_j = model.NewBoolVar(f'count_sb_{matched_idx}_{j}')
-                            model.AddBoolAnd([prec_j, same_j]).OnlyEnforceIf(count_j)
-                            model.AddBoolOr([prec_j.Not(), same_j.Not()]).OnlyEnforceIf(count_j.Not())
-                            counts_vars.append(count_j)
 
                     budget_bound = max(0, remaining)
                     overage = max(0, -remaining)
-                    if counts_vars:
-                        model.Add(sum(counts_vars) <= budget_bound)
+
+                    # メンバー k について「k より前に走る非依存タスクが budget 以下」を
+                    # ok_k として表し、最後に少なくとも1つの ok_k が真であることを課す。
+                    ok_vars = []
+                    for matched_idx in group_indices:
+                        dep_indices = self._get_dep_indices_for_target(tasks, matched_idx)
+                        target_start = starts_by_idx[matched_idx]
+                        counts_vars = []
+
+                        for j in range(len(tasks)):
+                            if j == matched_idx or j in dep_indices:
+                                continue
+                            if starts_by_idx.get(j) is None:
+                                continue
+
+                            prec_j = model.NewBoolVar(f'prec_sb_{matched_idx}_{j}')
+                            model.Add(starts_by_idx[j] <= target_start - 1).OnlyEnforceIf(prec_j)
+                            model.Add(starts_by_idx[j] >= target_start).OnlyEnforceIf(prec_j.Not())
+
+                            if is_a1 is None:
+                                # 1エージェント: すべて同エージェント
+                                counts_vars.append(prec_j)
+                            else:
+                                # 2エージェント: 同エージェント割り当てのみカウント
+                                a1_t = is_a1[matched_idx]
+                                a1_j = is_a1[j]
+                                if a1_t is None or a1_j is None:
+                                    continue
+                                same_j = model.NewBoolVar(f'same_ag_{matched_idx}_{j}')
+                                # same_j=1 iff is_a1[target]==is_a1[j] (両方0か両方1)
+                                model.Add(a1_t - a1_j == 0).OnlyEnforceIf(same_j)
+                                model.Add(a1_t + a1_j == 1).OnlyEnforceIf(same_j.Not())
+                                count_j = model.NewBoolVar(f'count_sb_{matched_idx}_{j}')
+                                model.AddBoolAnd([prec_j, same_j]).OnlyEnforceIf(count_j)
+                                model.AddBoolOr([prec_j.Not(), same_j.Not()]).OnlyEnforceIf(count_j.Not())
+                                counts_vars.append(count_j)
+
+                        if not counts_vars:
+                            # 前に置けるタスクが無い = 無条件に満たされる
+                            ok_vars = None
+                            break
+                        ok_k = model.NewBoolVar(f'sb_ok_{matched_idx}')
+                        model.Add(sum(counts_vars) <= budget_bound).OnlyEnforceIf(ok_k)
+                        ok_vars.append(ok_k)
+
+                    if ok_vars:
+                        # どれか1つが d 以内であればよい
+                        model.AddBoolOr(ok_vars)
                     if overage > 0:
                         # print(f"[SkipBudget] 警告: fixed_id={fixed_task_id} 超過中(超過量={overage}), 最善優先化")
                         pass
@@ -402,7 +472,8 @@ class CSPAgent:
                 continue
 
             fixed_task_id = self._extract_instruction_fixed_task_id(pending)
-            if fixed_task_id is None:
+            action = self._extract_instruction_action(pending)
+            if fixed_task_id is None and action is None:
                 continue
 
             deadline_info = self._classify_instruction_deadline(pending, current_env_time, deadline_seconds)
@@ -450,7 +521,8 @@ class CSPAgent:
                 continue
 
             fixed_task_id = self._extract_instruction_fixed_task_id(pending)
-            if fixed_task_id is None:
+            action = self._extract_instruction_action(pending)
+            if fixed_task_id is None and action is None:
                 continue
 
             deadline_info = self._classify_instruction_deadline(pending, current_env_time, deadline_seconds)
@@ -462,7 +534,7 @@ class CSPAgent:
                 continue
 
             if not self.sc_2agent:
-                target_idx = self._find_schedule_index_by_fixed_id(getattr(self, 'schedule', []), fixed_task_id)
+                target_idx = self._find_schedule_index_by_fixed_id(getattr(self, 'schedule', []), fixed_task_id, action=action)
                 if target_idx is None:
                     continue
                 if isinstance(self.current_task_idx, int) and self.current_task_idx == target_idx:
@@ -477,7 +549,7 @@ class CSPAgent:
                 schedule = schedule_per_agent.get(agent_idx, [])
                 if not schedule:
                     continue
-                target_idx = self._find_schedule_index_by_fixed_id(schedule, fixed_task_id)
+                target_idx = self._find_schedule_index_by_fixed_id(schedule, fixed_task_id, action=action)
                 if target_idx is None:
                     continue
                 return pending, fixed_task_id, agent_idx, target_idx
@@ -781,25 +853,36 @@ class CSPAgent:
         return ("task", str(verb), str(obj), int(order_uid))
 
     def get_instruction_candidates(self, env):
-        """現在の環境で未実行のタスク候補を固定 ID 付きで返す。"""
+        """現在の環境で未実行のタスク候補を返す。
+
+        指示は「注文いくつ目の玉ねぎを切る」ではなく「玉ねぎを切る」という行動単位で
+        選ばせる。そのため同じ (動詞, 対象) のタスクが複数の注文にまたがっていても
+        候補は1つにまとめる。CSP 側は「そのうちのどれか1つ」を d 以内に実行すれば
+        よいという制約として扱う(_apply_instruction_skip_budget_constraints)。
+        """
         current_orders = self._build_order_tasks(env)
         remaining_tids = self.get_remaining_tids(env, current_orders)
 
         verb_priority = {'chop': 0, 'cook': 1, 'serve': 2}
         sorted_tids = sorted(
             remaining_tids,
-            key=lambda tid: (tid[2], verb_priority.get(tid[0], 9), tid[1])
+            key=lambda tid: (verb_priority.get(tid[0], 9), tid[1], tid[2])
         )
 
-        candidates = []
+        grouped = {}
         for verb, obj, order_uid in sorted_tids:
-            display = f"{verb}_{obj.replace(' ', '').replace('-', '_')} (order:{order_uid})"
-            fixed_task_id = self._make_fixed_task_id(verb, obj, order_uid)
+            grouped.setdefault((verb, obj), []).append(order_uid)
+
+        candidates = []
+        for (verb, obj), order_uids in grouped.items():
+            display = f"{verb}_{obj.replace(' ', '').replace('-', '_')}"
             payload = {
-                'fixed_task_id': fixed_task_id,
+                # 後方互換のため代表IDも持たせる(グループ先頭)
+                'fixed_task_id': self._make_fixed_task_id(verb, obj, order_uids[0]),
+                'fixed_task_ids': [self._make_fixed_task_id(verb, obj, uid) for uid in order_uids],
                 'verb': verb,
                 'obj': obj,
-                'order_uid': order_uid,
+                'order_uids': order_uids,
             }
             candidates.append((display, payload))
 
