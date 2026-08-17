@@ -1,0 +1,296 @@
+"""スペース押下時に出る「指示カード」パネル(pygame 描画)。
+
+画面構成:
+    左50% = ゲーム画面本体(押下時点の見た目をそのまま表示)
+    右50% = 指示UIパネル
+
+右パネルの縦方向の並び:
+    1. タイマー(右上, 5秒のラジアルワイプ, 緑→黄→赤)
+    2. 見出し「つぎの指示をえらんでください」
+    3. 環境マップ(簡易表示の帯)
+    4. 指示カード一覧(縦リスト)
+
+タイマーは見た目上の演出であり、0 になっても自動選択や強制終了はしない
+(0 のまま表示し続け、選択されるまで待つ)。
+"""
+import pygame
+
+from gym_cooking.misc.game.game import get_image
+
+PANEL_BG = (247, 245, 240)
+CARD_BG = (255, 255, 255)
+CARD_BG_HOVER = (232, 242, 254)
+CARD_BORDER = (214, 210, 202)
+CARD_BORDER_HOVER = (66, 133, 244)
+TEXT_MAIN = (34, 34, 34)
+TEXT_SUB = (122, 118, 112)
+ICON_BG = (243, 240, 234)
+
+COUNTDOWN_SECONDS = 5.0
+CARD_HEIGHT = 56
+CARD_GAP = 8
+TIMER_RADIUS = 30
+TIMER_THICKNESS = 9
+
+# 緑 -> 黄 -> 赤 の3色補間
+TIMER_COLOR_STOPS = ((76, 175, 80), (255, 193, 7), (229, 57, 53))
+
+INGREDIENT_JP = {'onion': 'たまねぎ', 'tomato': 'トマト', 'lettuce': 'レタス'}
+VERB_ACTION_JP = {'chop': '切って', 'cook': '調理して', 'serve': '提供して'}
+
+
+def _jp_font(size, bold=False):
+    """メイリオ優先で日本語フォントを取得する(無ければ順にフォールバック)。"""
+    for name in ('Meiryo', 'メイリオ', 'Yu Gothic UI', 'MS Gothic', 'Noto Sans CJK JP'):
+        try:
+            path = pygame.font.match_font(name, bold=bold)
+        except Exception:
+            path = None
+        if path:
+            return pygame.font.Font(path, size)
+    return pygame.font.SysFont(None, size, bold=bold)
+
+
+def _lerp_color(c0, c1, t):
+    return tuple(int(round(a + (b - a) * t)) for a, b in zip(c0, c1))
+
+
+def timer_color(progress):
+    """progress: 0.0(開始) -> 1.0(終了) を 緑→黄→赤 で補間する。"""
+    progress = max(0.0, min(1.0, progress))
+    if progress <= 0.5:
+        return _lerp_color(TIMER_COLOR_STOPS[0], TIMER_COLOR_STOPS[1], progress / 0.5)
+    return _lerp_color(TIMER_COLOR_STOPS[1], TIMER_COLOR_STOPS[2], (progress - 0.5) / 0.5)
+
+
+def _ingredients_of(obj):
+    base = str(obj).replace(' soup', '')
+    return [p.strip() for p in base.split('-') if p.strip()]
+
+
+def card_label(verb, obj):
+    """カードの小さい文字(素材名・料理名)。"""
+    ings = _ingredients_of(obj)
+    if verb == 'chop':
+        return INGREDIENT_JP.get(ings[0] if ings else '', str(obj))
+    names = [INGREDIENT_JP.get(i, i) for i in ings]
+    if len(names) == 1:
+        return f"{names[0]}スープ"
+    return "・".join(names) + "スープ"
+
+
+def card_action(verb):
+    return VERB_ACTION_JP.get(verb, str(verb))
+
+
+def card_icon_name(verb, obj):
+    """既存のゲーム内画像(misc/game/graphics/*.png)のファイル名を決める。"""
+    ings = [i.capitalize() for i in _ingredients_of(obj)]
+    if not ings:
+        return None
+    if verb == 'chop':
+        return f"Fresh{ings[0]}"
+    prefix = 'Chopped' if verb == 'cook' else 'Cooked'
+    return "-".join(f"{prefix}{i}" for i in ings)
+
+
+def _load_icon(name, size):
+    if not name:
+        return None
+    try:
+        image = get_image(f"misc/game/graphics/{name}.png")
+    except Exception:
+        return None
+    # convert_alpha() は display 未設定だと例外になるので、設定済みのときだけ使う
+    if pygame.display.get_surface() is not None:
+        try:
+            image = image.convert_alpha()
+        except pygame.error:
+            pass
+    try:
+        return pygame.transform.smoothscale(image, (size, size))
+    except Exception:
+        return None
+
+
+def _draw_circular_icon(surface, icon, center, radius):
+    pygame.draw.circle(surface, ICON_BG, center, radius)
+    if icon is None:
+        return
+    # 円形にクリップして貼る
+    mask = pygame.Surface((radius * 2, radius * 2), pygame.SRCALPHA)
+    pygame.draw.circle(mask, (255, 255, 255, 255), (radius, radius), radius)
+    inner = pygame.transform.smoothscale(icon, (int(radius * 1.6), int(radius * 1.6)))
+    holder = pygame.Surface((radius * 2, radius * 2), pygame.SRCALPHA)
+    holder.blit(inner, inner.get_rect(center=(radius, radius)))
+    holder.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MIN)
+    surface.blit(holder, (center[0] - radius, center[1] - radius))
+    pygame.draw.circle(surface, CARD_BORDER, center, radius, 2)
+
+
+def _draw_radial_timer(surface, center, remaining, total):
+    """残り時間のラジアルワイプ。時計回りに閉じていく。"""
+    elapsed = total - remaining
+    progress = 0.0 if total <= 0 else max(0.0, min(1.0, elapsed / total))
+    color = timer_color(progress)
+
+    pygame.draw.circle(surface, (233, 230, 224), center, TIMER_RADIUS, TIMER_THICKNESS)
+
+    if remaining > 0:
+        # 12時方向から時計回りに、残りぶんだけ描く
+        box = pygame.Rect(0, 0, TIMER_RADIUS * 2, TIMER_RADIUS * 2)
+        box.center = center
+        import math
+        start = math.pi / 2 - 2 * math.pi * (1.0 - progress)
+        pygame.draw.arc(surface, color, box, start, math.pi / 2, TIMER_THICKNESS)
+
+    font = _jp_font(26, bold=True)
+    # 0 になったら 0 のまま表示し続ける(自動選択はしない)
+    text = font.render(str(int(max(0, round(remaining + 0.4999)))), True, color)
+    surface.blit(text, text.get_rect(center=center))
+
+
+class InstructionPanel:
+    """指示カード画面。選ばれた候補(display, payload)、またはキャンセル時 None を返す。"""
+
+    def __init__(self, candidates, env_summary=None):
+        self.candidates = candidates or []
+        self.env_summary = env_summary or {}
+        self.card_rects = []
+        self.scroll = 0
+        self._view_height = 0
+
+    def _draw_env_strip(self, surface, rect):
+        pygame.draw.rect(surface, (238, 244, 238), rect, border_radius=8)
+        pygame.draw.rect(surface, (219, 228, 219), rect, 1, border_radius=8)
+
+        title_font = _jp_font(13, bold=True)
+        body_font = _jp_font(11)
+
+        # 絵文字はメイリオに字形が無く豆腐(□)になるため、印は自前で描く
+        pin = (rect.x + 14, rect.y + 14)
+        pygame.draw.circle(surface, (76, 140, 90), pin, 4)
+        pygame.draw.circle(surface, (240, 248, 240), pin, 2)
+
+        area = self.env_summary.get('area', 'キッチン')
+        detail = self.env_summary.get('detail', '')
+        surface.blit(title_font.render(area, True, TEXT_MAIN), (rect.x + 26, rect.y + 6))
+        if detail:
+            surface.blit(body_font.render(detail, True, TEXT_SUB),
+                         (rect.x + 12, rect.y + 25))
+
+    def card_span(self):
+        return CARD_HEIGHT + CARD_GAP
+
+    def max_scroll(self, visible_height):
+        total = len(self.candidates) * self.card_span()
+        return max(0, total - visible_height)
+
+    def _draw_cards(self, surface, top, panel_rect, mouse_pos):
+        self.card_rects = []
+        label_font = _jp_font(12)
+        action_font = _jp_font(18, bold=True)
+
+        # カード一覧はビューポート内でクリップし、はみ出す分はホイールでスクロールする
+        view = pygame.Rect(panel_rect.x, top, panel_rect.width, panel_rect.bottom - 26 - top)
+        prev_clip = surface.get_clip()
+        surface.set_clip(view)
+
+        card_h = CARD_HEIGHT
+        gap = CARD_GAP
+        y = top - self.scroll
+        for display, payload in self.candidates:
+            rect = pygame.Rect(panel_rect.x + 16, y, panel_rect.width - 32, card_h)
+            if rect.bottom < view.top or rect.top > view.bottom:
+                y += card_h + gap
+                continue
+            hovered = rect.collidepoint(mouse_pos) and view.collidepoint(mouse_pos)
+            pygame.draw.rect(surface, CARD_BG_HOVER if hovered else CARD_BG, rect, border_radius=12)
+            pygame.draw.rect(surface, CARD_BORDER_HOVER if hovered else CARD_BORDER,
+                             rect, 2 if hovered else 1, border_radius=12)
+
+            verb = payload.get('verb') if isinstance(payload, dict) else None
+            obj = payload.get('obj') if isinstance(payload, dict) else None
+            if verb is None or obj is None:
+                verb, obj = 'chop', str(display)
+
+            radius = (card_h - 20) // 2
+            icon = _load_icon(card_icon_name(verb, obj), radius * 2)
+            _draw_circular_icon(surface, icon, (rect.x + 14 + radius, rect.centery), radius)
+
+            text_x = rect.x + 14 + radius * 2 + 14
+            surface.blit(label_font.render(card_label(verb, obj), True, TEXT_SUB),
+                         (text_x, rect.y + 9))
+            surface.blit(action_font.render(card_action(verb), True, TEXT_MAIN),
+                         (text_x, rect.y + 26))
+
+            self.card_rects.append((rect, (display, payload)))
+            y += card_h + gap
+
+        surface.set_clip(prev_clip)
+        self._view_height = view.height
+
+        # スクロールできることが分かるように、下端にグラデーションの目印を出す
+        if self.max_scroll(view.height) > self.scroll:
+            pygame.draw.line(surface, CARD_BORDER,
+                             (view.x + 16, view.bottom - 1), (view.right - 16, view.bottom - 1), 2)
+
+    def run(self, screen, game_snapshot):
+        """モーダルに描画してユーザーの選択を待つ。
+
+        screen: 横に広げた後の display Surface
+        game_snapshot: 押下時点のゲーム画面(左半分に表示する)
+        """
+        clock = pygame.time.Clock()
+        panel_x = game_snapshot.get_width()
+        panel_rect = pygame.Rect(panel_x, 0, screen.get_width() - panel_x, screen.get_height())
+
+        heading_font = _jp_font(17, bold=True)
+        hint_font = _jp_font(10)
+        started = pygame.time.get_ticks() / 1000.0
+
+        while True:
+            now = pygame.time.get_ticks() / 1000.0
+            remaining = max(0.0, COUNTDOWN_SECONDS - (now - started))
+            mouse_pos = pygame.mouse.get_pos()
+
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    return None
+                if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                    return None
+                if event.type == pygame.MOUSEWHEEL:
+                    limit = self.max_scroll(self._view_height)
+                    self.scroll = max(0, min(limit, self.scroll - event.y * self.card_span()))
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    for rect, choice in self.card_rects:
+                        if rect.collidepoint(event.pos):
+                            return choice
+
+            screen.blit(game_snapshot, (0, 0))
+            pygame.draw.rect(screen, PANEL_BG, panel_rect)
+            pygame.draw.line(screen, CARD_BORDER,
+                             (panel_rect.x, 0), (panel_rect.x, panel_rect.height), 2)
+
+            _draw_radial_timer(
+                screen,
+                (panel_rect.right - 16 - TIMER_RADIUS, 16 + TIMER_RADIUS),
+                remaining, COUNTDOWN_SECONDS,
+            )
+
+            screen.blit(heading_font.render("つぎの指示を", True, TEXT_MAIN),
+                        (panel_rect.x + 16, 22))
+            screen.blit(heading_font.render("えらんでください", True, TEXT_MAIN),
+                        (panel_rect.x + 16, 44))
+
+            strip = pygame.Rect(panel_rect.x + 16, 16 + TIMER_RADIUS * 2 + 12,
+                                panel_rect.width - 32, 46)
+            self._draw_env_strip(screen, strip)
+
+            self._draw_cards(screen, strip.bottom + 14, panel_rect, mouse_pos)
+
+            screen.blit(hint_font.render("クリックで選択 / ホイールでスクロール / Esc でキャンセル", True, TEXT_SUB),
+                        (panel_rect.x + 16, panel_rect.bottom - 22))
+
+            pygame.display.flip()
+            clock.tick(30)

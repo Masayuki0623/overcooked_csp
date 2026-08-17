@@ -5,6 +5,7 @@ from gym_cooking.utils.gui import popup_text, popup_task_choice
 from gym_cooking.utils.replay import Replay
 from agent.executor.low import EnvState
 from agent.mind.agent import get_agent, AgentSetting
+from agent.instruction_panel import InstructionPanel
 
 # helpers
 import pygame
@@ -149,6 +150,45 @@ class GamePlay(Game):
 
         return []
 
+    def _build_env_summary(self):
+        """指示パネルの環境マップ帯に出す簡易情報。"""
+        summary = {'area': 'キッチン', 'detail': ''}
+        try:
+            env_state = self._latest_env_state
+            if env_state is None:
+                return summary
+            agents = getattr(env_state, 'agents', []) or []
+            parts = []
+            for idx, agent in enumerate(agents):
+                who = 'AI' if idx != self.idx_human else 'あなた'
+                holding = getattr(agent, 'holding', None)
+                held = getattr(holding, 'full_name', None) if holding is not None else None
+                parts.append(f"{who}{tuple(agent.location)}" + (f" {held}" if held else ""))
+            summary['detail'] = "  ".join(parts)
+        except Exception:
+            pass
+        return summary
+
+    def _show_instruction_panel(self, candidates):
+        """スペース押下時の指示カード画面。選択中だけ窓を横に広げる。"""
+        try:
+            snapshot = self.screen.copy()
+        except Exception as e:
+            print(f"[GamePlay] 指示パネルの描画に失敗したためテキスト入力に切り替えます: {e}")
+            return popup_task_choice("AIへの指示タスクを選択してください", candidates)
+
+        old_size = (snapshot.get_width(), snapshot.get_height())
+        panel_width = max(300, old_size[0])
+        try:
+            widened = pygame.display.set_mode((old_size[0] + panel_width, old_size[1]))
+            panel = InstructionPanel(candidates, env_summary=self._build_env_summary())
+            return panel.run(widened, snapshot)
+        finally:
+            # 閉じたら元の窓サイズへ戻し、ゲーム画面を描き直す
+            self.screen = pygame.display.set_mode(old_size)
+            self.screen.blit(snapshot, (0, 0))
+            pygame.display.flip()
+
     def on_event(self, event):
         if event.type == pygame.QUIT:
             self._q_control.put(('Quit', {}))
@@ -170,7 +210,7 @@ class GamePlay(Game):
 
                 candidates = self._get_unexecuted_task_candidates()
                 if candidates:
-                    s = popup_task_choice("AIへの指示タスクを選択してください", candidates)
+                    s = self._show_instruction_panel(candidates)
                 else:
                     s = popup_text("Say to AI:")
 
