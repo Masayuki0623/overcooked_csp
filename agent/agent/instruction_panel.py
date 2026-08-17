@@ -37,6 +37,16 @@ TIMER_THICKNESS = 9
 # 緑 -> 黄 -> 赤 の3色補間
 TIMER_COLOR_STOPS = ((76, 175, 80), (255, 193, 7), (229, 57, 53))
 
+# 動詞ごとにカードの色を変える(切る=緑 / 調理=橙 / 提供=青)
+VERB_STYLE = {
+    'chop':  {'bg': (233, 246, 234), 'hover': (211, 240, 214),
+              'border': (102, 187, 106), 'text': (27, 94, 32)},
+    'cook':  {'bg': (255, 244, 226), 'hover': (255, 232, 196),
+              'border': (255, 167, 38), 'text': (191, 87, 0)},
+    'serve': {'bg': (228, 240, 253), 'hover': (205, 229, 252),
+              'border': (66, 165, 245), 'text': (13, 71, 161)},
+}
+
 INGREDIENT_JP = {'onion': 'たまねぎ', 'tomato': 'トマト', 'lettuce': 'レタス'}
 VERB_ACTION_JP = {'chop': '切って', 'cook': '調理して', 'serve': '提供して'}
 
@@ -115,8 +125,9 @@ def _load_icon(name, size):
         return None
 
 
-def _draw_circular_icon(surface, icon, center, radius):
-    pygame.draw.circle(surface, ICON_BG, center, radius)
+def _draw_circular_icon(surface, icon, center, radius, framed=True):
+    if framed:
+        pygame.draw.circle(surface, ICON_BG, center, radius)
     if icon is None:
         return
     # 円形にクリップして貼る
@@ -127,7 +138,8 @@ def _draw_circular_icon(surface, icon, center, radius):
     holder.blit(inner, inner.get_rect(center=(radius, radius)))
     holder.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MIN)
     surface.blit(holder, (center[0] - radius, center[1] - radius))
-    pygame.draw.circle(surface, CARD_BORDER, center, radius, 2)
+    if framed:
+        pygame.draw.circle(surface, CARD_BORDER, center, radius, 2)
 
 
 def _draw_radial_timer(surface, center, remaining, total):
@@ -233,31 +245,53 @@ class InstructionPanel:
         return font.render((trimmed + ellipsis) if trimmed else ellipsis, True, color)
 
     def _draw_card(self, surface, rect, verb, obj, hovered):
-        """アイコン(左, 円形) + ラベル・アクション文(右, 縦2行)。
+        """イラストを1文字として扱い「[たまねぎの絵]を切って」と読ませる。
 
-        列数が変わってもレイアウトは同じで、フォントとアイコン径だけを
-        カードの大きさに合わせて縮める。文字は幅に収まらなければ省略する。
+        イラストの上には、ふりがなの要領で素材名を小さく添える。
+        カードの地色と文字色は動詞ごとに変える。
         """
-        pygame.draw.rect(surface, CARD_BG_HOVER if hovered else CARD_BG, rect, border_radius=10)
-        pygame.draw.rect(surface, CARD_BORDER_HOVER if hovered else CARD_BORDER,
-                         rect, 2 if hovered else 1, border_radius=10)
+        style = VERB_STYLE.get(verb, VERB_STYLE['chop'])
+        pygame.draw.rect(surface, style['hover'] if hovered else style['bg'],
+                         rect, border_radius=10)
+        pygame.draw.rect(surface, style['border'], rect, 2 if hovered else 1, border_radius=10)
 
-        # 幅が狭いときはアイコンを小さくして、文字に使える幅を確保する
-        radius = max(9, min((rect.height - 14) // 2, 26, (rect.width - 80) // 2))
-        label_font = _jp_font(max(9, min(rect.height // 5, 13)))
+        tail = f"を{card_action(verb)}"
+        ruby = card_label(verb, obj)
+        inner_w = rect.width - 12
 
-        _draw_circular_icon(surface, _load_icon(card_icon_name(verb, obj), radius * 2),
-                            (rect.x + 8 + radius, rect.centery), radius)
+        # 「イラスト + 文字」が1行に収まるまで、文字とイラストを一緒に縮める
+        body_size = max(8, min(rect.height // 5, 13))
+        while True:
+            body_font = _jp_font(body_size, bold=True)
+            ruby_font = _jp_font(max(6, body_size - 3))
+            icon_d = max(14, int(body_size * 2.0))
+            tail_w = body_font.size(tail)[0]
+            if icon_d + 3 + tail_w <= inner_w or body_size <= 8:
+                break
+            body_size -= 1
 
-        text_x = rect.x + 8 + radius * 2 + 8
-        text_w = max(20, rect.right - 8 - text_x)
-        lt = self._fit_text(label_font, card_label(verb, obj), text_w, TEXT_SUB)
-        # アクション文はカードの主役なので、省略よりフォント縮小を優先する
-        at = self._shrink_to_fit(card_action(verb), text_w,
-                                 max(12, min(rect.height // 3, 20)), 10, TEXT_MAIN, bold=True)
-        top = rect.centery - (lt.get_height() + at.get_height()) // 2
-        surface.blit(lt, (text_x, top))
-        surface.blit(at, (text_x, top + lt.get_height()))
+        tail_surf = body_font.render(tail, True, style['text'])
+        # ふりがなはその行に他の要素が無いので、カード幅いっぱいまで使ってよい
+        ruby_surf = self._fit_text(ruby_font, ruby, inner_w, style['text'])
+
+        # ふりがなの高さぶんだけ本文を下げて、イラスト上に重ならないようにする
+        ruby_h = ruby_surf.get_height()
+        content_h = ruby_h + max(icon_d, tail_surf.get_height())
+        top = rect.centery - content_h // 2
+        line_cy = top + ruby_h + max(icon_d, tail_surf.get_height()) // 2
+
+        total_w = icon_d + 3 + tail_surf.get_width()
+        x = rect.centerx - total_w // 2
+
+        icon_cx = x + icon_d // 2
+        _draw_circular_icon(surface, _load_icon(card_icon_name(verb, obj), icon_d),
+                            (icon_cx, line_cy), icon_d // 2, framed=False)
+        # ふりがなはイラストの真上に置くが、カードからはみ出さないように寄せる
+        ruby_rect = ruby_surf.get_rect(centerx=icon_cx, top=top)
+        ruby_rect.left = max(ruby_rect.left, rect.left + 6)
+        ruby_rect.right = min(ruby_rect.right, rect.right - 6)
+        surface.blit(ruby_surf, ruby_rect)
+        surface.blit(tail_surf, tail_surf.get_rect(left=x + icon_d + 3, centery=line_cy))
 
     def _draw_cards(self, surface, top, panel_rect, mouse_pos):
         self.card_rects = []

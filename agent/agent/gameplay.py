@@ -175,16 +175,22 @@ class GamePlay(Game):
 
     def _show_instruction_panel(self, candidates):
         """スペース押下時の指示カード画面。選択中だけ窓を横に広げる。"""
+        # 先に描画スレッドを止めてから、自分で完全な1フレームを描いてコピーする。
+        # on_render は screen.fill してから全オブジェクトを描き直すため、その途中で
+        # copy() すると提供口やプレイヤーが欠けたスナップショットになってしまう。
+        self._instruction_panel_active = True
         try:
+            time.sleep(1.0 / max(self.fps, 1))  # 進行中の描画が終わるのを待つ
+            self.on_render(paused=1)
             snapshot = self.screen.copy()
         except Exception as e:
+            self._instruction_panel_active = False
             print(f"[GamePlay] 指示パネルの描画に失敗したためテキスト入力に切り替えます: {e}")
             return popup_task_choice("AIへの指示タスクを選択してください", candidates)
 
         old_size = (snapshot.get_width(), snapshot.get_height())
         # カードが3列でも窮屈にならない幅を確保する(選択中だけ広げるので実害はない)
         panel_width = max(360, old_size[0])
-        self._instruction_panel_active = True
         try:
             widened = pygame.display.set_mode((old_size[0] + panel_width, old_size[1]))
             panel = InstructionPanel(candidates, env_summary=self._build_env_summary())
