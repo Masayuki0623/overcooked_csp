@@ -2402,6 +2402,40 @@ class CSPAgent:
         self._emit_counter_debug(f"[CounterDebug] time={env.time} order_uid={target_order_uid} assigned_counter={assigned_counter} reason={reason} "
               f"all_assignments={counter_state} current_order_ingredients={current_ingredients}")
 
+    def _agent_holds_complete_set(self, env, ings_cap):
+        """この注文の材料が「全部そろった状態」で誰かの手に持たれているか。
+
+        置き場(マージ地点)は食材を1か所に集めるための作業場所なので、
+        集め終わって手に取られた時点で用済みになる。
+        """
+        expected = {
+            self._normalize_ingredient_name(ing)
+            for ing in ings_cap
+            if self._normalize_ingredient_name(ing)
+        }
+        if not expected:
+            return False
+
+        for agent in getattr(env, 'agents', []) or []:
+            holding = getattr(agent, 'holding', None)
+            if holding is None:
+                continue
+            held = set()
+            usable = True
+            for part in re.split(r'[-_/]+', str(getattr(holding, 'full_name', '') or '')):
+                if not part or part in ('Plate', 'FireExtinguisher'):
+                    continue
+                if part.startswith('Fresh'):
+                    # 未カットのものは鍋に入れられないので「集め終わった」とは言えない
+                    usable = False
+                    break
+                normalized = self._normalize_ingredient_name(part)
+                if normalized:
+                    held.add(normalized)
+            if usable and held == expected:
+                return True
+        return False
+
     def _resolve_assigned_counter(self, env, order_uid):
         assigned_counter = self._get_assigned_counter(order_uid)
         if assigned_counter is None:
@@ -2785,11 +2819,37 @@ class CSPAgent:
                 if other_uid != order_uid and (other_counter := entry.get('counter')) is not None
             }
 
-            assigned_counter, released_for_cook = self._resolve_assigned_counter(
+            # --- (0) そもそもこの注文に置き場が要るかを先に決める ---
+            # 置き場(マージ地点)は「刻んだ食材を1か所に集めて鍋へ運ぶ」ための
+            # 一時的な作業場所であって、注文が永久に所有するものではない。
+            #   * 材料が完全に揃って手に取られた  -> 集め終わったので用済み
+            #   * 既に鍋に入っている              -> 集める段階が終わっている
+            # このときは割り当てを解除し、他の注文がそのテーブルを使えるようにする。
+            # その後また誰かがテーブルに置いた場合は、(3) の retarget が拾い直す。
+            soup_name = '-'.join(ings_lower) + ' soup'
+            sorted_ings = sorted(ings_cap)
+            cook_needed = True
+            for ps in pot_states:
+                if not ps['used'] and ps['names'] == sorted_ings:
+                    ps['used'] = True
+                    cook_needed = False
+                    break
+
+            merge_point_needed = cook_needed and not self._agent_holds_complete_set(env, ings_cap)
+
+            assigned_counter, _ = self._resolve_assigned_counter(
                 env,
                 order_uid,
             )
             self._debug_order_counter_state(env, current_orders, order_idx=order_idx, order_uid=order_uid, assigned_counter=assigned_counter, reason='before_conflict_check')
+
+            if not merge_point_needed and assigned_counter is not None:
+                reason = "reason=already_cooking" if not cook_needed else "reason=ingredients_collected"
+                self._set_assigned_counter(order_uid, None)
+                self._log_counter_policy(order_uid, "release", assigned_counter, reason)
+                if assigned_counter in used_counters:
+                    used_counters.remove(assigned_counter)
+                assigned_counter = None
 
             # state は unexpected / missing / owner_conflict で分離する。
             # missing は不完全だが破棄対象ではない。unexpected または owner_conflict だけ解除する。
@@ -2824,7 +2884,7 @@ class CSPAgent:
             # 既に部分的にでも正しい食材が乗っている(incomplete)割当は、
             # 進行中の状態を捨てないよう対象外にする。
             should_try_retarget = (
-                not released_for_cook
+                merge_point_needed
                 and (assigned_counter is None or state.get('status') == 'unassigned')
             )
             if should_try_retarget:
@@ -2838,7 +2898,7 @@ class CSPAgent:
                         used_counters.append(assigned_counter)
                     self._log_counter_policy(order_uid, "retarget", assigned_counter, "reason=misplaced_ingredient_found")
 
-            if assigned_counter is None and not released_for_cook:
+            if assigned_counter is None and merge_point_needed:
                 assigned_counter = self._calculate_dynamic_merge_point(env, ings_lower, order_idx, pot_locs, used_counters, reserved_counters=reserved_counters)
                 if assigned_counter is not None:
                     self._set_assigned_counter(order_uid, assigned_counter)
@@ -2850,16 +2910,9 @@ class CSPAgent:
 
             assigned_counters_display_map[display_order + 1] = assigned_counter
 
-            soup_name = '-'.join(ings_lower) + ' soup'
+            # soup_name / sorted_ings / cook_needed は、置き場が要るかを決めるために
+            # このループの先頭(割り当て判定の前)で算出済み。
             tasks = []
-            sorted_ings = sorted(ings_cap)
-            cook_needed = True
-
-            for ps in pot_states:
-                if not ps['used'] and ps['names'] == sorted_ings:
-                    ps['used'] = True
-                    cook_needed = False
-                    break
 
             for ing in ings_cap:
                 if not cook_needed:
