@@ -321,8 +321,8 @@ class GamePlay(Game):
                 elif event_type == 'Continue':
                     paused -= 1
                 elif event_type == 'ChatIn':
-                    chat_in = f"User Input: [{args['mode']}]\n\n" + \
-                        args['chat']
+                    # chat_in = f"User Input: [{args['mode']}]\n\n" + args['chat']
+                    chat_in = ""  # User Inputの画面表示を無効化(指示後にゲーム画面へ重なるため)
                     chat_out = ""
                 elif event_type == 'ChatOut':
                     # chat_out = "AI Output:\n\n" + args['chat']
