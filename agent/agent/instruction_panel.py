@@ -263,8 +263,9 @@ class InstructionPanel:
         body_size = max(8, min(rect.height // 5, 13))
         while True:
             body_font = _jp_font(body_size, bold=True)
-            ruby_font = _jp_font(max(6, body_size - 3))
-            icon_d = max(14, int(body_size * 2.0))
+            # ふりがなは本文より一段小さく、イラストは本文より大きく見せる
+            ruby_font = _jp_font(max(6, body_size - 5))
+            icon_d = max(18, int(body_size * 2.8))
             tail_w = body_font.size(tail)[0]
             if icon_d + 3 + tail_w <= inner_w or body_size <= 8:
                 break
