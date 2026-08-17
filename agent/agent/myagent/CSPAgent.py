@@ -1253,6 +1253,10 @@ class CSPAgent:
         current_task_ids = self._stabilize_task_ids_for_held_progress(env, current_task_ids)
         event_reason = self._collect_event_replan_reason(env)
 
+        # 人間が推測と違うことをしていたら、予測ミスとして再スケジューリングする
+        if self.sc_2agent and self.human_counterpart_mode and self.use_predicted_human_model:
+            self._check_human_prediction(env)
+
         if not hasattr(self, 'prev_task_ids'):
             self.prev_task_ids = set()
 
@@ -1932,6 +1936,55 @@ class CSPAgent:
 
         total_cost = int(approach + task['dur'])
         return int(approach), total_cost
+
+    def _ingredients_of_task_id(self, task_id):
+        if not (isinstance(task_id, tuple) and len(task_id) >= 2):
+            return set()
+        obj = str(task_id[1]).replace(' soup', '')
+        return {
+            self._normalize_ingredient_name(part)
+            for part in obj.split('-')
+            if self._normalize_ingredient_name(part)
+        }
+
+    def _check_human_prediction(self, env):
+        """人間が推測と違うことに手を付けていたら、予測が外れたとみなす。
+
+        予測が外れたまま人間スロットにタスクを固定し続けると、そのタスクは
+        誰も実行しないまま計画に居座る。持ち物という明確な証拠が出た時点で
+        推測を捨てて、次のパスで推測し直す(=再スケジューリングする)。
+
+        逆に「人間が少し歩いた」程度では捨てない。予測自体は軽い(実測0.007ms)が、
+        予測が変わるたびに CSP の再計算(実測23.6ms)が走り、しかも解が変わって
+        AI の計画まで組み替わってしまうため。
+        """
+        predicted = getattr(self, '_predicted_human_task_id', None)
+        if predicted is None:
+            return
+
+        human_idx = 1 - self.own_agent_idx
+        agents = getattr(env, 'agents', None) or getattr(env, 'sim_agents', []) or []
+        if human_idx >= len(agents):
+            return
+        holding = getattr(agents[human_idx], 'holding', None)
+        holding_name = getattr(holding, 'full_name', None) if holding is not None else None
+        if not holding_name:
+            # 手ぶらは「別のことをしている」証拠にはならない
+            return
+
+        held = {
+            self._normalize_ingredient_name(part)
+            for part in re.split(r'[-_/]+', str(holding_name))
+        }
+        held.discard('')
+        if not held:
+            return
+
+        if not (held & self._ingredients_of_task_id(predicted)):
+            self._emit_counter_debug(
+                f"[HumanModel] 予測が外れた: 予測={predicted} だが人間は {holding_name} を持っている")
+            self._predicted_human_task_id = None
+            self._mark_reschedule_needed('human_prediction_missed')
 
     def _predict_human_current_task(self, env, tasks, human_pos):
         """残りタスクの中から「人間がいま手をつけているタスク」を推測する。

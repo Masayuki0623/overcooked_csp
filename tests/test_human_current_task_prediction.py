@@ -95,6 +95,42 @@ class HumanCurrentTaskPredictionTests(unittest.TestCase):
         again = self.agent._predict_human_current_task(make_env(None), remaining, (5, 5))
         self.assertNotEqual(again['id'], first['id'])
 
+    def test_prediction_miss_triggers_reschedule(self):
+        """推測と無関係な物を人間が持ったら、予測ミスとして再スケジュールを要求する。"""
+        self.agent._predicted_human_task_id = ('chop', 'onion', 0)
+        self.agent.pending_reschedule_reason = None
+        # 玉ねぎを切ると推測したのに、人間はレタスを持っている
+        self.agent._check_human_prediction(make_env('FreshLettuce'))
+        self.assertIsNone(self.agent._predicted_human_task_id)
+        self.assertEqual(self.agent.pending_reschedule_reason, 'human_prediction_missed')
+
+    def test_prediction_kept_when_holding_matches(self):
+        """推測どおりの食材を持っているなら、予測は維持する。"""
+        self.agent._predicted_human_task_id = ('chop', 'onion', 0)
+        self.agent.pending_reschedule_reason = None
+        self.agent._check_human_prediction(make_env('ChoppedOnion'))
+        self.assertEqual(self.agent._predicted_human_task_id, ('chop', 'onion', 0))
+        self.assertIsNone(self.agent.pending_reschedule_reason)
+
+    def test_empty_handed_is_not_evidence(self):
+        """手ぶらは『別のことをしている』証拠にならないので予測を捨てない。
+
+        少し歩いただけで捨てると、そのつど CSP の再計算(実測23.6ms)が走り、
+        解が変わって AI の計画まで組み替わってしまう。
+        """
+        self.agent._predicted_human_task_id = ('chop', 'onion', 0)
+        self.agent.pending_reschedule_reason = None
+        self.agent._check_human_prediction(make_env(None))
+        self.assertEqual(self.agent._predicted_human_task_id, ('chop', 'onion', 0))
+        self.assertIsNone(self.agent.pending_reschedule_reason)
+
+    def test_cook_task_prediction_matches_any_ingredient(self):
+        """調理タスクを推測しているときは、その料理の材料ならどれでも一致とみなす。"""
+        self.agent._predicted_human_task_id = ('cook', 'onion-tomato soup', 0)
+        self.agent.pending_reschedule_reason = None
+        self.agent._check_human_prediction(make_env('ChoppedTomato'))
+        self.assertIsNone(self.agent.pending_reschedule_reason)
+
     def test_no_tasks_returns_none(self):
         self.assertIsNone(self.agent._predict_human_current_task(make_env('FreshOnion'), [], (5, 5)))
 
