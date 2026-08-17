@@ -145,6 +145,50 @@ class CSPAgent:
             return payload[0]
         return payload
 
+    def _find_order_recipe_for_partial(self, env, held_parts):
+        """持っている組み合わせが、どの注文の作りかけかを探す。
+
+        戻り値は (完成レシピの材料リスト, その注文の置き場) 。
+        完全一致する注文があればそれを優先し、無ければ held_parts を
+        真に含む注文(まだ材料が足りない作りかけ)を返す。
+        どれにも当てはまらなければ (None, None)。
+        """
+        held = set(held_parts)
+        if not held:
+            return None, None
+
+        current_orders = []
+        if hasattr(env, 'order') and hasattr(env.order, 'current_orders'):
+            current_orders = env.order.current_orders or []
+
+        uid_by_idx = {}
+        for entry in getattr(self, 'active_order_entries', []) or []:
+            if entry.get('order_idx') is not None:
+                uid_by_idx[entry['order_idx']] = entry.get('uid')
+
+        supersets = []
+        for order_idx, order_tuple in enumerate(current_orders):
+            goal = order_tuple[0] if order_tuple else None
+            name = str(getattr(goal, 'full_name', '')).lower()
+            ings = [ing for ing in ('lettuce', 'onion', 'tomato') if ing in name]
+            if not ings:
+                continue
+            ing_set = set(ings)
+            counter = None
+            uid = uid_by_idx.get(order_idx)
+            if uid is not None:
+                counter = self._get_assigned_counter(uid)
+            if ing_set == held:
+                return sorted(ings), counter
+            if held < ing_set:
+                supersets.append((len(ing_set), sorted(ings), counter))
+
+        if supersets:
+            # 一番少ない材料で済む注文(=完成が近い)を選ぶ
+            supersets.sort(key=lambda e: e[0])
+            return supersets[0][1], supersets[0][2]
+        return None, None
+
     def _extract_instruction_action(self, pending):
         """指示から (動詞, 対象) を取り出す。注文番号は持たない。"""
         task_payload = pending.get('task')
@@ -1070,8 +1114,24 @@ class CSPAgent:
                 assigned_counter = carry_task.get('assigned_counter')
             if assigned_counter is None and scheduled_task:
                 assigned_counter = scheduled_task.get('assigned_counter')
+
+            # 持っている組み合わせをそのままレシピとして鍋に入れてはいけない。
+            # 3種スープの途中(レタス+玉ねぎを持って3つ目を取りに行く状態)で
+            # ここに来ることがあり、そのまま入れると2種のまま調理が確定して
+            # 注文が永久に完成しなくなる。
+            # まだ材料が足りない注文の一部なら、その注文の完成レシピを目標にする。
+            # process_cook_task 側は「一部しか持っていない」と判断して、
+            # 残りが集まる置き場へマージしに行く。
+            recipe_parts, recipe_counter = self._find_order_recipe_for_partial(
+                env, chopped_combo_parts
+            )
+            if recipe_parts is None:
+                recipe_parts = chopped_combo_parts
+            elif recipe_counter is not None:
+                assigned_counter = recipe_counter
+
             return {
-                'id': ('cook', f"{'-'.join(chopped_combo_parts)} soup", -1),
+                'id': ('cook', f"{'-'.join(recipe_parts)} soup", -1),
                 'res': ('pot', None),
                 'assigned_counter': assigned_counter,
             }
