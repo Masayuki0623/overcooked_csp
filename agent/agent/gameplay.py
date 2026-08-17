@@ -155,23 +155,23 @@ class GamePlay(Game):
         return []
 
     def _build_env_summary(self):
-        """指示パネルの環境マップ帯に出す簡易情報。"""
-        summary = {'area': 'キッチン', 'detail': ''}
+        """指示パネルの帯に出す情報。
+
+        座標のような細かい数値ではなく「どちらのキャラクターがAIで、
+        どちらがあなたか」をゲーム内の見た目そのままで示す。
+        """
+        players = []
         try:
-            env_state = self._latest_env_state
-            if env_state is None:
-                return summary
-            agents = getattr(env_state, 'agents', []) or []
-            parts = []
-            for idx, agent in enumerate(agents):
-                who = 'AI' if idx != self.idx_human else 'あなた'
-                holding = getattr(agent, 'holding', None)
-                held = getattr(holding, 'full_name', None) if holding is not None else None
-                parts.append(f"{who}{tuple(agent.location)}" + (f" {held}" if held else ""))
-            summary['detail'] = "  ".join(parts)
+            for idx, agent in enumerate(self.sim_agents):
+                color = getattr(agent, 'color', None)
+                players.append({
+                    'name': 'あなた' if idx == self.idx_human else 'AI',
+                    # ゲーム画面と同じキャラ画像を使う (misc/game/graphics/agent-<色>.png)
+                    'sprite': f'agent-{color}' if color else None,
+                })
         except Exception:
             pass
-        return summary
+        return {'players': players}
 
     def _show_instruction_panel(self, candidates):
         """スペース押下時の指示カード画面。選択中だけ窓を横に広げる。"""

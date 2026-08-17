@@ -6,7 +6,7 @@
 
 右パネルの縦方向の並び:
     1. タイマー(右上, 5秒のラジアルワイプ, 緑→黄→赤)
-    2. 見出し「つぎの指示をえらんでください」
+    2. 見出し「次のAIへの指示を選んでください」
     3. 環境マップ(簡易表示の帯)
     4. 指示カード一覧(縦リスト)
 
@@ -201,23 +201,21 @@ class InstructionPanel:
         self.card_rects = []
 
     def _draw_env_strip(self, surface, rect):
+        """どちらのキャラクターがAIで、どちらがあなたかをゲーム内の絵で示す帯。"""
         pygame.draw.rect(surface, (238, 244, 238), rect, border_radius=8)
         pygame.draw.rect(surface, (219, 228, 219), rect, 1, border_radius=8)
 
-        title_font = _jp_font(13, bold=True)
-        body_font = _jp_font(11)
-
-        # 絵文字はメイリオに字形が無く豆腐(□)になるため、印は自前で描く
-        pin = (rect.x + 14, rect.y + 14)
-        pygame.draw.circle(surface, (76, 140, 90), pin, 4)
-        pygame.draw.circle(surface, (240, 248, 240), pin, 2)
-
-        area = self.env_summary.get('area', 'キッチン')
-        detail = self.env_summary.get('detail', '')
-        surface.blit(title_font.render(area, True, TEXT_MAIN), (rect.x + 26, rect.y + 6))
-        if detail:
-            surface.blit(body_font.render(detail, True, TEXT_SUB),
-                         (rect.x + 12, rect.y + 25))
+        font = _jp_font(12, bold=True)
+        icon_d = min(rect.height - 12, 28)
+        x = rect.x + 12
+        for entry in self.env_summary.get('players', []):
+            icon = _load_icon(entry.get('sprite'), icon_d)
+            if icon is not None:
+                surface.blit(icon, icon.get_rect(centery=rect.centery, left=x))
+                x += icon_d + 4
+            text = font.render(entry.get('name', ''), True, TEXT_MAIN)
+            surface.blit(text, text.get_rect(centery=rect.centery, left=x))
+            x += text.get_width() + 18
 
     def plan_layout(self, view_w, view_h):
         """候補が全部収まる列数とカードサイズを事前に計算する。
@@ -383,9 +381,9 @@ class InstructionPanel:
                 remaining, COUNTDOWN_SECONDS,
             )
 
-            screen.blit(heading_font.render("つぎの指示を", True, TEXT_MAIN),
+            screen.blit(heading_font.render("次のAIへの指示を", True, TEXT_MAIN),
                         (panel_rect.x + 16, 22))
-            screen.blit(heading_font.render("えらんでください", True, TEXT_MAIN),
+            screen.blit(heading_font.render("選んでください", True, TEXT_MAIN),
                         (panel_rect.x + 16, 44))
 
             strip = pygame.Rect(panel_rect.x + 16, 16 + TIMER_RADIUS * 2 + 12,
