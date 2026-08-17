@@ -139,8 +139,7 @@ class Game:
 
         # print("[Plot]", self.__plot_elements, flush=True)
 
-        if paused:
-            self.draw_paused()
+        # PAUSED の文字は指示画面を出している間ずっと画面に重なって邪魔になるため出さない
         if chat:
             self.draw_multiline(chat)
 
