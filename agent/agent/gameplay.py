@@ -399,6 +399,19 @@ class GamePlay(Game):
         # None(未送信)になって初めて次のコマンドを送る。
         awaiting_confirm = {}
         while True:
+            # AI の判断レートを fps_ai に制限する。
+            # この sleep は「判断 → 送信」の間ではなくループ先頭に置くこと。
+            # 間に置くと、決めた行動が最大 1/fps_ai 秒ぶん遅れて環境に届き、
+            # その間に環境が数ステップ進んでしまう。さらに awaiting_confirm は
+            # 「送った行動が適用されたと確認できるまで次を送らない」ため、
+            # 遅延ぶんがそのまま次の行動までの待ち時間に加算され、
+            # AI が数フレームに1回しか動けなくなる。
+            # 先頭で待ってから最新状態を取り込み、判断した行動は即座に送る。
+            sleep_time = max(time_per_step - (time.time() - time_last), 0)
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+            time_last = time.time()
+
             event = self._q_ai.get()
             while True:
                 event_type, args = event
@@ -439,11 +452,6 @@ class GamePlay(Game):
                 move, chat_ret = self.ai(env)
                 if self.debug_mode:
                     print(f"[AITRACE] decide_end   wall={time.time():.4f} pos_seen={env.self_pos} move={move}")
-
-                # sleep
-                sleep_time = max(time_per_step - (time.time() - time_last), 0)
-                time.sleep(sleep_time)
-                time_last = time.time()
 
                 if chat_ret:
                     self._q_env.put(('ChatOut', {"chat": chat_ret}))

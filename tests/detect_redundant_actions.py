@@ -101,6 +101,67 @@ def detect_pickup_putdown_loop(event_history, window=20, min_repeats=2):
     return findings
 
 
+def detect_stuck_holding(snapshots, stuck_seconds=3.0):
+    """agent0 が同じ物を持ったまま座標が変化しない(=置けずに詰まっている)区間を検出する。"""
+    findings = []
+    i = 0
+    n = len(snapshots)
+    while i < n:
+        t0, pos0, hold0 = snapshots[i]
+        if hold0 is None:
+            i += 1
+            continue
+        j = i + 1
+        while j < n and snapshots[j][1] == pos0 and snapshots[j][2] == hold0:
+            j += 1
+        t_end = snapshots[j - 1][0]
+        if t_end - t0 >= stuck_seconds:
+            findings.append({
+                'type': 'stuck_holding',
+                'player': 'agent-1',
+                'location': pos0,
+                'holding': hold0,
+                'start_time': t0,
+                'end_time': t_end,
+                'duration': t_end - t0,
+            })
+        i = j
+    return findings
+
+
+def detect_stuck_idle(snapshots, stuck_seconds=5.0):
+    """agent0 が手ぶらのまま同じ場所から動かない区間を検出する。
+
+    human_counterpart_mode では、CSP が人間スロットへ割り当てたタスクは誰も
+    実行しない。自分のタスクの前提がそこにあると AI は永久に待ち続けて停止する。
+    detect_stuck_holding は「何かを持ったまま詰まる」ケースしか見ないため、
+    この「手ぶらで固まる」デッドロックを拾えるよう別途検出する。
+    """
+    findings = []
+    i = 0
+    n = len(snapshots)
+    while i < n:
+        t0, pos0, hold0 = snapshots[i]
+        if hold0 is not None:
+            i += 1
+            continue
+        j = i + 1
+        while j < n and snapshots[j][1] == pos0 and snapshots[j][2] is None:
+            j += 1
+        t_end = snapshots[j - 1][0]
+        if t_end - t0 >= stuck_seconds:
+            findings.append({
+                'type': 'stuck_idle',
+                'player': 'agent-1',
+                'location': pos0,
+                'start_time': t0,
+                'end_time': t_end,
+                'duration': t_end - t0,
+            })
+        i = j
+    return findings
+
+
 def run_one_trial(trial_idx, duration_seconds, seed=None):
     if seed is not None:
         random.seed(seed)
@@ -137,22 +198,47 @@ def run_one_trial(trial_idx, duration_seconds, seed=None):
             game._q_env.put(('Action', {"agent": "human", "action": action}))
             time.sleep(0.1)
 
-    t_human = threading.Thread(target=human_driver, daemon=True)
-    t_human.start()
+    # DETECT_NO_HUMAN=1 で疑似人間を止める。ランダムに動く人間は通路を塞ぐことが
+    # あるため、残った停止が「人間の通せんぼ」由来か「AI 側のロジック」由来かを
+    # 切り分けるのに使う。
+    if os.environ.get('DETECT_NO_HUMAN') != '1':
+        t_human = threading.Thread(target=human_driver, daemon=True)
+        t_human.start()
+
+    snapshots = []
+    stop_poll = threading.Event()
+
+    def poller():
+        start = time.time()
+        while not stop_poll.is_set() and time.time() - start < duration_seconds:
+            a0 = env.sim_agents[0]
+            hold_name = a0.holding.full_name if a0.holding is not None else None
+            snapshots.append((time.time() - start, a0.location, hold_name))
+            time.sleep(0.2)
+
+    t_poll = threading.Thread(target=poller, daemon=True)
+    t_poll.start()
 
     time.sleep(duration_seconds + 0.5)
+    stop_poll.set()
 
     event_history = env._event_history
     findings = detect_move_oscillation(event_history) + detect_pickup_putdown_loop(event_history)
     # agent-1 = sim_agents[0] = CSP が操作する AI。agent-2(疑似人間)はランダムに動くのが
     # 仕様なので除外し、CSP 側の重複行動だけを対象にする。
     findings = [f for f in findings if f.get('player') == 'agent-1']
+    findings += detect_stuck_holding(snapshots)
+    findings += detect_stuck_idle(snapshots)
     print(f"[trial {trial_idx}] event_history len={len(event_history)} findings={len(findings)}")
     if findings and os.environ.get('DETECT_DUMP_EVENTS') == '1':
         print("  --- raw agent-1 Pickup_/Put_ events ---")
         for e in event_history:
             if e.playerA == 'agent-1' and e.event.startswith(('Pickup_', 'Put_')):
                 print(f"    t={e.time:.2f} event={e.event} location={e.location}")
+    if findings and os.environ.get('DETECT_DUMP_SNAPSHOTS') == '1':
+        print("  --- agent-1 snapshots (t, pos, holding) ---")
+        for t, pos, hold in snapshots:
+            print(f"    t={t:5.2f} pos={pos} hold={hold}")
     for f in findings:
         print(f"    {f}")
     return findings

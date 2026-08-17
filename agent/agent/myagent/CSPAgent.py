@@ -52,6 +52,13 @@ class CSPAgent:
         self.completed_task_ids = set() # 追加：完了したタスクのID集合（同期用）
         self.pending_reschedule_reason = "initial"
         self._last_event_history_len = 0
+        # Pickup/Put/Chop などのイベントが短時間に連発したとき、毎回スケジュール全体を
+        # 再計算すると、その連続イベントの間の一時的で曖昧な世界状態(食材がどこにも
+        # 見えない/複数の注文から同時に見える瞬間)を拾ってしまい、同じ食材を複数の
+        # 注文が奪い合うような揺れを引き起こす。直近の再計算からこの秒数(シミュレーション
+        # 内時間)経っていなければ、今回は再計算を見送り理由だけ保持する。
+        self._min_reschedule_interval_seconds = 0.3
+        self._last_reschedule_time = None
         self.stall_threshold = 8
         self.stall_counts = {0: 0, 1: 0} if self.sc_2agent else 0
         self.active_order_entries = []
@@ -91,8 +98,7 @@ class CSPAgent:
 
     def _emit_counter_debug(self, message):
         if getattr(self, 'debug_counter_trace', False):
-            # print(message)
-            pass
+            print(message)
 
     def _log_reschedule_event(self, reason, env, added=None, removed=None):
         current_time = getattr(env, 'time', None)
@@ -885,6 +891,10 @@ class CSPAgent:
 
         holding = getattr(agents[agent_idx], 'holding', None)
         holding_name = getattr(holding, 'full_name', None) if holding is not None else None
+        if getattr(self, 'debug_counter_trace', False) and holding_name:
+            sched_id = scheduled_task.get('id') if scheduled_task else None
+            carry_now = self.carry_task_by_agent.get(agent_idx) if self.sc_2agent and isinstance(self.carry_task_by_agent, dict) else getattr(self, 'carry_task_by_agent', None)
+            print(f"[CarryOverride] agent={agent_idx} holding_name={holding_name!r} scheduled_id={sched_id} carry_task_id={carry_now.get('id') if carry_now else None}")
         if not holding_name:
             if self.sc_2agent:
                 self.carry_task_by_agent[agent_idx] = None
@@ -911,9 +921,11 @@ class CSPAgent:
                 chopped_combo_parts = sorted(part.replace('Chopped', '').lower() for part in parts)
 
         carried_ing = None
+        carried_ing_is_fresh = False
         if '-' not in holding_name:
             if holding_name.startswith('Fresh'):
                 carried_ing = holding_name.replace('Fresh', '').lower()
+                carried_ing_is_fresh = True
             elif holding_name.startswith('Chopped'):
                 carried_ing = holding_name.replace('Chopped', '').lower()
 
@@ -977,7 +989,16 @@ class CSPAgent:
                 'assigned_counter': assigned_counter,
             }
 
-        if carried_ing:
+        # 「刻む前(Fresh)」の食材は、どの注文にもまだ紐づいていなくても
+        # 「とりあえず切ってしまう」のが常に安全(切った後の置き場は次サイクルで
+        # 改めて決まる)。しかし「刻んだ後(Chopped)」の食材でここまで来たもの
+        # (carry_task にも scheduled_task にも一致しなかったもの)は、既にどこかの
+        # 注文の要求が別経路で満たされたことによる余剰品である可能性が高い。
+        # ここで chop タスクとして再解釈して assigned_counter(他タスクから借用した、
+        # 無関係な場所)へ運ぼうとすると、既に埋まっている置き場へ届けようとして
+        # マージできず詰まる。scheduled_task をそのまま返し、通常の「不要品」経路
+        # (現在のタスクに合わない持ち物は空きカウンターへ自動的に置く)に任せる。
+        if carried_ing and carried_ing_is_fresh:
             assigned_counter = None
             if carry_task:
                 assigned_counter = carry_task.get('assigned_counter')
@@ -995,6 +1016,78 @@ class CSPAgent:
             self.carry_task_by_agent = None
 
         return scheduled_task
+
+    def _recipe_ingredient_set(self, soup_name):
+        return {
+            self._normalize_ingredient_name(part)
+            for part in str(soup_name).replace(' soup', '').split('-')
+            if self._normalize_ingredient_name(part)
+        }
+
+    def _has_usable_pot_for_cook(self, env, soup_name):
+        """この cook タスクが実際に使える鍋があるか。
+
+        エンジンの interact() は「空の鍋」にしか食材を投入できないため、
+        使えるのは (a) 空の鍋 か (b) 既にこのレシピが入っている鍋だけ。
+        """
+        expected = self._recipe_ingredient_set(soup_name)
+        for pot in self._get_resources(env).get('pots', []):
+            if env.pos_obj.get(pot) is None:
+                return True
+            if expected and self._get_counter_food_names(env, pot) == expected:
+                return True
+        return False
+
+    def _find_ready_serve_task(self, env, agent_idx):
+        """鍋が塞がって cook が進めないとき、鍋を空けられる serve タスクを探す。
+
+        スケジュールは先頭から順に実行するため、cook が鍋待ちで止まると、
+        その鍋を空けるはずの serve が後ろにあって永久に実行されない。
+        結果として「鍋が空くまで待機中」のまま両方が固まる典型的な
+        デッドロックになる。取り出せる状態の鍋があるなら serve を先に行う。
+        """
+        pots = self._get_resources(env).get('pots', [])
+        for candidate in self.schedule_per_agent.get(agent_idx, []):
+            task_id = candidate.get('id')
+            if not (isinstance(task_id, tuple) and len(task_id) >= 3):
+                continue
+            verb, obj, _order_uid = task_id
+            if verb != 'serve':
+                continue
+            expected = self._recipe_ingredient_set(obj)
+            if not expected:
+                continue
+            for pot in pots:
+                pot_obj = env.pos_obj.get(pot)
+                if pot_obj is None:
+                    continue
+                is_cooked = getattr(pot_obj, 'is_cooked', None)
+                if not callable(is_cooked) or not is_cooked():
+                    continue
+                if self._get_counter_food_names(env, pot) == expected:
+                    return candidate
+        return None
+
+    def _find_takeover_task_for_deps(self, missing_deps, agent_idx):
+        """待ちの原因になっている前提タスクを、自分で引き受けるために探す。
+
+        CSP は常に2エージェント分のスケジュールを作るが、human_counterpart_mode
+        では「もう一方」は CSP が指示できない人間であり、人間スロットに割り当てられた
+        タスクは誰も実行しない。そのため自分のタスクの前提が人間スロットにあると、
+        AI はその場で永久に待ち続けて停止してしまう(実プレイで後半に固まる原因)。
+
+        足りない前提タスク(missing_deps)に一致するタスクをスケジュール全体から探す。
+        自分のスケジュールを優先し、無ければ人間スロットのものを引き受ける。
+        見つからなければ None。
+        """
+        if not missing_deps:
+            return None
+        missing_set = set(missing_deps)
+        for search_idx in (agent_idx, 1 - agent_idx):
+            for candidate in self.schedule_per_agent.get(search_idx, []):
+                if candidate['id'] in missing_set:
+                    return candidate
+        return None
 
     def __call__(self, env):
         """
@@ -1029,6 +1122,23 @@ class CSPAgent:
 
         reschedule_reason = None if self.no_reschedule and self.initialized else event_reason or self._get_reschedule_reason(current_task_ids, added, removed)
 
+        # Pickup/Put/Chop などのイベントが短時間に連発すると、その連続イベントの
+        # 合間の一時的で曖昧な世界状態(食材がどこにも見えない/複数の注文から
+        # 同時に見える瞬間)を拾って毎回スケジュール全体を再計算してしまい、同じ
+        # 食材を複数の注文が奪い合うような揺れを引き起こす。直近の実際の再計算
+        # からこの秒数(シミュレーション内時間)経っていなければ、今回は再計算を
+        # 見送り、理由だけ pending として保持して後でまとめて再計算する。
+        if reschedule_reason is not None and self.initialized:
+            current_env_time = getattr(env, 'time', None)
+            last_resched = self._last_reschedule_time
+            if (
+                current_env_time is not None
+                and last_resched is not None
+                and (current_env_time - last_resched) < self._min_reschedule_interval_seconds
+            ):
+                self._mark_reschedule_needed(reschedule_reason)
+                reschedule_reason = None
+
         # 必要なタイミングだけリスケジュールする
         if reschedule_reason is not None:
             self._log_reschedule_event(reschedule_reason, env, added=added, removed=removed)
@@ -1060,6 +1170,7 @@ class CSPAgent:
             try:
                 start_time = time.time()
                 self.schedule = self.solve_csp_scheduling(env, orders=current_orders)
+                self._last_reschedule_time = getattr(env, 'time', self._last_reschedule_time)
                 elapsed_time = time.time() - start_time
                 self._emit_counter_debug(f"[CSPAgent] スケジューリング時間: {elapsed_time:.4f} 秒")
 
@@ -1083,8 +1194,26 @@ class CSPAgent:
                                 holding = getattr(env.agents[aidx], 'holding', None)
                                 holding_name = getattr(holding, 'full_name', None) if holding is not None else None
                                 if in_prog_tid[0] == 'chop' and holding_name and f"{in_prog_tid[1].capitalize()}" in holding_name:
-                                    self.carry_task_by_agent[aidx] = deepcopy(in_prog_task)
-                                    self._emit_counter_debug(f"  [保持継続] AI{aidx}: {in_prog_tid} を carry task として継続")
+                                    # スケジュールから消えた理由は2通りある:
+                                    # (1) 自分が持っている分でこの注文が満たされた → 継続して届けるべき
+                                    # (2) 既に別の経路(他の食材の置き場)でこの注文が満たされていた
+                                    #     → 自分が持っているのは余剰品で、届け先(counter)は既に埋まっている
+                                    # (2) なのに carry task として再アタッチすると、満杯のcounterへ
+                                    # 届けようとしてマージできず永久に詰まる。届け先に既に同じ食材が
+                                    # あるかを見て、あれば余剰品とみなし carry task にしない
+                                    # (通常の「不要品」経路でどこか空きcounterへ自動的に置かれる)。
+                                    order_uid_for_carry = in_prog_tid[2]
+                                    assigned_counter_for_order = self._get_assigned_counter(order_uid_for_carry)
+                                    already_satisfied = False
+                                    if assigned_counter_for_order is not None:
+                                        counter_foods = self._get_counter_food_names(env, assigned_counter_for_order)
+                                        if self._normalize_ingredient_name(in_prog_tid[1]) in counter_foods:
+                                            already_satisfied = True
+                                    if not already_satisfied:
+                                        self.carry_task_by_agent[aidx] = deepcopy(in_prog_task)
+                                        self._emit_counter_debug(f"  [保持継続] AI{aidx}: {in_prog_tid} を carry task として継続")
+                                    else:
+                                        self._emit_counter_debug(f"  [余剰品] AI{aidx}: {in_prog_tid} の届け先は既に満たされているため carry task にしない")
                                 self._emit_counter_debug(f"  [スキップ] AI{aidx}: {in_prog_tid} が新スケジュールに存在しない → idx=0から開始")
                                 new_idx[aidx] = 0
                     self.current_task_idx = new_idx
@@ -1242,7 +1371,9 @@ class CSPAgent:
                 scheduled_tid = scheduled_task['id']
                 tid = task['id']
                 verb, obj, order_uid = tid
-                
+                if getattr(self, 'debug_counter_trace', False) and tid != scheduled_tid:
+                    self._emit_counter_debug(f"[CarryOverride] agent={agent_idx} scheduled={scheduled_tid} overridden_to={tid}")
+
                 import copy
                 e_agent = copy.copy(env)
                 e_agent.agent_idx = agent_idx
@@ -1253,6 +1384,20 @@ class CSPAgent:
                 # --- 先行する依存タスクが終わっているか（フライング実行エラーの防止） ---
                 # スケジュール上に存在しないchopタスクは「すでに食材がある」ため完了済みとみなす
                 all_scheduled_ids = {t['id'] for agent_sc in self.schedule_per_agent.values() for t in agent_sc}
+
+                # 鍋が全部埋まっていて cook が進めないなら、鍋を空けられる serve を先に行う。
+                # そうしないと「cook は鍋待ち → その鍋を空ける serve は cook の後ろで
+                # 永久に実行されない」というデッドロックになる。
+                if verb == 'cook' and not self._has_usable_pot_for_cook(env, obj):
+                    ready_serve = self._find_ready_serve_task(env, agent_idx)
+                    if ready_serve is not None:
+                        self._emit_counter_debug(
+                            f"[DEBUG] AI{agent_idx} 鍋が塞がっているため serve を先行実行: "
+                            f"{ready_serve['id']} (元のタスク {tid} は保留)"
+                        )
+                        task = ready_serve
+                        tid = task['id']
+                        verb, obj, order_uid = tid
 
                 can_start = True
                 if verb == 'cook':
@@ -1276,24 +1421,40 @@ class CSPAgent:
                             missing_deps = [('cook', obj, order_uid)]
                     self._emit_counter_debug(f"[DEBUG] AI{agent_idx} 待機中: {verb} '{obj}' の前提タスク未完了 -> {missing_deps}")
                     self._emit_counter_debug(f"[DEBUG]   完了済み: {self.completed_task_ids}")
-                    
-                    # じゃまにならない場所に移動する
-                    # 他エージェントが現在実行中のタスクを取得（避けるべきリソースを特定）
-                    other_idx = 1 - agent_idx
-                    other_sc = self.schedule_per_agent.get(other_idx, [])
-                    other_t_idx = self.current_task_idx.get(other_idx, 0)
-                    other_current_task = other_sc[other_t_idx] if other_t_idx < len(other_sc) else None
-                    
-                    ta = self.task_agents[agent_idx]
-                    action = ta.move_to_safe_position(
-                        env,
-                        blocking_task=other_current_task,  # 他エージェントが使っているリソース（避ける対象）
-                        own_next_task=task,                # 自分が次に実行するタスク（近くで待機する基準）
-                        dynamic_obstacles=dynamic_obstacles
-                    )
-                    actions[f"ai_{agent_idx}"] = action
-                    reasons.append(f"AI{agent_idx}:MovingToSafePosition")
-                    continue
+
+                    # human_counterpart_mode では人間スロットのタスクは誰も実行しない。
+                    # 前提タスクがそこに割り当たっていると永久に待ち続けて停止するため、
+                    # 待つ前に自分で引き受けられないか探す。
+                    takeover_task = None
+                    if self.human_counterpart_mode:
+                        takeover_task = self._find_takeover_task_for_deps(missing_deps, agent_idx)
+
+                    if takeover_task is not None:
+                        self._emit_counter_debug(
+                            f"[DEBUG] AI{agent_idx} 前提タスクを自分で引き受け: {takeover_task['id']} "
+                            f"(元のタスク {tid} は前提待ちのため保留)"
+                        )
+                        task = takeover_task
+                        tid = task['id']
+                        verb, obj, order_uid = tid
+                    else:
+                        # じゃまにならない場所に移動する
+                        # 他エージェントが現在実行中のタスクを取得（避けるべきリソースを特定）
+                        other_idx = 1 - agent_idx
+                        other_sc = self.schedule_per_agent.get(other_idx, [])
+                        other_t_idx = self.current_task_idx.get(other_idx, 0)
+                        other_current_task = other_sc[other_t_idx] if other_t_idx < len(other_sc) else None
+
+                        ta = self.task_agents[agent_idx]
+                        action = ta.move_to_safe_position(
+                            env,
+                            blocking_task=other_current_task,  # 他エージェントが使っているリソース（避ける対象）
+                            own_next_task=task,                # 自分が次に実行するタスク（近くで待機する基準）
+                            dynamic_obstacles=dynamic_obstacles
+                        )
+                        actions[f"ai_{agent_idx}"] = action
+                        reasons.append(f"AI{agent_idx}:MovingToSafePosition")
+                        continue
 
                 # -------------------------------------------------------------
                 
@@ -1883,6 +2044,42 @@ class CSPAgent:
 
         return names
 
+    def _get_counter_blocking_food_names(self, env, counter_pos):
+        """マージ先として使えなくする食材(未カット等)を counter から拾う。
+
+        ゲームエンジンの mergeable() は ChoppedX 同士でなければマージを許さない。
+        一方 _get_counter_food_names は Fresh/Chopped の区別を落とす(どちらも
+        'onion' になる)ため、人間が「切っていない食材」を置き場に置くと、CSP は
+        「必要な食材が既に置いてある」と誤認したまま、AI はマージできない置く操作を
+        永久に繰り返して停止してしまう。
+        ここでは実際にマージを妨げる(= Chopped でない)食材名だけを返す。
+        """
+        counter_obj = env.pos_obj.get(counter_pos)
+        if counter_obj is None or not hasattr(counter_obj, 'contents'):
+            return set()
+
+        blocking = set()
+
+        def walk(value):
+            if value is None:
+                return
+            full_name = str(getattr(value, 'full_name', getattr(value, 'name', '')) or '')
+            for part in re.split(r'[-_/]+', full_name):
+                if not part or part in ('Plate', 'FireExtinguisher'):
+                    continue
+                if part.startswith('Chopped'):
+                    continue
+                normalized = self._normalize_ingredient_name(part)
+                if normalized:
+                    blocking.add(normalized)
+            for child in getattr(value, 'contents', []):
+                walk(child)
+
+        for food in counter_obj.contents:
+            walk(food)
+
+        return blocking
+
     def _evaluate_order_counter_state(self, env, order_uid, order_ingredient_names, assigned_counter):
         """counter の状態を設計上の意味で分類する。
 
@@ -1956,6 +2153,12 @@ class CSPAgent:
         state = self._evaluate_order_counter_state(env, order_uid, order_ingredient_names, assigned_counter)
         if state['owner_conflict']:
             return 'owner_conflict'
+
+        # 未カット食材が置き場に乗っていると、そこへは何もマージできない。
+        # 期待食材と同じ種類に見えても使えないので、置き場ごと解除して
+        # 別のカウンターへ retarget させる(人間が切らずに置いた場合の救済)。
+        if self._get_counter_blocking_food_names(env, assigned_counter):
+            return 'counter_blocked_by_unchopped_food'
 
         expected = {
             self._normalize_ingredient_name(name)
@@ -2084,8 +2287,15 @@ class CSPAgent:
 
         return False
 
-    def _owns_world_ingredient(self, env, ingredient_name):
-        """世界の中にその食材があるかを実体ベースで判定する。古いタスク ID には依存しない。"""
+    def _owns_world_ingredient(self, env, ingredient_name, require_ready_to_cook=False):
+        """世界の中にその食材があるかを実体ベースで判定する。古いタスク ID には依存しない。
+
+        require_ready_to_cook=True のときは Fresh(未カット)を数えない。
+        cook タスクの前提判定に Fresh を含めてしまうと、人間が未カット食材を
+        カウンターに置いただけで「材料は揃っている」と誤判定して cook を開始し、
+        一方 TaskAgent の process_cook_task は Chopped* しか消費できないため、
+        その場から動かず永久に待ち続けてしまう。
+        """
         if not ingredient_name:
             return False
         name = str(ingredient_name).strip().lower()
@@ -2096,11 +2306,12 @@ class CSPAgent:
             return False
 
         candidate_tokens = {
-            f"Fresh{normalized.capitalize()}",
             f"Chopped{normalized.capitalize()}",
             f"Cooking{normalized.capitalize()}",
             f"Cooked{normalized.capitalize()}",
         }
+        if not require_ready_to_cook:
+            candidate_tokens.add(f"Fresh{normalized.capitalize()}")
 
         def has_token(obj_or_name):
             if obj_or_name is None:
@@ -2124,7 +2335,11 @@ class CSPAgent:
         parts = [p.strip() for p in soup_name.replace(' soup', '').split('-') if p.strip()]
         if not parts:
             return True
-        return all(self._owns_world_ingredient(env, p) for p in parts)
+        # cook が実際に消費できるのは Chopped 以降だけなので、Fresh は数えない。
+        return all(
+            self._owns_world_ingredient(env, p, require_ready_to_cook=True)
+            for p in parts
+        )
 
     def _serve_dependency_ready_from_world(self, env, soup_name):
         """serve 直前の cook 依存は、実際の調理済み品があるかで判定する。"""
@@ -2192,6 +2407,60 @@ class CSPAgent:
         details = f"foods={sorted(counter_food_names)}" if counter_food_names else "reason=fixed"
         self._log_counter_policy(order_uid, "fixed", assigned_counter, details)
         return assigned_counter, False
+
+    def _find_unclaimed_matching_counter(self, env, order_uid, ings_lower, reserved_counters, used_counters, order_idx):
+        """人間が(想定外の)別カウンターに置いてしまった、この注文向けの食材を探す。
+
+        他注文の assigned_counter でも、今回のスケジューリングパスで既に
+        他の注文に確保済みでもないカウンターのうち、この注文が求める食材だけが
+        (部分一致でも)置かれている場所があれば、その位置を返す。
+        見つからなければ None。呼び出し側はこれを新しい assigned_counter として
+        採用することで、人間がどこに置いても次のパスで正しい置き場に追従できる。
+        """
+        expected = {
+            self._normalize_ingredient_name(name)
+            for name in ings_lower
+            if self._normalize_ingredient_name(name)
+        }
+        if not expected:
+            return None
+
+        resources = self._get_resources(env)
+        counters = resources.get('counters', [])
+
+        candidates = []
+        for pos in counters:
+            if pos in reserved_counters or pos in used_counters:
+                continue
+            foods = self._get_counter_food_names(env, pos)
+            if not foods:
+                continue
+            if not foods <= expected:
+                # 余計な食材が混ざっている場所はこの注文向けとは断定できない
+                continue
+            if self._get_counter_blocking_food_names(env, pos):
+                # 未カット食材が乗っている場所へは何もマージできない
+                continue
+            candidates.append(pos)
+
+        if not candidates:
+            return None
+        if len(candidates) == 1:
+            return candidates[0]
+
+        # 複数候補があれば、鍋までの距離が最短のものを優先する
+        pots = resources.get('pots', [])
+        pot = pots[order_idx % len(pots)] if pots else None
+        if pot is None:
+            return candidates[0]
+
+        best_pos, best_dist = None, float('inf')
+        for pos in candidates:
+            dist = self.astar_distance(env, pos, pot)
+            if dist is not None and dist < best_dist:
+                best_dist = dist
+                best_pos = pos
+        return best_pos if best_pos is not None else candidates[0]
 
     def _calculate_dynamic_merge_point(self, env, ings_lower, order_idx, pot_locs, used_counters, reserved_counters=None):
         reserved = set(reserved_counters or [])
@@ -2266,12 +2535,12 @@ class CSPAgent:
         # 複数の注文が同じ食材を必要としている場合、どの注文向けかを取り違えると
         # 別の注文がその分を横取りしてしまい、結局 chop タスクが復活して同じ問題が
         # 別の食材で再発するため、「このエージェントは今どの注文向けに動いているか」
-        # (carry_task または現在のスケジュール済みタスクの order) に紐づけて管理する。
+        # (carry_task、または現在のスケジュール済みタスクの order) に紐づけて管理する。
         # 紐づけ先が分からない場合のみ、注文を問わない共有プールにフォールバックする。
         held_chopped_by_order = {}
         held_chopped_unassigned = {}
 
-        def _infer_agent_order(agent_idx):
+        def _infer_agent_order(agent_idx, ing_names_lower):
             carry_task = None
             sched = []
             idx = 0
@@ -2289,12 +2558,24 @@ class CSPAgent:
                 if not isinstance(idx, int):
                     idx = 0
 
-            for task in (carry_task, sched[idx] if idx < len(sched) else None):
-                if not task:
-                    continue
-                task_id = task.get('id')
+            # carry_task(明示的に「この食材はこの注文向け」と紐付けたもの)は無条件に信用する。
+            if carry_task:
+                task_id = carry_task.get('id')
                 if isinstance(task_id, tuple) and len(task_id) >= 3:
                     return task_id[2]
+
+            # carry_task が無い場合のみ、現在のスケジュール済みタスクを参考にするが、
+            # 頻繁な再スケジューリングでスケジュールは実際に持っている食材と無関係な
+            # 注文を指していることがある(例: 今はchop onionが割り当てられているが
+            # 実際に持っているのはtomato)。対象食材が一致する場合に限って採用し、
+            # 一致しなければ「不明」として共有プールへフォールバックさせる。
+            scheduled_task = sched[idx] if idx < len(sched) else None
+            if scheduled_task:
+                task_id = scheduled_task.get('id')
+                if isinstance(task_id, tuple) and len(task_id) >= 3:
+                    verb, obj, order = task_id
+                    if verb == 'chop' and obj.lower() in ing_names_lower:
+                        return order
             return None
 
         for agent_idx, agent in enumerate(getattr(env, 'agents', [])):
@@ -2316,7 +2597,11 @@ class CSPAgent:
             if not ing_names:
                 continue
 
-            order_for_agent = _infer_agent_order(agent_idx)
+            order_for_agent = _infer_agent_order(agent_idx, {n.lower() for n in ing_names})
+            self._emit_counter_debug(
+                f"[HeldInventory] agent={agent_idx} ing_names={ing_names} order_for_agent={order_for_agent} "
+                f"carry_task_by_agent={self.carry_task_by_agent} current_task_idx={getattr(self, 'current_task_idx', None)}"
+            )
             for ing_name in ing_names:
                 if order_for_agent is not None:
                     bucket = held_chopped_by_order.setdefault(order_for_agent, {})
@@ -2369,6 +2654,7 @@ class CSPAgent:
                 available_chopped[ingredient_name] -= 1
                 if available_chopped[ingredient_name] <= 0:
                     del available_chopped[ingredient_name]
+                self._emit_counter_debug(f"[ConsumeChopped] order={order_uid} ing={ingredient_name} source=world pos={pos}")
                 return True
 
             # 世界(カウンター等)に見つからなくても、この注文向けに動いているエージェントが
@@ -2381,14 +2667,20 @@ class CSPAgent:
                 own_bucket[ingredient_name] -= 1
                 if own_bucket[ingredient_name] <= 0:
                     del own_bucket[ingredient_name]
+                self._emit_counter_debug(f"[ConsumeChopped] order={order_uid} ing={ingredient_name} source=held_own")
                 return True
 
             if held_chopped_unassigned.get(ingredient_name, 0) > 0:
                 held_chopped_unassigned[ingredient_name] -= 1
                 if held_chopped_unassigned[ingredient_name] <= 0:
                     del held_chopped_unassigned[ingredient_name]
+                self._emit_counter_debug(f"[ConsumeChopped] order={order_uid} ing={ingredient_name} source=held_unassigned")
                 return True
 
+            self._emit_counter_debug(
+                f"[ConsumeChopped] order={order_uid} ing={ingredient_name} source=NONE "
+                f"held_by_order={held_chopped_by_order} held_unassigned={held_chopped_unassigned}"
+            )
             return False
 
         def choose_counter_for_order(ingredient_names, current_counter=None, reserved_counters=None):
@@ -2520,6 +2812,27 @@ class CSPAgent:
                     self._set_assigned_counter(order_uid, None)
                     self._log_counter_policy(order_uid, "release", assigned_counter, "reason=counter_reserved_by_other_order")
                     assigned_counter = None
+
+            # 割当先がまだ無い、または割当先はあるがまだ何も置かれていない場合は、
+            # 人間が別カウンターへ誤って置いてしまった、この注文向けの食材が
+            # どこかに無いか先に探す。見つかればそこを正式な置き場として引き継ぐ
+            # (人間がどこに置いても次のパスで追従できるようにするため)。
+            # 既に部分的にでも正しい食材が乗っている(incomplete)割当は、
+            # 進行中の状態を捨てないよう対象外にする。
+            should_try_retarget = (
+                not released_for_cook
+                and (assigned_counter is None or state.get('status') == 'unassigned')
+            )
+            if should_try_retarget:
+                candidate = self._find_unclaimed_matching_counter(
+                    env, order_uid, ings_lower, reserved_counters, used_counters, order_idx
+                )
+                if candidate is not None:
+                    assigned_counter = candidate
+                    self._set_assigned_counter(order_uid, assigned_counter)
+                    if assigned_counter not in used_counters:
+                        used_counters.append(assigned_counter)
+                    self._log_counter_policy(order_uid, "retarget", assigned_counter, "reason=misplaced_ingredient_found")
 
             if assigned_counter is None and not released_for_cook:
                 assigned_counter = self._calculate_dynamic_merge_point(env, ings_lower, order_idx, pot_locs, used_counters, reserved_counters=reserved_counters)
@@ -2744,6 +3057,20 @@ class CSPAgent:
             # Fallback (should not happen in standard gym_cooking envs)
             agent_pos = (0, 0)
             agent1_pos = (0, 0)
+
+        if self.human_counterpart_mode:
+            # human_counterpart_mode では「もう一方」は実際には CSP が指示できない人間で、
+            # その計画(schedule_per_agent の反対側)は実行されない仮想的な what-if に過ぎない。
+            # それにもかかわらずその人間の実座標を毎回ここに使うと、人間がランダムに
+            # 歩き回るたびに距離行列がわずかに変化し、"どちらの仮想エージェントが
+            # どのタスクを担当するか"という(実行結果に直結する)決定が同点でなくなって
+            # 毎回入れ替わってしまう(食材を置く→拾うを延々繰り返す等の揺れの原因)。
+            # 人間の実座標を計画に反映させず、常に自分(実際に動かす側)と同じ地点から
+            # 出発すると仮定することで、この人間の動きに起因する揺れを断つ。
+            if self.own_agent_idx == 0:
+                agent1_pos = agent_pos
+            else:
+                agent_pos = agent1_pos
         
         # リソース位置の特定と固定 (Fixed Position)
         resources = self._get_resources(env)
@@ -2860,6 +3187,7 @@ class CSPAgent:
         # これにより依存待ち時間中に別タスクを実行できる解が見つかるようになる。
         # =====================================================
         is_a1 = None  # 2エージェントモード時にのみ設定される割り当てBoolVarリスト
+        switch_penalty_terms = []  # 前回と担当エージェントが変わるタスクへの弱いペナルティ
 
         if self.sc_2agent:
             if predicted_human_task_ids:
@@ -2882,7 +3210,21 @@ class CSPAgent:
             else:
                 # is_a1[i]: True = タスクiをAI1が担当、False = AI0が担当
                 is_a1 = [model.NewBoolVar(f'is_a1_{i}') for i in range(num_tasks)]
-                
+
+                if self.human_counterpart_mode:
+                    # human_counterpart_mode では「もう一方」は CSP が指示できない人間で、
+                    # そのスロットに割り当てたタスクは誰も実行しない。にもかかわらず
+                    # 半分を相手に任せる前提で組むと、AI は自分の担当外のタスクの完了を
+                    # 永久に待ち続けて停止する(例: serve が人間スロットに入ると鍋が
+                    # 空かず、食材を全部持ったまま「鍋が空くまで待機」で固まる)。
+                    # AI が単独で全部こなす前提で組む。人間が実際にやってくれた分は、
+                    # その結果が世界に存在するため次回の再スケジューリングで
+                    # タスク一覧から自然に消える。
+                    own_is_a1 = 1 if self.own_agent_idx == 1 else 0
+                    for i in range(num_tasks):
+                        model.Add(is_a1[i] == own_is_a1)
+
+
                 # エージェント出発位置からの最低到達時間
                 for i in range(num_tasks):
                     dist_from_a0 = int(dist_matrix.get((start_node, i), 0))
@@ -2903,6 +3245,25 @@ class CSPAgent:
                             [is_a1[i], is_a1[j], order_ij])
                         model.Add(starts[i] >= ends[j] + dji).OnlyEnforceIf(
                             [is_a1[i], is_a1[j], order_ij.Not()])
+
+                # makespan と end_sum が同点になるタスク割り当てが複数存在する場合、
+                # ソルバーはその中から任意の1つを選ぶため、世界の状態がわずかに
+                # 変化するたびに「どちらのエージェントがどのタスクを担当するか」が
+                # 入れ替わってしまうことがある(例: 同じ食材を置く/持つを繰り返す)。
+                # 前回のスケジュールで各タスクがどちらのエージェント担当だったかを
+                # 覚えておき、目的関数の最下位優先度としてそれを維持する方を弱く
+                # 優先することで、makespan/end_sum を悪化させない範囲でのみ
+                # 担当エージェントの入れ替わりを抑制する。
+                prev_agent_by_task_id = {}
+                if previous_schedule_per_agent:
+                    for prev_agent_idx in (0, 1):
+                        for prev_task in previous_schedule_per_agent.get(prev_agent_idx, []):
+                            prev_agent_by_task_id[prev_task['id']] = prev_agent_idx
+                for i in range(num_tasks):
+                    prev_agent = prev_agent_by_task_id.get(tasks[i]['id'])
+                    if prev_agent is None:
+                        continue
+                    switch_penalty_terms.append(is_a1[i] if prev_agent == 0 else (1 - is_a1[i]))
         else:
             # 1エージェント: 従来の circuit 方式
             arcs = []
@@ -3055,7 +3416,15 @@ class CSPAgent:
             model.Add(makespan == 0)
         end_sum = sum(task_ends) if task_ends else 0
         weight_makespan = num_tasks * 1000
-        model.Minimize(makespan * weight_makespan + end_sum)
+        if switch_penalty_terms:
+            # switch_scale は switch_penalty が取り得る最大値より大きくし、
+            # (makespan, end_sum) の優先順位を一切変えずに完全な同点のときだけ
+            # 担当エージェント維持側を選ばせる。
+            switch_scale = len(switch_penalty_terms) + 1
+            switch_penalty = sum(switch_penalty_terms)
+            model.Minimize((makespan * weight_makespan + end_sum) * switch_scale + switch_penalty)
+        else:
+            model.Minimize(makespan * weight_makespan + end_sum)
 
         solver = cp_model.CpSolver()
         status = solver.Solve(model)

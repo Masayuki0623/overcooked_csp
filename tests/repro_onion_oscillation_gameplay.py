@@ -64,19 +64,36 @@ def main():
     t_human = threading.Thread(target=human_driver, daemon=True)
     t_human.start()
 
+    # 最初の食材を手にするまでの経路を記録する。
+    # 検証したいのは「どの食材を取るか」ではなく「目的地まで揺れずに真っ直ぐ向かうか」。
+    # どの食材から着手するかはスケジューラが makespan を見て決める内部的な判断であり、
+    # ここで特定の食材に固定すると、正当なスケジュール変更で誤検知してしまう。
     start = time.time()
-    picked = False
+    picked_name = None
+    path = []
     while time.time() - start < MAX_WALL_SECONDS:
-        if env.sim_agents[0].holding is not None and 'Onion' in env.sim_agents[0].holding.full_name:
-            picked = True
+        agent = env.sim_agents[0]
+        if not path or path[-1] != agent.location:
+            path.append(agent.location)
+        if agent.holding is not None:
+            picked_name = agent.holding.full_name
             break
         time.sleep(0.05)
 
     elapsed = time.time() - start
-    if picked:
-        print(f"\n[RESULT] SUCCESS: picked up onion after {elapsed:.2f}s (wall)")
+
+    if picked_name is None:
+        print(f"\n[RESULT] FAIL: 食材を {MAX_WALL_SECONDS}s 以内に取得できなかった")
+        return
+
+    # 同じマスへ戻っていたら「揺れ」とみなす(本来の不具合の症状)
+    revisited = [p for p in set(path) if path.count(p) > 1]
+    print(f"  取得したもの: {picked_name}  経路: {path}")
+    if revisited:
+        print(f"\n[RESULT] FAIL: 取得までに同じマスへ戻った(揺れ) -> {revisited}")
     else:
-        print(f"\n[RESULT] FAIL: did not pick up onion within {MAX_WALL_SECONDS}s")
+        print(f"\n[RESULT] SUCCESS: 揺れずに {elapsed:.2f}s で {picked_name} を取得 "
+              f"({len(path)} マス移動)")
 
 
 if __name__ == '__main__':

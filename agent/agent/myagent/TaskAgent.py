@@ -593,7 +593,17 @@ class TaskAgent:
             
             return (0,0), "皿が見つかりません"
             
-        return (0,0), f"{holding_name} を持っていますが、配膳タスクで何をすべきかわかりません"
+        # ここまで来たのは、配膳に使えないもの(食材など)を持っている場合。
+        # chop/cook タスクには「不要な持ち物を空きカウンターに置く」経路があるが、
+        # serve だけ無く (0,0) を返していたため、食材を持ったまま配膳タスクに
+        # 切り替わると永久にその場から動けなくなっていた。同じ経路で置きに行く。
+        return self.drop_unwanted_item(
+            env,
+            holding,
+            reason=f"配膳タスクですが、{holding_name} を持っています",
+            dynamic_obstacles=dynamic_obstacles,
+            allow_strict_override=True,
+        )
 
     def process_cook_task(self, env, ingredients=None, assigned_pot=None, assigned_counter=None, dynamic_obstacles=None):
         self_pos = env.self_pos
@@ -632,12 +642,21 @@ class TaskAgent:
                     curr_ings.append(p)
                 
                 if is_subset:
-                    target_pot_loc = p_loc
-                    missing_ings = target_ing_names.copy()
+                    remaining = target_ing_names.copy()
                     for p in curr_ings:
-                        if p in missing_ings:
-                            missing_ings.remove(p)
-                    break
+                        if p in remaining:
+                            remaining.remove(p)
+                    if not remaining:
+                        # 必要な材料が全て入っている鍋(調理中/調理済み)
+                        target_pot_loc = p_loc
+                        missing_ings = remaining
+                        break
+                    # 中身が一部だけの鍋には、このゲームでは後から材料を追加できない。
+                    # interact() は「空の鍋」にしか食材を投入せず、埋まっている鍋へ
+                    # 不足分を持っていっても何も起きない(人間が単品を鍋に入れた場合に
+                    # 発生する)。追加しに行くと置けないまま永久に固まるため、この鍋は
+                    # 対象にせず、カウンター上で全部マージしてから空の鍋へ投入する。
+                    continue
 
         # print(f"[DEBUG] cook:pot_state target_pot={target_pot_loc} missing={missing_ings}")
                     
@@ -838,7 +857,15 @@ class TaskAgent:
                 is_valid_holding = True
             
             if not is_valid_holding:
-                 return self.drop_unwanted_item(env, holding, reason=f"{ing_name} を切るタスクですが、{holding_name} を持っています")
+                 # ここに来る持ち物は CSPAgent 側で「どのタスク・注文にも紐づかない」と
+                 # 判定済みの余剰品(例: 別経路で既に満たされた注文向けに切ってしまった食材)。
+                 # strict_counter_management で待機させ続けると、行き場のない食材を
+                 # 持ったまま永久に固まってしまうため、ここは例外的に空きカウンターへの
+                 # 退避を許可する(process_chop_task 内の「共有置き場に既にある」ケースと同様)。
+                 return self.drop_unwanted_item(
+                     env, holding, reason=f"{ing_name} を切るタスクですが、{holding_name} を持っています",
+                     allow_strict_override=True,
+                 )
 
         # 0. If holding Chopped Ingredient -> Place on Table
         if holding_name and chopped_ing_name in holding_name:
