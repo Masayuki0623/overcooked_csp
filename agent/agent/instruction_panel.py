@@ -13,6 +13,8 @@
 タイマーは見た目上の演出であり、0 になっても自動選択や強制終了はしない
 (0 のまま表示し続け、選択されるまで待つ)。
 """
+import math
+
 import pygame
 
 from gym_cooking.misc.game.game import get_image
@@ -33,6 +35,8 @@ MIN_CARD_H = 44
 MAX_CARD_H = 84
 TIMER_RADIUS = 30
 TIMER_THICKNESS = 9
+# 円弧を滑らかに見せるための描画倍率(この倍率で描いて縮小する)
+TIMER_SUPERSAMPLE = 4
 
 # 緑 -> 黄 -> 赤 の3色補間
 TIMER_COLOR_STOPS = ((76, 175, 80), (255, 193, 7), (229, 57, 53))
@@ -142,21 +146,45 @@ def _draw_circular_icon(surface, icon, center, radius, framed=True):
         pygame.draw.circle(surface, CARD_BORDER, center, radius, 2)
 
 
-def _draw_radial_timer(surface, center, remaining, total):
-    """残り時間のラジアルワイプ。時計回りに閉じていく。"""
+def _draw_radial_timer(surface, center, remaining, total, bg_color=PANEL_BG):
+    """残り時間のラジアルワイプ。時計回りに閉じていく。
+
+    pygame.draw.arc はアンチエイリアスされず、太い円弧だと輪郭がガタガタに
+    なってしまう。そこで SUPERSAMPLE 倍の大きさで「扇形の塗り+中央のくり抜き」
+    として描き、smoothscale で縮めて滑らかにする。
+    """
     elapsed = total - remaining
     progress = 0.0 if total <= 0 else max(0.0, min(1.0, elapsed / total))
     color = timer_color(progress)
 
-    pygame.draw.circle(surface, (233, 230, 224), center, TIMER_RADIUS, TIMER_THICKNESS)
+    ss = TIMER_SUPERSAMPLE
+    size = TIMER_RADIUS * 2 * ss
+    temp = pygame.Surface((size, size))
+    temp.fill(bg_color)
+    tc = (size // 2, size // 2)
+
+    # 下地のリング
+    pygame.draw.circle(temp, (233, 230, 224), tc, TIMER_RADIUS * ss)
 
     if remaining > 0:
-        # 12時方向から時計回りに、残りぶんだけ描く
-        box = pygame.Rect(0, 0, TIMER_RADIUS * 2, TIMER_RADIUS * 2)
-        box.center = center
-        import math
-        start = math.pi / 2 - 2 * math.pi * (1.0 - progress)
-        pygame.draw.arc(surface, color, box, start, math.pi / 2, TIMER_THICKNESS)
+        # 12時方向から時計回りに、残りぶんだけ扇形で塗る
+        fraction = max(0.0, min(1.0, 1.0 - progress))
+        start = -math.pi / 2
+        end = start + 2 * math.pi * fraction
+        steps = max(24, int(180 * fraction))
+        points = [tc]
+        for i in range(steps + 1):
+            a = start + (end - start) * i / steps
+            points.append((tc[0] + TIMER_RADIUS * ss * math.cos(a),
+                           tc[1] + TIMER_RADIUS * ss * math.sin(a)))
+        if len(points) >= 3:
+            pygame.draw.polygon(temp, color, points)
+
+    # 中央をくり抜いてリングにする
+    pygame.draw.circle(temp, bg_color, tc, (TIMER_RADIUS - TIMER_THICKNESS) * ss)
+
+    smooth = pygame.transform.smoothscale(temp, (TIMER_RADIUS * 2, TIMER_RADIUS * 2))
+    surface.blit(smooth, (center[0] - TIMER_RADIUS, center[1] - TIMER_RADIUS))
 
     font = _jp_font(26, bold=True)
     # 0 になったら 0 のまま表示し続ける(自動選択はしない)
