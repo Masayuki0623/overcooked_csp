@@ -16,6 +16,14 @@ class VirtualHumanState:
     current_pos: tuple[int, int]
     remaining_task_ids: set
 
+# 人間の予測タスクを乗り換える判定のしきい値。
+# 「別タスクの方がこのフレーム数以上早く終わる」かつ「その状態が連続でこの回数続いた」
+# ときだけ予測ミスとみなす。人間はうろうろするので、すぐ乗り換えるとそのつど
+# CSP の再計算が走って解が変わってしまう。
+HUMAN_PREDICTION_COST_MARGIN = 15   # フレーム (10fps で 1.5 秒相当)
+HUMAN_PREDICTION_CONFIRM_FRAMES = 3
+
+
 class CSPAgent:
     """
     CSP(制約充足問題)ベースのエージェント
@@ -92,6 +100,7 @@ class CSPAgent:
         self.predicted_human_tasks = []
         # 直近に推測した人間のタスク(毎フレーム変わらないよう保持する)
         self._predicted_human_task_id = None
+        self._human_prediction_doubt = 0
         self.human_counterpart_mode = False
         # CSP が実際に操作するプレイヤー番号 (0 or 1)。
         # sc_2agent=True かつ human_counterpart_mode=True のとき有効。
@@ -1256,6 +1265,8 @@ class CSPAgent:
         # 人間が推測と違うことをしていたら、予測ミスとして再スケジューリングする
         if self.sc_2agent and self.human_counterpart_mode and self.use_predicted_human_model:
             self._check_human_prediction(env)
+            self._check_human_prediction_by_cost(
+                env, [t for o in current_orders for t in o['tasks']])
 
         if not hasattr(self, 'prev_task_ids'):
             self.prev_task_ids = set()
@@ -1984,7 +1995,68 @@ class CSPAgent:
             self._emit_counter_debug(
                 f"[HumanModel] 予測が外れた: 予測={predicted} だが人間は {holding_name} を持っている")
             self._predicted_human_task_id = None
+            self._human_prediction_doubt = 0
             self._mark_reschedule_needed('human_prediction_missed')
+
+    def _check_human_prediction_by_cost(self, env, tasks):
+        """所要時間の見積もりからも、予測が外れていないかを見る。
+
+        持ち物は明確な証拠だが、手ぶらで別の場所へ向かっている人間は捉えられない。
+        そこで人間の現在地から各タスクの所要時間を見積もり(既存の
+        _estimate_virtual_task_finish)、予測タスクより明らかに早く終わるタスクが
+        現れたら予測ミスとみなす。
+
+        ただし人間はうろうろするので、1フレームでも早くなったら乗り換える、とすると
+        そのつど CSP の再計算(実測23.6ms)が走り解が変わってしまう。
+        「はっきり差がある(MARGIN)」かつ「続けて何度もそうだった(CONFIRM)」ときだけ
+        予測ミスと判定する。
+        """
+        predicted = getattr(self, '_predicted_human_task_id', None)
+        if predicted is None or not tasks:
+            return
+
+        predicted_task = next((t for t in tasks if t['id'] == predicted), None)
+        if predicted_task is None:
+            self._predicted_human_task_id = None
+            self._human_prediction_doubt = 0
+            return
+
+        human_idx = 1 - self.own_agent_idx
+        agents = getattr(env, 'agents', None) or getattr(env, 'sim_agents', []) or []
+        if human_idx >= len(agents):
+            return
+        human_pos = getattr(agents[human_idx], 'location', None)
+        if human_pos is None:
+            return
+
+        _, predicted_cost = self._estimate_virtual_task_finish(env, predicted_task, human_pos)
+
+        best_id, best_cost = None, None
+        for task in tasks:
+            if task['id'] == predicted:
+                continue
+            _, cost = self._estimate_virtual_task_finish(env, task, human_pos)
+            if cost is None:
+                continue
+            if best_cost is None or cost < best_cost:
+                best_id, best_cost = task['id'], cost
+
+        clearly_better = (
+            best_cost is not None
+            and (predicted_cost is None or best_cost + HUMAN_PREDICTION_COST_MARGIN < predicted_cost)
+        )
+        if not clearly_better:
+            self._human_prediction_doubt = 0
+            return
+
+        self._human_prediction_doubt = getattr(self, '_human_prediction_doubt', 0) + 1
+        if self._human_prediction_doubt >= HUMAN_PREDICTION_CONFIRM_FRAMES:
+            self._emit_counter_debug(
+                f"[HumanModel] 予測が外れた(所要時間): 予測={predicted}({predicted_cost}) "
+                f"より {best_id}({best_cost}) の方が早い")
+            self._predicted_human_task_id = None
+            self._human_prediction_doubt = 0
+            self._mark_reschedule_needed('human_prediction_missed_by_cost')
 
     def _predict_human_current_task(self, env, tasks, human_pos):
         """残りタスクの中から「人間がいま手をつけているタスク」を推測する。

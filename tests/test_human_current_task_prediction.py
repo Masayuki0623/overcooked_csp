@@ -131,6 +131,59 @@ class HumanCurrentTaskPredictionTests(unittest.TestCase):
         self.agent._check_human_prediction(make_env('ChoppedTomato'))
         self.assertIsNone(self.agent.pending_reschedule_reason)
 
+    def _stub_costs(self, cost_by_id):
+        def est(env, task, pos):
+            return 0, cost_by_id.get(task['id'])
+        self.agent._estimate_virtual_task_finish = est
+
+    def test_cost_miss_needs_repeated_confirmation(self):
+        """明らかに早いタスクが現れても、続けて確認できるまでは乗り換えない。
+
+        人間はうろうろするので、1フレームで乗り換えるとそのつど CSP の
+        再計算が走って解が変わってしまう。
+        """
+        tasks = make_tasks()
+        self.agent._predicted_human_task_id = ('chop', 'onion', 0)
+        self.agent._human_prediction_doubt = 0
+        self.agent.pending_reschedule_reason = None
+        self._stub_costs({('chop', 'onion', 0): 100, ('chop', 'tomato', 0): 10,
+                          ('cook', 'onion-tomato soup', 0): 200})
+        env = make_env(None)
+        for _ in range(2):
+            self.agent._check_human_prediction_by_cost(env, tasks)
+            self.assertIsNotNone(self.agent._predicted_human_task_id)
+        self.agent._check_human_prediction_by_cost(env, tasks)
+        self.assertIsNone(self.agent._predicted_human_task_id)
+        self.assertEqual(self.agent.pending_reschedule_reason,
+                         'human_prediction_missed_by_cost')
+
+    def test_small_cost_difference_does_not_switch(self):
+        """差がわずかなら乗り換えない(しきい値未満)。"""
+        tasks = make_tasks()
+        self.agent._predicted_human_task_id = ('chop', 'onion', 0)
+        self.agent._human_prediction_doubt = 0
+        self._stub_costs({('chop', 'onion', 0): 100, ('chop', 'tomato', 0): 95,
+                          ('cook', 'onion-tomato soup', 0): 200})
+        env = make_env(None)
+        for _ in range(5):
+            self.agent._check_human_prediction_by_cost(env, tasks)
+        self.assertEqual(self.agent._predicted_human_task_id, ('chop', 'onion', 0))
+
+    def test_doubt_resets_when_prediction_becomes_best_again(self):
+        """一時的に他が早く見えても、戻れば疑いは解消する。"""
+        tasks = make_tasks()
+        self.agent._predicted_human_task_id = ('chop', 'onion', 0)
+        self.agent._human_prediction_doubt = 0
+        env = make_env(None)
+        self._stub_costs({('chop', 'onion', 0): 100, ('chop', 'tomato', 0): 10,
+                          ('cook', 'onion-tomato soup', 0): 200})
+        self.agent._check_human_prediction_by_cost(env, tasks)
+        self._stub_costs({('chop', 'onion', 0): 10, ('chop', 'tomato', 0): 100,
+                          ('cook', 'onion-tomato soup', 0): 200})
+        self.agent._check_human_prediction_by_cost(env, tasks)
+        self.assertEqual(self.agent._human_prediction_doubt, 0)
+        self.assertEqual(self.agent._predicted_human_task_id, ('chop', 'onion', 0))
+
     def test_no_tasks_returns_none(self):
         self.assertIsNone(self.agent._predict_human_current_task(make_env('FreshOnion'), [], (5, 5)))
 
