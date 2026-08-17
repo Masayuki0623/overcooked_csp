@@ -76,6 +76,12 @@ class _SelectiveWriter:
         self.stream.flush()
 
 
+# AI は「送った行動が適用された」ことを次の状態pushで確認してから次を送るため、
+# 1行動につき判断時間+往復ぶんが必要になる。環境の1ステップをAIの判断時間の
+# 何倍まで引き伸ばすか(--debug で進行を遅くするときにだけ使う)。
+AI_PACE_ROUNDTRIP_FACTOR = 2.0
+
+
 class GamePlay(Game):
     def __init__(self, env, replay: Replay, agent_set: AgentSetting, debug_mode: bool = False, human_agent_idx: int | None = 1, ai_agent_idx: int | None = 0, sc_2agent: bool = False):
         Game.__init__(self, env, play=True)
@@ -103,6 +109,19 @@ class GamePlay(Game):
         # fps of human and ai
         self.fps = 10
         self.fps_ai = agent_set.speed
+
+        # --debug では詳細トレースの出力だけで AI の判断1回が数百msかかる。
+        # 環境をそのまま 1/fps 秒ごとに進めると AI が数フレームに1回しか動けず、
+        # 「AIだけが極端に遅い」状態になってしまう。
+        # そこで AI の実際の判断時間を測り、環境がそれより速く進まないようにする。
+        # env.step へ渡すゲーム内時間(passed_time)は変えないので、調理時間などの
+        # ゲームロジックは一切変わらず、実時間の進行だけが遅くなる。
+        self.pace_env_to_ai = debug_mode
+        # AI の判断時間(指数移動平均, 秒)。_run_ai が更新し _run_env が読む。
+        self._ai_decide_seconds = 0.0
+        # 遅くする上限(1ステップが 1/fps 秒の何倍まで伸びてよいか)。
+        # これを超えると体感で止まって見えるため頭打ちにする。
+        self.max_pace_stretch = 8.0
 
         # human_agent_idx は None の場合もある（両方AIの旧モードなど）
         self.idx_human = human_agent_idx
@@ -294,6 +313,21 @@ class GamePlay(Game):
                 self._q_ai.put(('Env', {"EnvState": dcopy(e), "applied_actions": dict(ad)}))
                 action_dict = {agent.name: None for agent in self.sim_agents}
 
+            # AI の判断が 1 ステップ分の時間より長くかかっているなら、環境の 1 ステップを
+            # その分だけ引き伸ばす。--debug では詳細トレースの出力だけで判断1回が
+            # 数百msかかるため、これをしないと AI が数フレームに1回しか動けなくなる。
+            # 引き伸ばすのは実時間だけで、env.step へ渡すゲーム内時間(passed_time)は
+            # seconds_per_step のままなので、調理時間などのゲームロジックは変わらない。
+            # 1ステップに必要なのは「判断時間」だけではない。AIは自分が送った行動が
+            # 適用されたことを次の状態pushで確認してから次を送る(awaiting_confirm)ため、
+            # 1行動あたり判断+往復ぶんの時間がかかる。判断時間と同じ周期にすると
+            # AIは1ステップおきにしか動けない(実測 47.6%)。往復ぶんを見込んで倍にする。
+            step_period = seconds_per_step
+            if self.pace_env_to_ai:
+                needed = self._ai_decide_seconds * AI_PACE_ROUNDTRIP_FACTOR
+                if needed > step_period:
+                    step_period = min(needed, seconds_per_step * self.max_pace_stretch)
+
             # last_t は sleep の「後」に更新すること。
             # 前に更新すると、次の周回で測る経過時間に自分の sleep 時間が含まれてしまい、
             # sleep_time が 0 になる周回と満額になる周回が交互に現れて、環境が設定 fps の
@@ -301,7 +335,7 @@ class GamePlay(Game):
             # AI は fps_ai(=10)/秒でしか行動を決められないため、環境だけが倍速で進むと
             # AI は全ステップの半分しか動けず、毎ステップ入力が反映される人間に対して
             # 半分の速度に見える(「AIの移動が遅い」の原因)。
-            sleep_time = max(seconds_per_step - (time.time() - last_t), 0)
+            sleep_time = max(step_period - (time.time() - last_t), 0)
             if sleep_time > 0:
                 time.sleep(sleep_time)
             last_t = time.time()
@@ -466,7 +500,18 @@ class GamePlay(Game):
                     hold_seen = getattr(env, 'hold', None)
                     hold_seen_name = getattr(hold_seen, 'full_name', None) if hold_seen is not None else None
                     print(f"[AITRACE] decide_begin wall={time.time():.4f} pos_seen={env.self_pos} hold_seen={hold_seen_name}")
+                # 判断時間の計測は --debug のときだけ行う(pace_env_to_ai=debug_mode)。
+                # 通常プレイでは計測も進行の引き伸ばしも一切行わない。
+                decide_started = time.time() if self.pace_env_to_ai else None
                 move, chat_ret = self.ai(env)
+                if decide_started is not None:
+                    # 環境側が「AIより速く進まない」ようにするための実測値。
+                    # 再スケジュール時だけ跳ねる(CSP探索)ので、指数移動平均で均す。
+                    decide_elapsed = time.time() - decide_started
+                    if self._ai_decide_seconds <= 0:
+                        self._ai_decide_seconds = decide_elapsed
+                    else:
+                        self._ai_decide_seconds = self._ai_decide_seconds * 0.8 + decide_elapsed * 0.2
                 if self.debug_mode:
                     print(f"[AITRACE] decide_end   wall={time.time():.4f} pos_seen={env.self_pos} move={move}")
 
