@@ -67,7 +67,11 @@ class CSPAgent:
         self.counter_invalid_since_by_order = {}
         self.order_display_labels = []
         self.carry_task_by_agent = {0: None, 1: None} if self.sc_2agent else None
-        self.debug_counter_trace = True
+        # 詳細トレースの既定は OFF。
+        # これらは1回の判断ごとに数十行を出力するため、常時ONにすると実コンソールへの
+        # 書き込みだけで判断1回が数百msかかり(実測: 8.5ms -> 約350ms)、AI が
+        # 毎フレーム動けなくなる。play_main.py が --debug のときだけ True にする。
+        self.debug_counter_trace = False
         
         self.task_agent = TaskAgent()
         self.task_agent.strict_counter_management = True
@@ -109,7 +113,7 @@ class CSPAgent:
             parts.append(f"added={sorted(added)}")
         if removed:
             parts.append(f"removed={sorted(removed)}")
-        print(" ".join(parts))
+        self._emit_counter_debug(" ".join(parts))
 
     def _get_active_task_ids(self):
         if self.sc_2agent:
@@ -894,7 +898,7 @@ class CSPAgent:
         if getattr(self, 'debug_counter_trace', False) and holding_name:
             sched_id = scheduled_task.get('id') if scheduled_task else None
             carry_now = self.carry_task_by_agent.get(agent_idx) if self.sc_2agent and isinstance(self.carry_task_by_agent, dict) else getattr(self, 'carry_task_by_agent', None)
-            print(f"[CarryOverride] agent={agent_idx} holding_name={holding_name!r} scheduled_id={sched_id} carry_task_id={carry_now.get('id') if carry_now else None}")
+            self._emit_counter_debug(f"[CarryOverride] agent={agent_idx} holding_name={holding_name!r} scheduled_id={sched_id} carry_task_id={carry_now.get('id') if carry_now else None}")
         if not holding_name:
             if self.sc_2agent:
                 self.carry_task_by_agent[agent_idx] = None
@@ -3029,7 +3033,7 @@ class CSPAgent:
         OR-Tools CP-SAT を用いたスケジューリング（移動コスト込み）。
         Circuit制約を用いて順序依存のセットアップ時間（移動時間）を正確にモデル化する。
         """
-        print(f"[CSPAgent] CSPスケジューリング開始 ({len(orders)} 注文)...")
+        self._emit_counter_debug(f"[CSPAgent] CSPスケジューリング開始 ({len(orders)} 注文)...")
         previous_schedule = getattr(self, 'schedule', None)
         previous_schedule_per_agent = getattr(self, 'schedule_per_agent', None)
         model = cp_model.CpModel()
@@ -3043,7 +3047,7 @@ class CSPAgent:
         
         num_tasks = len(tasks)
         if num_tasks == 0:
-            print("[CSPAgent] スケジュール対象タスクがありません。")
+            self._emit_counter_debug("[CSPAgent] スケジュール対象タスクがありません。")
             return []
 
         # 現在のエージェント位置（初期位置）
@@ -3092,7 +3096,7 @@ class CSPAgent:
             predicted_human_task_ids = set(predicted_human_windows)
             if self.predicted_human_tasks:
                 first_task = self.predicted_human_tasks[0]
-                print(
+                self._emit_counter_debug(
                     f"[HumanModel] 予測人間タスク: {first_task['id']} "
                     f"start={first_task['start']} end={first_task['end']}"
                 )
@@ -3104,7 +3108,7 @@ class CSPAgent:
         agent1_start_node = num_tasks + 1 if self.sc_2agent else None
         
         dist_matrix = {} # (from_idx, to_idx) -> distance
-        print("[CSPAgent] 距離行列を計算中...")
+        self._emit_counter_debug("[CSPAgent] 距離行列を計算中...")
         
         # キャッシュ付きA*
         dist_cache = {}
@@ -3136,7 +3140,7 @@ class CSPAgent:
                     dist_matrix[(i,j)] = dist
 
         # Debug: Check distances between task types
-        print("--- 距離行列サンプル ---")
+        self._emit_counter_debug("--- 距離行列サンプル ---")
         sample_chop = next((i for i, t in enumerate(tasks) if t['verb'] == 'chop'), None)
         sample_cook = next((i for i, t in enumerate(tasks) if t['verb'] == 'cook'), None)
         if sample_chop is not None and sample_cook is not None:
@@ -3144,9 +3148,9 @@ class CSPAgent:
             d2 = dist_matrix.get((sample_cook, sample_chop), -1)
             p1 = tasks[sample_chop]['end_pos']
             p2 = tasks[sample_cook]['start_pos']
-            print(f"Chop({sample_chop} @ {p1}) -> Cook({sample_cook} @ {p2}): {d1}")
-            print(f"Cook({sample_cook} @ {p2}) -> Chop({sample_chop} @ {p1}): {d2}")
-        print("------------------------")
+            self._emit_counter_debug(f"Chop({sample_chop} @ {p1}) -> Cook({sample_cook} @ {p2}): {d1}")
+            self._emit_counter_debug(f"Cook({sample_cook} @ {p2}) -> Chop({sample_chop} @ {p1}): {d2}")
+        self._emit_counter_debug("------------------------")
 
         # 3. 変数と制約の定義
         horizon = 10000 
@@ -3283,7 +3287,7 @@ class CSPAgent:
             model.AddCircuit(arcs)
 
         # ====================================================
-        print(f"[CSPAgent] スケジュール対象タスク数: {num_tasks}")
+        self._emit_counter_debug(f"[CSPAgent] スケジュール対象タスク数: {num_tasks}")
         
         # Helper: Group vars by Order ID / TID
         vars_by_order = {} 
@@ -3339,7 +3343,7 @@ class CSPAgent:
         for pot_loc, intervals_list in pot_usage_intervals.items():
             if len(intervals_list) > 1:
                 model.AddNoOverlap(intervals_list)
-                print(f"[CSPAgent] 鍋 {pot_loc} の重複禁止制約を追加 ({len(intervals_list)} 注文)")
+                self._emit_counter_debug(f"[CSPAgent] 鍋 {pot_loc} の重複禁止制約を追加 ({len(intervals_list)} 注文)")
 
         # まな板の占有制約 (Cutboard Usage Constraint)
         cutboard_intervals = {}
@@ -3356,11 +3360,11 @@ class CSPAgent:
         for c_loc, intervals_list in cutboard_intervals.items():
             if len(intervals_list) > 1:
                 model.AddNoOverlap(intervals_list)
-                print(f"[CSPAgent] まな板 {c_loc} の重複禁止制約を追加 ({len(intervals_list)} タスク)")
+                self._emit_counter_debug(f"[CSPAgent] まな板 {c_loc} の重複禁止制約を追加 ({len(intervals_list)} タスク)")
 
         # 動的制約 (Dynamic Constraints)
         if hasattr(self, 'active_constraints') and self.active_constraints:
-            print(f"[CSPAgent] 動的制約を適用中: {len(self.active_constraints)}件")
+            self._emit_counter_debug(f"[CSPAgent] 動的制約を適用中: {len(self.active_constraints)}件")
             for constr in self.active_constraints:
                 c_type = constr.get('type')
                 if c_type == 'order_sequential':
@@ -3429,17 +3433,17 @@ class CSPAgent:
         solver = cp_model.CpSolver()
         status = solver.Solve(model)
         status_name = solver.StatusName(status)
-        print(f"[CSPAgent] ソルバー状態: {status_name}")
+        self._emit_counter_debug(f"[CSPAgent] ソルバー状態: {status_name}")
 
         schedule = []
         if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
             actual_makespan = solver.Value(makespan)
-            print(f"[CSPAgent] 最適Makespan(移動込み): {actual_makespan} (評価値: {solver.ObjectiveValue()})")
+            self._emit_counter_debug(f"[CSPAgent] 最適Makespan(移動込み): {actual_makespan} (評価値: {solver.ObjectiveValue()})")
             
             if not self.sc_2agent:
                 # 1エージェント: 従来通りlit_mapでルートをトレース
                 schedule.sort(key=lambda x: x['start'])
-                print("--- 推定順序と移動時間 (詳細) ---")
+                self._emit_counter_debug("--- 推定順序と移動時間 (詳細) ---")
                 current_node = start_node
                 visited_count = 0
                 while visited_count < num_tasks:
@@ -3459,13 +3463,13 @@ class CSPAgent:
                                     'display_order': t.get('display_order', t.get('slot_idx', t['order'])),
                                     'fixed_task_id': self._make_fixed_task_id(t['verb'], t['obj'], t['order'])
                                 })
-                                print(f" -> {t['verb']} {t['obj']}")
+                                self._emit_counter_debug(f" -> {t['verb']} {t['obj']}")
                             current_node = j
                             found_next = True
                             visited_count += 1
                             break
                     if not found_next: break
-                print("---------------------------------")
+                self._emit_counter_debug("---------------------------------")
             else:
                 # 2エージェント: is_a1 変数から直接エージェント割り当てを読む
                 schedule_per_agent = {0: [], 1: []}
@@ -3495,7 +3499,7 @@ class CSPAgent:
                 
         else:
             if status_name == 'INFEASIBLE':
-                print(f"[CSPAgent] ソルバー結果: INFEASIBLE (締切制約などにより解なし) — 直前のスケジュールへフォールバックします。")
+                self._emit_counter_debug(f"[CSPAgent] ソルバー結果: INFEASIBLE (締切制約などにより解なし) — 直前のスケジュールへフォールバックします。")
                 if self.sc_2agent and previous_schedule_per_agent:
                     self.schedule_per_agent = previous_schedule_per_agent
                     fallback_schedule = previous_schedule_per_agent[0] + previous_schedule_per_agent[1]
@@ -3505,7 +3509,7 @@ class CSPAgent:
                     self.schedule = previous_schedule
                     return previous_schedule
             else:
-                print(f"[CSPAgent] 解が見つかりませんでした。 状態={status_name}")
+                self._emit_counter_debug(f"[CSPAgent] 解が見つかりませんでした。 状態={status_name}")
                 pass
             
         return schedule
@@ -3514,14 +3518,14 @@ class CSPAgent:
         if orders is None:
             orders = self._build_order_tasks(env)
         
-        print("\n--- 生成タスク (環境状態でフィルタ済) ---")
+        self._emit_counter_debug("\n--- 生成タスク (環境状態でフィルタ済) ---")
         for o in orders:
-            print(f"注文 {o.get('display_order', o['order']) + 1} (食材: {o['ingredients']}):")
+            self._emit_counter_debug(f"注文 {o.get('display_order', o['order']) + 1} (食材: {o['ingredients']}):")
             if not o['tasks']:
-                print("  (タスク不要)")
+                self._emit_counter_debug("  (タスク不要)")
             for t in o['tasks']:
-                print(f"  - {t['id']}: 所要={t['dur']}, 資源候補={t['res_candidates']}")
-        print("-------------------------------------------------------\n")
+                self._emit_counter_debug(f"  - {t['id']}: 所要={t['dur']}, 資源候補={t['res_candidates']}")
+        self._emit_counter_debug("-------------------------------------------------------\n")
 
         budget = self.budget_frames
         res_timeline = {'cutboard':{}, 'pot':{}}
@@ -3580,7 +3584,7 @@ class CSPAgent:
         return schedule
 
     def _print_schedule(self, schedule):
-        print("\n=== CSP スケジュール（フレーム単位） ===")
+        self._emit_counter_debug("\n=== CSP スケジュール（フレーム単位） ===")
         total_frames = 0
         
         # Group by agent
@@ -3593,15 +3597,15 @@ class CSPAgent:
             total_frames = max(total_frames, item.get('end', 0))
 
         for aid in sorted(agents_sched.keys()):
-            print(f"\nAI{aid}")
+            self._emit_counter_debug(f"\nAI{aid}")
             for item in agents_sched[aid]:
                 tid = item.get('id'); start = item.get('start'); end = item.get('end'); res = item.get('res')
                 verb, obj, order = tid
                 display_order = item.get('display_order', order)
-                print(f"{verb} {obj} (注文{display_order+1}) : 開始={start}, 終了={end}, 資源={res}")
+                self._emit_counter_debug(f"{verb} {obj} (注文{display_order+1}) : 開始={start}, 終了={end}, 資源={res}")
 
-        print(f"\n総投入フレーム: {total_frames}")
-        print("===================================\n")
+        self._emit_counter_debug(f"\n総投入フレーム: {total_frames}")
+        self._emit_counter_debug("===================================\n")
 
     def astar_distance(self, env, start, goal):
         import heapq

@@ -95,6 +95,18 @@ def _create_single_agent(agent_name, speed, replay, init_env_state, env, task_na
     return get_agent(AgentSetting(agent_name, speed=speed), replay)
 
 
+def _iter_task_agents(ai):
+    """AI が内部で持つ TaskAgent を列挙する(1体モード/2体モードの両方)。"""
+    task_agent = getattr(ai, 'task_agent', None)
+    if task_agent is not None:
+        yield task_agent
+    task_agents = getattr(ai, 'task_agents', None)
+    if isinstance(task_agents, dict):
+        for task_agent in task_agents.values():
+            if task_agent is not None:
+                yield task_agent
+
+
 def init_env_replay(map_name, agent0_name, agent1_name, task_name=None, no_reschedule=False, debug_mode=False, order_file=None):
     map_kwargs = dict(MAP_SETTINGS[map_name])
     if order_file is not None:
@@ -192,6 +204,14 @@ def init_env_replay(map_name, agent0_name, agent1_name, task_name=None, no_resch
 
     game = GamePlay(env, replay, agent_set, debug_mode=debug_mode, human_agent_idx=human_idx, ai_agent_idx=ai_idx)
     game.ai = ai
+    # 詳細トレースは --debug のときだけ出す。
+    # これらは1回の判断ごとに数十行を出力するため、常時ONだと実コンソールへの
+    # 書き込みだけで判断1回が数百msかかり(実測: 8.5ms -> 約350ms)、
+    # AI が毎フレーム動けなくなる。
+    if hasattr(ai, 'debug_counter_trace'):
+        ai.debug_counter_trace = debug_mode
+    for task_agent in _iter_task_agents(ai):
+        task_agent.debug_trace = debug_mode
     replay['set_map'] = deepcopy(map_set)
     replay['set_agent'] = deepcopy(agent_set)
     replay['order_rand'] = deepcopy(env.order_scheduler.rand_recipe_list)

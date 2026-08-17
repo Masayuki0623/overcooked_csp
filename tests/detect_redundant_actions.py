@@ -179,6 +179,11 @@ def run_one_trial(trial_idx, duration_seconds, seed=None):
     csp_agent = CSPAgent(agent_set.speed, replay, sc_2agent=True)
     csp_agent.human_counterpart_mode = True
     csp_agent.own_agent_idx = 0
+    # 詳細トレースは既定 OFF(常時ONだと出力だけで判断1回が数百msかかる)。
+    # DETECT_DEBUG=1 のときだけ、実アプリの --debug と同じように有効化する。
+    csp_agent.debug_counter_trace = debug_mode
+    for task_agent in list(getattr(csp_agent, 'task_agents', {}).values()):
+        task_agent.debug_trace = debug_mode
     game.ai = csp_agent
 
     if game.on_init() is False:

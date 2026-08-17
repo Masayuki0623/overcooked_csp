@@ -116,6 +116,10 @@ class TaskAgent:
         return fallback_func()
 
     def _log_chop_debug(self, env, ing_name, holding_name, assigned_cutboard, assigned_counter, stage, target=None, reason=None):
+        # 既定は OFF。1回の判断ごとに複数行を出力するため、常時ONだと実コンソールへの
+        # 書き込みが支配的になり、AI が毎フレーム動けなくなる。
+        if not getattr(self, 'debug_trace', False):
+            return
         current_time = getattr(env, 'time', None)
         parts = [
             f"[TaskAgent][CHOP] time={current_time}",
