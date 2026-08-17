@@ -135,10 +135,6 @@ class GamePlay(Game):
         self._success = False
         self._finalized = False
         self._latest_env_state = None
-        # 指示パネル表示中は _run_env スレッド側の描画を止める。
-        # on_render は screen.fill -> display.flip まで行うため、パネルの描画と
-        # 交互に画面全体を上書きし合って激しく点滅してしまう。
-        self._instruction_panel_active = False
 
     def _get_unexecuted_task_candidates(self):
         env_state = self._latest_env_state
@@ -174,33 +170,26 @@ class GamePlay(Game):
         return summary
 
     def _show_instruction_panel(self, candidates):
-        """スペース押下時の指示カード画面。選択中だけ窓を横に広げる。"""
-        # 先に描画スレッドを止めてから、自分で完全な1フレームを描いてコピーする。
-        # on_render は screen.fill してから全オブジェクトを描き直すため、その途中で
-        # copy() すると提供口やプレイヤーが欠けたスナップショットになってしまう。
-        self._instruction_panel_active = True
-        try:
-            time.sleep(1.0 / max(self.fps, 1))  # 進行中の描画が終わるのを待つ
-            self.on_render(paused=1)
-            snapshot = self.screen.copy()
-        except Exception as e:
-            self._instruction_panel_active = False
-            print(f"[GamePlay] 指示パネルの描画に失敗したためテキスト入力に切り替えます: {e}")
-            return popup_task_choice("AIへの指示タスクを選択してください", candidates)
+        """スペース押下時の指示カード画面をゲーム窓とは別のウィンドウで開く。
 
-        old_size = (snapshot.get_width(), snapshot.get_height())
-        # カードが3列でも窮屈にならない幅を確保する(選択中だけ広げるので実害はない)
-        panel_width = max(360, old_size[0])
+        ゲーム画面には一切触れないので、描画の奪い合いによる点滅も、描画途中の
+        コピーによるオブジェクト欠けも起きない。
+        """
         try:
-            widened = pygame.display.set_mode((old_size[0] + panel_width, old_size[1]))
+            width, height = self.screen.get_width(), self.screen.get_height()
+            position = None
+            try:
+                from pygame._sdl2.video import Window
+                main_x, main_y = Window.from_display_module().position
+                position = (main_x + width + 8, main_y)  # ゲーム窓のすぐ右へ
+            except Exception:
+                pass
+
             panel = InstructionPanel(candidates, env_summary=self._build_env_summary())
-            return panel.run(widened, snapshot)
-        finally:
-            self._instruction_panel_active = False
-            # 閉じたら元の窓サイズへ戻し、ゲーム画面を描き直す
-            self.screen = pygame.display.set_mode(old_size)
-            self.screen.blit(snapshot, (0, 0))
-            pygame.display.flip()
+            return panel.run_windowed((max(360, width), height), position=position)
+        except Exception as e:
+            print(f"[GamePlay] 指示ウィンドウを開けなかったため一覧選択に切り替えます: {e}")
+            return popup_task_choice("AIへの指示タスクを選択してください", candidates)
 
     def on_event(self, event):
         if event.type == pygame.QUIT:
@@ -413,11 +402,7 @@ class GamePlay(Game):
 
             if not paused:
                 self.replay.log('on_render', {'paused': paused, 'chat': chat})
-            # 指示パネル表示中はこのスレッドから描画しない。
-            # on_render は screen.fill -> display.flip まで行うため、パネル側の
-            # 描画と交互に画面全体を上書きし合って激しく点滅してしまう。
-            if not self._instruction_panel_active:
-                self.on_render(paused=paused, chat=chat, debug_info=debug_info)
+            self.on_render(paused=paused, chat=chat, debug_info=debug_info)
 
     def _refresh_instruction_states(self, env):
         """実行開始/完了に応じて pending instruction の状態を更新する。"""

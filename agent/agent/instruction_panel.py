@@ -314,59 +314,83 @@ class InstructionPanel:
             self._draw_card(surface, rect, verb, obj, rect.collidepoint(mouse_pos))
             self.card_rects.append((rect, (display, payload)))
 
-    def run(self, screen, game_snapshot):
-        """モーダルに描画してユーザーの選択を待つ。
+    def render(self, surface):
+        """パネル1枚分を surface に描く(ゲーム画面には触れない)。"""
+        rect = surface.get_rect()
+        surface.fill(PANEL_BG)
 
-        screen: 横に広げた後の display Surface
-        game_snapshot: 押下時点のゲーム画面(左半分に表示する)
-        """
-        clock = pygame.time.Clock()
-        panel_x = game_snapshot.get_width()
-        panel_rect = pygame.Rect(panel_x, 0, screen.get_width() - panel_x, screen.get_height())
+        remaining = max(0.0, COUNTDOWN_SECONDS - (pygame.time.get_ticks() / 1000.0 - self._started))
+        _draw_radial_timer(surface, (rect.right - 16 - TIMER_RADIUS, 16 + TIMER_RADIUS),
+                           remaining, COUNTDOWN_SECONDS)
 
         heading_font = _jp_font(17, bold=True)
+        surface.blit(heading_font.render("つぎの指示を", True, TEXT_MAIN), (16, 22))
+        surface.blit(heading_font.render("えらんでください", True, TEXT_MAIN), (16, 44))
+
+        strip = pygame.Rect(16, 16 + TIMER_RADIUS * 2 + 12, rect.width - 32, 46)
+        self._draw_env_strip(surface, strip)
+        self._draw_cards(surface, strip.bottom + 14, rect, self._mouse)
+
         hint_font = _jp_font(10)
-        started = pygame.time.get_ticks() / 1000.0
+        surface.blit(hint_font.render("クリックで選択 / Esc でキャンセル", True, TEXT_SUB),
+                     (16, rect.bottom - 20))
 
-        while True:
-            now = pygame.time.get_ticks() / 1000.0
-            remaining = max(0.0, COUNTDOWN_SECONDS - (now - started))
-            mouse_pos = pygame.mouse.get_pos()
+    def run_windowed(self, size, position=None):
+        """ゲーム窓とは別のウィンドウを開いて選択を待つ。
 
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    return None
-                if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                    return None
-                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                    for rect, choice in self.card_rects:
-                        if rect.collidepoint(event.pos):
-                            return choice
+        ゲーム側の画面には一切触れないので、描画の奪い合い(点滅)も、
+        描画途中のコピーによるオブジェクト欠けも起きない。
+        """
+        from pygame._sdl2.video import Window, Renderer, Texture
 
-            screen.blit(game_snapshot, (0, 0))
-            pygame.draw.rect(screen, PANEL_BG, panel_rect)
-            pygame.draw.line(screen, CARD_BORDER,
-                             (panel_rect.x, 0), (panel_rect.x, panel_rect.height), 2)
+        window = Window("つぎの指示", size=size, position=position)
+        renderer = Renderer(window)
+        canvas = pygame.Surface(size)
+        clock = pygame.time.Clock()
+        self._started = pygame.time.get_ticks() / 1000.0
+        self._mouse = (-1, -1)
+        try:
+            window.focus()
+        except Exception:
+            pass
 
-            _draw_radial_timer(
-                screen,
-                (panel_rect.right - 16 - TIMER_RADIUS, 16 + TIMER_RADIUS),
-                remaining, COUNTDOWN_SECONDS,
-            )
+        try:
+            while True:
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        return None
+                    if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                        return None
+                    if event.type == pygame.WINDOWCLOSE and self._is_panel_event(event, window):
+                        return None
+                    if event.type == pygame.MOUSEMOTION and self._is_panel_event(event, window):
+                        self._mouse = event.pos
+                    if (event.type == pygame.MOUSEBUTTONDOWN and event.button == 1
+                            and self._is_panel_event(event, window)):
+                        for rect, choice in self.card_rects:
+                            if rect.collidepoint(event.pos):
+                                return choice
 
-            screen.blit(heading_font.render("つぎの指示を", True, TEXT_MAIN),
-                        (panel_rect.x + 16, 22))
-            screen.blit(heading_font.render("えらんでください", True, TEXT_MAIN),
-                        (panel_rect.x + 16, 44))
+                self.render(canvas)
+                texture = Texture.from_surface(renderer, canvas)
+                renderer.clear()
+                texture.draw()
+                renderer.present()
+                clock.tick(30)
+        finally:
+            try:
+                window.destroy()
+            except Exception:
+                pass
 
-            strip = pygame.Rect(panel_rect.x + 16, 16 + TIMER_RADIUS * 2 + 12,
-                                panel_rect.width - 32, 46)
-            self._draw_env_strip(screen, strip)
+    @staticmethod
+    def _is_panel_event(event, window):
+        """このパネルのウィンドウで起きたイベントか(判別できなければ受け入れる)。"""
+        ev_window = getattr(event, 'window', None)
+        if ev_window is None:
+            return True
+        try:
+            return ev_window.id == window.id
+        except Exception:
+            return True
 
-            self._draw_cards(screen, strip.bottom + 14, panel_rect, mouse_pos)
-
-            screen.blit(hint_font.render("クリックで選択 / Esc でキャンセル", True, TEXT_SUB),
-                        (panel_rect.x + 16, panel_rect.bottom - 22))
-
-            pygame.display.flip()
-            clock.tick(30)
