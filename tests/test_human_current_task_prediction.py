@@ -62,6 +62,39 @@ class HumanCurrentTaskPredictionTests(unittest.TestCase):
         # 人間の実座標が使われていること(AI の座標ではない)
         self.assertEqual(calls, [((5, 5), 1)])
 
+    def test_prediction_is_sticky_while_task_remains(self):
+        """一度推測したタスクは、残タスクにある限り毎回変えない。
+
+        位置ベースの推測は人間が歩くたびに結果が変わる。毎回変えると
+        人間スロットに固定するタスクが入れ替わり、CSPの解ごとAIの計画が
+        組み替わって、まな板に置いた直後に別タスクへ飛ばされる等の
+        不安定な動きを招く。
+        """
+        tasks = make_tasks()
+        calls = []
+
+        def fake_greedy(env, tasks_, human_start_pos, limit=None):
+            calls.append(human_start_pos)
+            return [{'id': tasks_[0]['id'], 'start': 0, 'end': 5, 'task': tasks_[0]}]
+
+        self.agent._predict_human_greedy_tasks = fake_greedy
+        first = self.agent._predict_human_current_task(make_env(None), tasks, (5, 5))
+        # 人間が移動しても推測は変わらない
+        second = self.agent._predict_human_current_task(make_env(None), tasks, (1, 1))
+        self.assertEqual(first['id'], second['id'])
+        self.assertEqual(len(calls), 1, "2回目は貪欲予測を呼び直さない")
+
+    def test_prediction_updates_when_task_disappears(self):
+        """推測したタスクが残タスクから消えたら、改めて推測し直す。"""
+        tasks = make_tasks()
+        self.agent._predict_human_greedy_tasks = (
+            lambda env, t, human_start_pos, limit=None:
+            [{'id': t[0]['id'], 'start': 0, 'end': 5, 'task': t[0]}])
+        first = self.agent._predict_human_current_task(make_env(None), tasks, (5, 5))
+        remaining = [t for t in tasks if t['id'] != first['id']]
+        again = self.agent._predict_human_current_task(make_env(None), remaining, (5, 5))
+        self.assertNotEqual(again['id'], first['id'])
+
     def test_no_tasks_returns_none(self):
         self.assertIsNone(self.agent._predict_human_current_task(make_env('FreshOnion'), [], (5, 5)))
 

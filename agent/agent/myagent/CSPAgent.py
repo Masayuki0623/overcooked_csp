@@ -90,6 +90,8 @@ class CSPAgent:
         # 最初のタスクとして強制割り当てするか。
         self.use_predicted_human_model = True
         self.predicted_human_tasks = []
+        # 直近に推測した人間のタスク(毎フレーム変わらないよう保持する)
+        self._predicted_human_task_id = None
         self.human_counterpart_mode = False
         # CSP が実際に操作するプレイヤー番号 (0 or 1)。
         # sc_2agent=True かつ human_counterpart_mode=True のとき有効。
@@ -1961,8 +1963,20 @@ class CSPAgent:
                 if task.get('verb') != 'chop':
                     continue
                 if self._normalize_ingredient_name(str(task.get('obj', ''))) in held:
+                    self._predicted_human_task_id = task['id']
                     self._emit_counter_debug(
                         f"[HumanModel] 持ち物から推測: {task['id']} (holding={holding_name})")
+                    return task
+
+        # 位置ベースの推測は人間が歩き回るたびに結果が変わる。毎回変えると、
+        # そのつど「人間スロットに固定するタスク」が入れ替わって CSP の解が変わり、
+        # AI の計画まで組み替わってしまう(まな板に食材を置いた直後に別タスクへ
+        # 飛ばされ、置き場で置く/拾うを繰り返す等)。
+        # 一度推測したタスクは、それが残タスクから消えるまで維持する。
+        previous_id = getattr(self, '_predicted_human_task_id', None)
+        if previous_id is not None:
+            for task in tasks:
+                if task['id'] == previous_id:
                     return task
 
         predicted = self._predict_human_greedy_tasks(
@@ -1970,9 +1984,11 @@ class CSPAgent:
         )
         if predicted:
             task = predicted[0]['task']
+            self._predicted_human_task_id = task['id']
             self._emit_counter_debug(
                 f"[HumanModel] 位置から推測: {task['id']} (human_pos={human_pos})")
             return task
+        self._predicted_human_task_id = None
         return None
 
     def _predict_human_greedy_tasks(self, env, tasks, human_start_pos, limit=None):
