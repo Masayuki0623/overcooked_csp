@@ -182,6 +182,9 @@ def run_one_trial(trial_idx, duration_seconds, seed=None):
     # 詳細トレースは既定 OFF(常時ONだと出力だけで判断1回が数百msかかる)。
     # DETECT_DEBUG=1 のときだけ、実アプリの --debug と同じように有効化する。
     csp_agent.debug_counter_trace = debug_mode
+    # DETECT_NO_HUMAN_MODEL=1 で人間タスクの推測を切る(A/B比較用)
+    if os.environ.get('DETECT_NO_HUMAN_MODEL') == '1':
+        csp_agent.use_predicted_human_model = False
     for task_agent in list(getattr(csp_agent, 'task_agents', {}).values()):
         task_agent.debug_trace = debug_mode
     game.ai = csp_agent

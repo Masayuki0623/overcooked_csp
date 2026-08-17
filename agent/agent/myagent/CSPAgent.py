@@ -86,7 +86,9 @@ class CSPAgent:
         self.gui_constraint_input = ""
         # 適用する動的制約リスト (JSON format)
         self.active_constraints = []
-        self.use_predicted_human_model = False
+        # 人間が「いま手をつけているタスク」を推測し、それだけを人間スロットの
+        # 最初のタスクとして強制割り当てするか。
+        self.use_predicted_human_model = True
         self.predicted_human_tasks = []
         self.human_counterpart_mode = False
         # CSP が実際に操作するプレイヤー番号 (0 or 1)。
@@ -1511,10 +1513,24 @@ class CSPAgent:
                 sc = self.schedule_per_agent.get(agent_idx, [])
                 t_idx = self.current_task_idx[agent_idx]
                 if t_idx >= len(sc):
-                    actions[f"ai_{agent_idx}"] = (0, 0)
-                    reasons.append(f"AI{agent_idx}:Idle")
-                    continue
-                
+                    # 自分の担当が尽きたら、人間スロットに置いたタスクを引き受ける。
+                    # 人間がいま手をつけていると推測して人間スロットへ回したタスクは、
+                    # 推測が外れると誰も実行しない。AI が手待ちのまま止まるより、
+                    # 自分でやってしまう方が常に良い(人間が先にやれば、その結果が
+                    # 世界に現れて次の再スケジューリングでタスクから消える)。
+                    takeover = None
+                    if self.human_counterpart_mode:
+                        other_sc = self.schedule_per_agent.get(1 - agent_idx, [])
+                        takeover = other_sc[0] if other_sc else None
+                    if takeover is None:
+                        actions[f"ai_{agent_idx}"] = (0, 0)
+                        reasons.append(f"AI{agent_idx}:Idle")
+                        continue
+                    self._emit_counter_debug(
+                        f"[DEBUG] AI{agent_idx} 手待ちのため人間スロットのタスクを引き受け: {takeover['id']}")
+                    sc = [takeover]
+                    t_idx = 0
+
                 scheduled_task = sc[t_idx]
                 task = self._get_carry_override_task(env, agent_idx, scheduled_task)
                 scheduled_tid = scheduled_task['id']
@@ -1914,6 +1930,50 @@ class CSPAgent:
 
         total_cost = int(approach + task['dur'])
         return int(approach), total_cost
+
+    def _predict_human_current_task(self, env, tasks, human_pos):
+        """残りタスクの中から「人間がいま手をつけているタスク」を推測する。
+
+        持ち物は行動を最もよく表す手がかりなので先に見る。
+          * 未カットの食材を持っている -> その食材を切る作業の途中
+          * 刻んだ食材を持っている     -> その食材を置き場へ運んでいる途中
+        持ち物から分からなければ、既存の貪欲予測(人間は自分の位置から
+        一番早く終わるタスクを取る)を1件だけ使う。
+        """
+        if not tasks:
+            return None
+
+        human_idx = 1 - self.own_agent_idx
+        agents = getattr(env, 'agents', None) or getattr(env, 'sim_agents', []) or []
+        holding_name = None
+        if human_idx < len(agents):
+            holding = getattr(agents[human_idx], 'holding', None)
+            holding_name = getattr(holding, 'full_name', None) if holding is not None else None
+
+        if holding_name:
+            held = set()
+            for part in re.split(r'[-_/]+', str(holding_name)):
+                normalized = self._normalize_ingredient_name(part)
+                if normalized:
+                    held.add(normalized)
+            # 持っている食材に対応する chop タスクがあれば、それに手をつけているとみなす
+            for task in tasks:
+                if task.get('verb') != 'chop':
+                    continue
+                if self._normalize_ingredient_name(str(task.get('obj', ''))) in held:
+                    self._emit_counter_debug(
+                        f"[HumanModel] 持ち物から推測: {task['id']} (holding={holding_name})")
+                    return task
+
+        predicted = self._predict_human_greedy_tasks(
+            env, tasks, human_start_pos=human_pos, limit=1
+        )
+        if predicted:
+            task = predicted[0]['task']
+            self._emit_counter_debug(
+                f"[HumanModel] 位置から推測: {task['id']} (human_pos={human_pos})")
+            return task
+        return None
 
     def _predict_human_greedy_tasks(self, env, tasks, human_start_pos, limit=None):
         tasks_by_id = {task['id']: task for task in tasks}
@@ -3285,6 +3345,10 @@ class CSPAgent:
             agent_pos = (0, 0)
             agent1_pos = (0, 0)
 
+        # 人間の実座標は「いま何に手をつけているか」の推測にだけ使う。
+        # 距離行列には使わない(下のコメント参照)。
+        human_real_pos = agent1_pos if self.own_agent_idx == 0 else agent_pos
+
         if self.human_counterpart_mode:
             # human_counterpart_mode では「もう一方」は実際には CSP が指示できない人間で、
             # その計画(schedule_per_agent の反対側)は実行されない仮想的な what-if に過ぎない。
@@ -3302,27 +3366,6 @@ class CSPAgent:
         # リソース位置の特定と固定 (Fixed Position)
         resources = self._get_resources(env)
         self._annotate_task_geometry(env, tasks, agent_pos)
-
-        predicted_human_windows = {}
-        predicted_human_task_ids = set()
-        if self.sc_2agent and self.use_predicted_human_model:
-            self.predicted_human_tasks = self._predict_human_greedy_tasks(
-                env,
-                tasks,
-                human_start_pos=agent_pos,
-                limit=1,
-            )
-            predicted_human_windows = {
-                entry['id']: (entry['start'], entry['end'])
-                for entry in self.predicted_human_tasks
-            }
-            predicted_human_task_ids = set(predicted_human_windows)
-            if self.predicted_human_tasks:
-                first_task = self.predicted_human_tasks[0]
-                self._emit_counter_debug(
-                    f"[HumanModel] 予測人間タスク: {first_task['id']} "
-                    f"start={first_task['start']} end={first_task['end']}"
-                )
 
         # 2. 距離行列の作成 (A* distance)
         node_num = num_tasks + 2 if self.sc_2agent else num_tasks + 1
@@ -3395,10 +3438,6 @@ class CSPAgent:
             ends[i] = e_var
             intervals[i] = interval
 
-            if t['id'] in predicted_human_windows:
-                fixed_start, fixed_end = predicted_human_windows[t['id']]
-                model.Add(s_var == fixed_start)
-                model.Add(e_var == fixed_end)
         
         # Startノード用のダミー変数（Circuit用）
         starts[start_node] = model.NewIntVar(0, 0, 'start_dummy')
@@ -3417,39 +3456,39 @@ class CSPAgent:
         switch_penalty_terms = []  # 前回と担当エージェントが変わるタスクへの弱いペナルティ
 
         if self.sc_2agent:
-            if predicted_human_task_ids:
-                is_a1 = [None] * num_tasks
-                ai_indices = []
-                for i in range(num_tasks):
-                    if tasks[i]['id'] in predicted_human_task_ids:
-                        continue
-                    ai_indices.append(i)
-                    dist_from_a1 = int(dist_matrix.get((agent1_start_node, i), 0))
-                    model.Add(starts[i] >= dist_from_a1)
-
-                for idx_i, i in enumerate(ai_indices):
-                    for j in ai_indices[idx_i + 1:]:
-                        order_ij = model.NewBoolVar(f'order_{i}_{j}')
-                        dij = int(dist_matrix.get((i, j), 0))
-                        dji = int(dist_matrix.get((j, i), 0))
-                        model.Add(starts[j] >= ends[i] + dij).OnlyEnforceIf(order_ij)
-                        model.Add(starts[i] >= ends[j] + dji).OnlyEnforceIf(order_ij.Not())
-            else:
+            if True:  # 2エージェント割り当て(人間スロットは推測タスク1件のみ)
                 # is_a1[i]: True = タスクiをAI1が担当、False = AI0が担当
                 is_a1 = [model.NewBoolVar(f'is_a1_{i}') for i in range(num_tasks)]
 
                 if self.human_counterpart_mode:
-                    # human_counterpart_mode では「もう一方」は CSP が指示できない人間で、
-                    # そのスロットに割り当てたタスクは誰も実行しない。にもかかわらず
+                    # human_counterpart_mode では「もう一方」は CSP が指示できない人間。
                     # 半分を相手に任せる前提で組むと、AI は自分の担当外のタスクの完了を
                     # 永久に待ち続けて停止する(例: serve が人間スロットに入ると鍋が
                     # 空かず、食材を全部持ったまま「鍋が空くまで待機」で固まる)。
-                    # AI が単独で全部こなす前提で組む。人間が実際にやってくれた分は、
-                    # その結果が世界に存在するため次回の再スケジューリングで
-                    # タスク一覧から自然に消える。
+                    #
+                    # そこで人間スロットに置くのは「いま人間が手をつけていると推測した
+                    # 1つだけ」に限り、残りは全部 AI が単独でこなす前提で組む。
+                    # 人間スロットのタスクはそれ1つなので、必然的に人間の最初のタスクになる。
+                    # 推測が外れても、人間が実際にやった分は世界の状態に現れて次回の
+                    # 再スケジューリングでタスク一覧から消えるため自動的に補正される。
                     own_is_a1 = 1 if self.own_agent_idx == 1 else 0
+                    human_is_a1 = 1 - own_is_a1
+                    human_task = (
+                        self._predict_human_current_task(env, tasks, human_real_pos)
+                        if self.use_predicted_human_model else None
+                    )
+                    human_task_idx = None
+                    if human_task is not None:
+                        for i in range(num_tasks):
+                            if tasks[i]['id'] == human_task['id']:
+                                human_task_idx = i
+                                break
                     for i in range(num_tasks):
-                        model.Add(is_a1[i] == own_is_a1)
+                        model.Add(is_a1[i] == (human_is_a1 if i == human_task_idx else own_is_a1))
+                    self.predicted_human_tasks = (
+                        [{'id': human_task['id'], 'task': human_task}]
+                        if human_task_idx is not None else []
+                    )
 
 
                 # エージェント出発位置からの最低到達時間
@@ -3698,10 +3737,7 @@ class CSPAgent:
                 schedule_per_agent = {0: [], 1: []}
                 for i in range(num_tasks):
                     t = tasks[i]
-                    if predicted_human_task_ids:
-                        agent_idx = 0 if t['id'] in predicted_human_task_ids else 1
-                    else:
-                        agent_idx = 1 if solver.Value(is_a1[i]) else 0
+                    agent_idx = 1 if solver.Value(is_a1[i]) else 0
                     schedule_per_agent[agent_idx].append({
                         'id': t['id'],
                         'start': solver.Value(starts[i]),
