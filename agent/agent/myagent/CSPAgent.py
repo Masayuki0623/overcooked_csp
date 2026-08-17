@@ -23,11 +23,46 @@ class VirtualHumanState:
 HUMAN_PREDICTION_COST_MARGIN = 15   # フレーム (10fps で 1.5 秒相当)
 HUMAN_PREDICTION_CONFIRM_FRAMES = 3
 
+# 料理名(タスクの obj)の接尾辞。
+# スープは「刻む → 鍋で調理 → 皿に移して提供」だが、サラダは鍋を使わず
+# 「刻む → 皿に乗せて提供」で完成する。両者を同じ obj 文字列で扱うと
+# サラダにも cook タスクが生成されてしまう(XYSalad が XYSoup として
+# 提供される不具合の原因)ため、料理の種類を接尾辞で区別する。
+SOUP_SUFFIX = ' soup'
+SALAD_SUFFIX = ' salad'
+DISH_SUFFIXES = (SOUP_SUFFIX, SALAD_SUFFIX)
+
+
+def strip_dish_suffix(name):
+    """'onion-tomato soup' / 'onion-tomato salad' → 'onion-tomato'"""
+    text = str(name)
+    for suffix in DISH_SUFFIXES:
+        if text.endswith(suffix):
+            return text[:-len(suffix)]
+    return text
+
+
+def is_salad_dish(name):
+    return str(name).endswith(SALAD_SUFFIX)
+
+
+def dish_ingredients(name):
+    """料理名から材料名のリストを取り出す。"""
+    return [part.strip() for part in strip_dish_suffix(name).split('-') if part.strip()]
+
 
 class CSPAgent:
     """
     CSP(制約充足問題)ベースのエージェント
     """
+
+    # 「提供」系の動詞。
+    #   serve       : 鍋の調理済み料理を皿に移して提供する(スープ)
+    #   serve_salad : 刻んだ食材をそのまま皿に乗せて提供する(サラダ、鍋を使わない)
+    SERVE_VERBS = ('serve', 'serve_salad')
+    # 同一注文内の実行順序。serve と serve_salad は同じ「最後の工程」。
+    VERB_PRIORITY = {'chop': 0, 'cook': 1, 'serve': 2, 'serve_salad': 2}
+
     def __init__(self, speed=2.5, replay=None, no_reschedule=False, sc_2agent=False, deadline_seconds: float | None = None, skip_budget: int | None = None):
         self.speed = speed
         self.replay = replay
@@ -161,14 +196,14 @@ class CSPAgent:
     def _find_order_recipe_for_partial(self, env, held_parts):
         """持っている組み合わせが、どの注文の作りかけかを探す。
 
-        戻り値は (完成レシピの材料リスト, その注文の置き場) 。
+        戻り値は (完成レシピの材料リスト, その注文の置き場, サラダか) 。
         完全一致する注文があればそれを優先し、無ければ held_parts を
         真に含む注文(まだ材料が足りない作りかけ)を返す。
-        どれにも当てはまらなければ (None, None)。
+        どれにも当てはまらなければ (None, None, False)。
         """
         held = set(held_parts)
         if not held:
-            return None, None
+            return None, None, False
 
         current_orders = []
         if hasattr(env, 'order') and hasattr(env.order, 'current_orders'):
@@ -186,21 +221,33 @@ class CSPAgent:
             ings = [ing for ing in ('lettuce', 'onion', 'tomato') if ing in name]
             if not ings:
                 continue
+            is_salad = self._goal_name_is_salad(name)
             ing_set = set(ings)
             counter = None
             uid = uid_by_idx.get(order_idx)
             if uid is not None:
                 counter = self._get_assigned_counter(uid)
             if ing_set == held:
-                return sorted(ings), counter
+                return sorted(ings), counter, is_salad
             if held < ing_set:
-                supersets.append((len(ing_set), sorted(ings), counter))
+                supersets.append((len(ing_set), sorted(ings), counter, is_salad))
 
         if supersets:
             # 一番少ない材料で済む注文(=完成が近い)を選ぶ
             supersets.sort(key=lambda e: e[0])
-            return supersets[0][1], supersets[0][2]
-        return None, None
+            return supersets[0][1], supersets[0][2], supersets[0][3]
+        return None, None, False
+
+    @staticmethod
+    def _goal_name_is_salad(goal_full_name):
+        """注文ゴールの full_name からサラダかスープかを判定する。
+
+        レシピ定義上、サラダは材料が Chopped(state_index=2)、スープは
+        Cooked(state_index=4) で登録される。したがってゴール名は
+        'ChoppedOnion-ChoppedTomato-Plate' か 'CookedTomato-Plate' となり、
+        'cooked' を含むかどうかで確実に区別できる。
+        """
+        return 'cooked' not in str(goal_full_name).lower()
 
     def _extract_instruction_action(self, pending):
         """指示から (動詞, 対象) を取り出す。注文番号は持たない。"""
@@ -313,7 +360,7 @@ class CSPAgent:
         dep_indices = set()
         target = tasks[matched_idx]
         target_order = target.get('order')
-        verb_priority = {'chop': 0, 'cook': 1, 'serve': 2}
+        verb_priority = self.VERB_PRIORITY
         target_prio = verb_priority.get(target.get('verb', ''), 9)
         for j, t in enumerate(tasks):
             if j == matched_idx:
@@ -478,7 +525,7 @@ class CSPAgent:
                 continue
 
             # 依存タスク(同じ注文で動詞優先度が低い)はカウントしない
-            verb_prio = {'chop': 0, 'cook': 1, 'serve': 2}
+            verb_prio = self.VERB_PRIORITY
             if (len(completed_tid) >= 3 and len(target_tid) >= 3 and
                     completed_tid[2] == target_tid[2] and
                     verb_prio.get(completed_tid[0], 9) < verb_prio.get(target_tid[0], 9)):
@@ -704,8 +751,8 @@ class CSPAgent:
                 if chopped_name in holding_name and task['id'] in removed:
                     return True
 
-            if verb == 'cook':
-                recipe_ings = obj.replace(' soup', '').split('-')
+            if verb in ('cook', 'serve_salad'):
+                recipe_ings = dish_ingredients(obj)
                 if any(f"Chopped{ing.capitalize()}" in holding_name for ing in recipe_ings):
                     if any(tid[0] == 'chop' and tid[2] == order_uid for tid in added):
                         return True
@@ -848,15 +895,16 @@ class CSPAgent:
         for order in current_orders:
             order_uid = order['order']
             order_name = order['name']
-            if ' soup' not in order_name: continue
-            
-            raw_parts = order_name.replace(' soup', '').split('-')
+            is_salad = is_salad_dish(order_name)
+            if not is_salad and SOUP_SUFFIX not in order_name: continue
+
+            raw_parts = dish_ingredients(order_name)
             req_set = set(raw_parts)
-            
+
             needs_chop = list(raw_parts)
-            needs_cook = True
+            needs_cook = not is_salad
             needs_serve = True
-            
+
             # 1. 皿にある完成品
             plate_match = None
             for p in inv_plates_ings:
@@ -867,8 +915,10 @@ class CSPAgent:
                 inv_plates_ings.remove(plate_match)
                 needs_chop = []
                 needs_cook = False
-            else:
-                # 2. 鍋にあるか？
+            elif not is_salad:
+                # 2. 鍋にあるか？(サラダは鍋を使わないので見ない。
+                #    人間が誤って鍋へ入れた分を「調理済み」と数えると、
+                #    サラダの chop タスクが消えて完成できなくなる)
                 pot_match = None
                 for pot_s in inv_pots_ings:
                     if pot_s == req_set:
@@ -884,7 +934,7 @@ class CSPAgent:
                     for ing in pot_match:
                         if ing in needs_chop:
                             needs_chop.remove(ing)
-            
+
             # 3. chop済み確認
             final_needs_chop = []
             for ing in needs_chop:
@@ -892,18 +942,19 @@ class CSPAgent:
                     inv_chopped.remove(ing)
                 else:
                     final_needs_chop.append(ing)
-                    
+
             # tids構築
             for ing in final_needs_chop:
                 raw_ing = ing.replace('Chopped', '').lower()
                 remaining_tids.add(('chop', raw_ing, order_uid))
-                
-            soup_name = "-".join([i.replace('Chopped', '').lower() for i in raw_parts]) + " soup"
+
+            base_name = "-".join([i.replace('Chopped', '').lower() for i in raw_parts])
+            dish_name = base_name + (SALAD_SUFFIX if is_salad else SOUP_SUFFIX)
             if needs_cook:
-                remaining_tids.add(('cook', soup_name, order_uid))
+                remaining_tids.add(('cook', dish_name, order_uid))
             if needs_serve:
-                remaining_tids.add(('serve', soup_name, order_uid))
-                
+                remaining_tids.add(('serve_salad' if is_salad else 'serve', dish_name, order_uid))
+
         return remaining_tids
 
     def _make_fixed_task_id(self, verb, obj, order_uid):
@@ -920,7 +971,7 @@ class CSPAgent:
         current_orders = self._build_order_tasks(env)
         remaining_tids = self.get_remaining_tids(env, current_orders)
 
-        verb_priority = {'chop': 0, 'cook': 1, 'serve': 2}
+        verb_priority = self.VERB_PRIORITY
         sorted_tids = sorted(
             remaining_tids,
             key=lambda tid: (verb_priority.get(tid[0], 9), tid[1], tid[2])
@@ -985,8 +1036,8 @@ class CSPAgent:
                 chopped_name = f"Chopped{obj.capitalize()}"
                 if chopped_name in holding_name:
                     current_task_ids.add(task_id)
-            elif verb == 'cook':
-                for ing in obj.replace(' soup', '').split('-'):
+            elif verb in ('cook', 'serve_salad'):
+                for ing in dish_ingredients(obj):
                     chopped_name = f"Chopped{ing.capitalize()}"
                     if chopped_name in holding_name:
                         current_task_ids.discard(('chop', ing, order_uid))
@@ -1054,7 +1105,20 @@ class CSPAgent:
             if cooked_parts:
                 cooked_parts.sort()
                 return {
-                    'id': ('serve', f"{'-'.join(cooked_parts)} soup", -1),
+                    'id': ('serve', f"{'-'.join(cooked_parts)}{SOUP_SUFFIX}", -1),
+                    'res': ('delivery', None),
+                }
+
+        # 皿の上に刻んだ食材が乗っている = サラダの完成品。あとは提供口へ運ぶだけ。
+        if 'Plate' in holding_name and 'Chopped' in holding_name:
+            chopped_parts = []
+            for part in holding_name.split('-'):
+                if part.startswith('Chopped'):
+                    chopped_parts.append(part.replace('Chopped', '').lower())
+            if chopped_parts:
+                chopped_parts.sort()
+                return {
+                    'id': ('serve_salad', f"{'-'.join(chopped_parts)}{SALAD_SUFFIX}", -1),
                     'res': ('delivery', None),
                 }
 
@@ -1079,15 +1143,15 @@ class CSPAgent:
             if carried_ing is None or not holding_name.startswith('Chopped') or task is None:
                 return False
             verb, obj, _ = task['id']
-            if verb != 'cook':
+            if verb not in ('cook', 'serve_salad'):
                 return False
-            needed_parts = obj.replace(' soup', '').split('-')
+            needed_parts = dish_ingredients(obj)
             return carried_ing in needed_parts
 
         if scheduled_task:
             verb, obj, _ = scheduled_task['id']
-            if verb == 'cook' and chopped_combo_parts:
-                scheduled_parts = sorted(obj.replace(' soup', '').split('-'))
+            if verb in ('cook', 'serve_salad') and chopped_combo_parts:
+                scheduled_parts = sorted(dish_ingredients(obj))
                 if scheduled_parts == chopped_combo_parts:
                     if self.sc_2agent:
                         self.carry_task_by_agent[agent_idx] = deepcopy(scheduled_task)
@@ -1111,14 +1175,19 @@ class CSPAgent:
 
         if carry_task:
             verb, obj, _ = carry_task['id']
-            if verb == 'cook' and chopped_combo_parts:
-                carry_parts = sorted(obj.replace(' soup', '').split('-'))
+            if verb in ('cook', 'serve_salad') and chopped_combo_parts:
+                carry_parts = sorted(dish_ingredients(obj))
                 if carry_parts == chopped_combo_parts:
                     return deepcopy(carry_task)
             if matches_single_chopped(carry_task):
                 return deepcopy(carry_task)
             food_names = (f"Fresh{obj.capitalize()}", f"Chopped{obj.capitalize()}")
-            if verb == 'chop' and any(food_name in holding_name for food_name in food_names):
+            # 複数の食材がマージ済みのものを持っているときは、単品の chop タスクでは
+            # 扱えない(process_chop_task は「1食材を切って置く」しかできず、
+            # 置き場が決まっていないと永久に待機する)。この場合は下の
+            # chopped_combo_parts の処理に任せて、注文に対応した cook / serve_salad
+            # タスクへ読み替える。
+            if verb == 'chop' and not chopped_combo_parts and any(food_name in holding_name for food_name in food_names):
                 return deepcopy(carry_task)
 
         if chopped_combo_parts:
@@ -1135,7 +1204,7 @@ class CSPAgent:
             # まだ材料が足りない注文の一部なら、その注文の完成レシピを目標にする。
             # process_cook_task 側は「一部しか持っていない」と判断して、
             # 残りが集まる置き場へマージしに行く。
-            recipe_parts, recipe_counter = self._find_order_recipe_for_partial(
+            recipe_parts, recipe_counter, recipe_is_salad = self._find_order_recipe_for_partial(
                 env, chopped_combo_parts
             )
             if recipe_parts is None:
@@ -1143,8 +1212,18 @@ class CSPAgent:
             elif recipe_counter is not None:
                 assigned_counter = recipe_counter
 
+            # サラダ注文の作りかけなら、鍋ではなく皿へ運ぶタスクとして扱う。
+            # ここで cook を返すと、刻んだ食材がそのまま鍋に入れられて
+            # サラダがスープとして提供されてしまう。
+            if recipe_is_salad:
+                return {
+                    'id': ('serve_salad', f"{'-'.join(recipe_parts)}{SALAD_SUFFIX}", -1),
+                    'res': ('delivery', None),
+                    'assigned_counter': assigned_counter,
+                }
+
             return {
-                'id': ('cook', f"{'-'.join(recipe_parts)} soup", -1),
+                'id': ('cook', f"{'-'.join(recipe_parts)}{SOUP_SUFFIX}", -1),
                 'res': ('pot', None),
                 'assigned_counter': assigned_counter,
             }
@@ -1177,10 +1256,10 @@ class CSPAgent:
 
         return scheduled_task
 
-    def _recipe_ingredient_set(self, soup_name):
+    def _recipe_ingredient_set(self, dish_name):
         return {
             self._normalize_ingredient_name(part)
-            for part in str(soup_name).replace(' soup', '').split('-')
+            for part in dish_ingredients(dish_name)
             if self._normalize_ingredient_name(part)
         }
 
@@ -1442,11 +1521,21 @@ class CSPAgent:
         # ====== スケジュール実行 ======
         if not self.sc_2agent:
             # 単一エージェントモード
-            if not hasattr(self, 'schedule') or not self.schedule or self.current_task_idx >= len(self.schedule):
-                return (0, 0), "タスクなし"
+            schedule = getattr(self, 'schedule', None) or []
+            task_idx = self.current_task_idx
+            if task_idx >= len(schedule):
+                # 担当が尽きていても、持ち物から継続すべき作業が決まることがある
+                # (2エージェントモード側の同じ分岐のコメントを参照)。
+                # self.current_task_idx は進めない(進めると次フレームで
+                # 本来のスケジュールを先頭からやり直してしまう)。
+                fallback_task = self._get_carry_override_task(env, 0, None)
+                if fallback_task is None:
+                    return (0, 0), "タスクなし"
+                schedule = [fallback_task]
+                task_idx = 0
 
             preempted_this_frame = bool(getattr(self, '_just_preempted', False))
-            scheduled_task = self.schedule[self.current_task_idx]
+            scheduled_task = schedule[task_idx]
             task = self._get_carry_override_task(env, 0, scheduled_task)
             scheduled_tid = scheduled_task['id']
             tid = task['id']
@@ -1459,15 +1548,22 @@ class CSPAgent:
                 if getattr(self.task_agent, 'assigned_task_id', None) != tid or getattr(self.task_agent, 'assigned_counter', None) is None:
                     self.task_agent.assigned_counter = task.get('assigned_counter')
             elif verb == 'cook':
-                parts = obj.replace(' soup', '').split('-')
+                parts = dish_ingredients(obj)
                 task_name = f"cook_{'_'.join(parts)}"
                 if getattr(self.task_agent, 'assigned_task_id', None) != tid or getattr(self.task_agent, 'assigned_counter', None) is None:
                     self.task_agent.assigned_counter = task.get('assigned_counter')
+            elif verb == 'serve_salad':
+                # サラダは置き場に集めた刻んだ食材を取りに行くので、
+                # serve と違って assigned_counter を保持する。
+                parts = dish_ingredients(obj)
+                task_name = f"serve_salad_{'_'.join(parts)}"
+                if getattr(self.task_agent, 'assigned_task_id', None) != tid or getattr(self.task_agent, 'assigned_counter', None) is None:
+                    self.task_agent.assigned_counter = task.get('assigned_counter')
             elif verb == 'serve':
-                parts = obj.replace(' soup', '').split('-')
+                parts = dish_ingredients(obj)
                 task_name = f"serve_{'_'.join(parts)}"
                 self.task_agent.assigned_counter = None
-            
+
             if task_name:
                 self.task_agent.task_name = task_name
                 self.task_agent.assigned_task_id = tid
@@ -1490,7 +1586,7 @@ class CSPAgent:
                 # イベント(event_history の Put_/Deliver_)に基づく既存の再スケジュール検知に任せ、
                 # ここでは先走って completed_task_ids やタスク進行を進めない。
                 reason_is_done = "Done" in reason or "done" in reason or "完了" in reason
-                if reason_is_done and verb not in ('chop', 'serve'):
+                if reason_is_done and verb not in ('chop',) + self.SERVE_VERBS:
                     self._emit_counter_debug(f"[CSPAgent] タスク {task_name} 完了。次へ移動。")
                     self.completed_task_ids.add(tid)
                     self._update_skip_budget_on_completion(tid, 0, scheduled_task.get('dur', 0))
@@ -1535,16 +1631,29 @@ class CSPAgent:
                     # 推測が外れると誰も実行しない。AI が手待ちのまま止まるより、
                     # 自分でやってしまう方が常に良い(人間が先にやれば、その結果が
                     # 世界に現れて次の再スケジューリングでタスクから消える)。
-                    takeover = None
-                    if self.human_counterpart_mode:
+                    # 担当が尽きていても、手に持っているものから「やるべきこと」が
+                    # 決まる場合がある(例: 材料を全部集め終えて手に持っているが、
+                    # その注文の提供タスクは相手側に割り当てられている)。
+                    # そのまま Idle にすると、持ち物を抱えたまま止まり、相手も
+                    # その食材を見つけられずに双方が固まる。
+                    takeover = self._get_carry_override_task(env, agent_idx, None)
+                    if takeover is not None:
+                        self._emit_counter_debug(
+                            f"[DEBUG] AI{agent_idx} 担当が尽きたが持ち物から継続: {takeover['id']}")
+                    if takeover is None and self.human_counterpart_mode:
+                        # 人間がいま手をつけていると推測して人間スロットへ回したタスクは、
+                        # 推測が外れると誰も実行しない。AI が手待ちのまま止まるより、
+                        # 自分でやってしまう方が常に良い(人間が先にやれば、その結果が
+                        # 世界に現れて次の再スケジューリングでタスクから消える)。
                         other_sc = self.schedule_per_agent.get(1 - agent_idx, [])
                         takeover = other_sc[0] if other_sc else None
+                        if takeover is not None:
+                            self._emit_counter_debug(
+                                f"[DEBUG] AI{agent_idx} 手待ちのため人間スロットのタスクを引き受け: {takeover['id']}")
                     if takeover is None:
                         actions[f"ai_{agent_idx}"] = (0, 0)
                         reasons.append(f"AI{agent_idx}:Idle")
                         continue
-                    self._emit_counter_debug(
-                        f"[DEBUG] AI{agent_idx} 手待ちのため人間スロットのタスクを引き受け: {takeover['id']}")
                     sc = [takeover]
                     t_idx = 0
 
@@ -1588,16 +1697,21 @@ class CSPAgent:
                     ingredient_ready = self._cook_dependency_ready_from_world(env, obj)
                     if not ingredient_ready:
                         can_start = False
+                elif verb == 'serve_salad':
+                    # サラダは鍋を経由せず刻んだ食材をそのまま皿に乗せるので、
+                    # 前提は cook と同じ「刻んだ食材が世界にあるか」。
+                    if not self._salad_dependency_ready_from_world(env, obj):
+                        can_start = False
                 elif verb == 'serve':
                     # serve は皿の先取りができるので、cook 完了前でも TaskAgent に進める。
                     # 鍋前待機や実際の取得タイミングは process_serve_task 側で判定する。
                     can_start = True
-                        
+
                 if not can_start:
                     missing_deps = []
-                    if verb == 'cook':
-                        parts = obj.replace(' soup', '').split('-')
-                        missing_deps = [('chop', p.strip(), order_uid) for p in parts if ('chop', p.strip(), order_uid) not in self.completed_task_ids]
+                    if verb in ('cook', 'serve_salad'):
+                        parts = dish_ingredients(obj)
+                        missing_deps = [('chop', p, order_uid) for p in parts if ('chop', p, order_uid) not in self.completed_task_ids]
                     elif verb == 'serve':
                         if ('cook', obj, order_uid) not in self.completed_task_ids:
                             missing_deps = [('cook', obj, order_uid)]
@@ -1658,10 +1772,13 @@ class CSPAgent:
                 if verb == 'chop':
                     task_name = f"chop_{obj}"
                 elif verb == 'cook':
-                    parts = obj.replace(' soup', '').split('-')
+                    parts = dish_ingredients(obj)
                     task_name = f"cook_{'_'.join(parts)}"
+                elif verb == 'serve_salad':
+                    parts = dish_ingredients(obj)
+                    task_name = f"serve_salad_{'_'.join(parts)}"
                 elif verb == 'serve':
-                    parts = obj.replace(' soup', '').split('-')
+                    parts = dish_ingredients(obj)
                     task_name = f"serve_{'_'.join(parts)}"
                 
 
@@ -1694,7 +1811,7 @@ class CSPAgent:
                     # 同じ分岐のコメントを参照。ここで先走って完了扱いにしないことで、
                     # 手放す前に次のタスクへ進み食材の置き場が付け替わってしまう不具合を防ぐ。
                     reason_is_done = reason.endswith("(Done)") or reason.endswith("(完了)")
-                    if reason_is_done and verb not in ('chop', 'serve'):
+                    if reason_is_done and verb not in ('chop',) + self.SERVE_VERBS:
                         self._emit_counter_debug(f"[CSPAgent] AI{agent_idx} タスク {task_name} 完了。")
                         self.completed_task_ids.add(tid)
                         self._update_skip_budget_on_completion(tid, agent_idx, scheduled_task.get('dur', 0))
@@ -1733,7 +1850,7 @@ class CSPAgent:
             model.add_bool_var(name)
             var_names.append(name)
             durations[name] = int(t['dur'])
-            benefits[name] = 100 if t['verb'] == 'serve' else 0
+            benefits[name] = 100 if t['verb'] in self.SERVE_VERBS else 0
 
         model.add_linear_le(durations, self.budget_frames)
 
@@ -1743,7 +1860,7 @@ class CSPAgent:
         for o in orders:
             chops = [t for t in o['tasks'] if t['verb'] == 'chop']
             cooks = [t for t in o['tasks'] if t['verb'] == 'cook']
-            serves = [t for t in o['tasks'] if t['verb'] == 'serve']
+            serves = [t for t in o['tasks'] if t['verb'] in self.SERVE_VERBS]
 
             if cooks:
                 c_name = name_by_task_id[id(cooks[0])]
@@ -1755,6 +1872,11 @@ class CSPAgent:
                 if cooks:
                     c_name = name_by_task_id[id(cooks[0])]
                     model.model.Add(model.vars[s_name] <= model.vars[c_name])
+                else:
+                    # サラダは cook が無いので、chop が全部選ばれていることを条件にする
+                    for ch in chops:
+                        ch_name = name_by_task_id[id(ch)]
+                        model.model.Add(model.vars[s_name] <= model.vars[ch_name])
 
         model.maximize_linear(benefits)
 
@@ -1895,7 +2017,7 @@ class CSPAgent:
             elif verb == 'cook':
                 pots = resources['pots']
                 pot = pots[order_idx % len(pots)] if pots else default_start_pos
-                needed_ings = obj.replace(' soup', '').split('-')
+                needed_ings = dish_ingredients(obj)
                 start_candidates = []
 
                 for pos, world_obj in env.pos_obj.items():
@@ -1915,6 +2037,30 @@ class CSPAgent:
                 t['end_pos'] = pot
                 t['fixed_res'] = ('pot', pot)
 
+            elif verb == 'serve_salad':
+                # サラダ: 刻んだ食材のある置き場 → 皿タイル → 提供口。鍋は使わない。
+                plate = resources['plate']
+                delivery = resources['delivery']
+                needed_ings = dish_ingredients(obj)
+
+                start_pos = t.get('assigned_counter')
+                if start_pos is None:
+                    start_candidates = []
+                    for pos, world_obj in env.pos_obj.items():
+                        if world_obj is None:
+                            continue
+                        base_name = chopped_base_name(world_obj)
+                        if base_name is not None and base_name.lower() in needed_ings:
+                            start_candidates.append(pos)
+                    if start_candidates:
+                        start_pos = self._nearest_by_path(env, default_start_pos, start_candidates) or get_nearest(default_start_pos, start_candidates)
+                    else:
+                        start_pos = plate
+
+                t['start_pos'] = start_pos
+                t['end_pos'] = delivery
+                t['fixed_res'] = ('delivery', delivery)
+
             elif verb == 'serve':
                 pots = resources['pots']
                 pot = pots[order_idx % len(pots)] if pots else default_start_pos
@@ -1929,8 +2075,8 @@ class CSPAgent:
         verb, obj, order_uid = task['id']
         if verb == 'chop':
             return True
-        if verb == 'cook':
-            needed_ings = obj.replace(' soup', '').split('-')
+        if verb in ('cook', 'serve_salad'):
+            needed_ings = dish_ingredients(obj)
             return all(('chop', ing, order_uid) not in remaining_task_ids for ing in needed_ings)
         if verb == 'serve':
             return ('cook', obj, order_uid) not in remaining_task_ids
@@ -1951,10 +2097,9 @@ class CSPAgent:
     def _ingredients_of_task_id(self, task_id):
         if not (isinstance(task_id, tuple) and len(task_id) >= 2):
             return set()
-        obj = str(task_id[1]).replace(' soup', '')
         return {
             self._normalize_ingredient_name(part)
-            for part in obj.split('-')
+            for part in dish_ingredients(task_id[1])
             if self._normalize_ingredient_name(part)
         }
 
@@ -2124,7 +2269,7 @@ class CSPAgent:
             remaining_task_ids={task['id'] for task in tasks},
         )
         predicted = []
-        verb_priority = {'chop': 0, 'cook': 1, 'serve': 2}
+        verb_priority = self.VERB_PRIORITY
 
         while state.remaining_task_ids:
             candidates = []
@@ -2270,7 +2415,7 @@ class CSPAgent:
             
             pot_pos = pot_pos_list[order_idx % len(pot_pos_list)]
 
-            needed_ings = obj.replace(' soup', '').split('-')
+            needed_ings = dish_ingredients(obj)
             start_candidates = []
 
             for pos, world_obj in env.pos_obj.items():
@@ -2291,17 +2436,46 @@ class CSPAgent:
             if d is None: return None
             return int(d + 2)
 
+        elif verb == 'serve_salad':
+            # サラダ: 置き場の刻んだ食材を取る → 皿タイルへ寄って皿に乗せる → 提供口。
+            plate_pos = resources['plate']
+            delivery_pos = resources['delivery']
+
+            needed_ings = dish_ingredients(obj)
+            start_pos = assigned_counter
+            if start_pos is None:
+                start_candidates = []
+                for pos, world_obj in env.pos_obj.items():
+                    if world_obj is None:
+                        continue
+                    base_name = chopped_base_name(world_obj)
+                    if base_name is not None and base_name.lower() in needed_ings:
+                        start_candidates.append(pos)
+                if start_candidates:
+                    start_pos = get_nearest(plate_pos, start_candidates)
+                else:
+                    counters = env.get_pos_by_obj_gs(gs="Counter")
+                    if not counters: return None
+                    start_pos = get_nearest(plate_pos, counters)
+
+            d1 = self.astar_distance(env, start_pos, plate_pos)
+            d2 = self.astar_distance(env, plate_pos, delivery_pos)
+
+            if d1 is None or d2 is None: return None
+            # 食材の取得 + 皿に乗せる + 提供 の3インタラクト分
+            return int(d1 + d2 + 3)
+
         elif verb == 'serve':
             plate_pos = resources['plate']
             pot_pos_list = resources['pots']
             delivery_pos = resources['delivery']
-            
+
             if not pot_pos_list: return None
             pot_pos = pot_pos_list[order_idx % len(pot_pos_list)]
-            
+
             d1 = self.astar_distance(env, plate_pos, pot_pos)
             d2 = self.astar_distance(env, pot_pos, delivery_pos)
-            
+
             if d1 is None or d2 is None: return None
             return int(d1 + d2 + 3)
         else:
@@ -2680,11 +2854,11 @@ class CSPAgent:
 
         return False
 
-    def _cook_dependency_ready_from_world(self, env, soup_name):
+    def _cook_dependency_ready_from_world(self, env, dish_name):
         """cook の前提となる具材が実世界に存在するなら true。任意の古い完了タスクより優先する。"""
-        if not soup_name:
+        if not dish_name:
             return False
-        parts = [p.strip() for p in soup_name.replace(' soup', '').split('-') if p.strip()]
+        parts = dish_ingredients(dish_name)
         if not parts:
             return True
         # cook が実際に消費できるのは Chopped 以降だけなので、Fresh は数えない。
@@ -2693,11 +2867,20 @@ class CSPAgent:
             for p in parts
         )
 
-    def _serve_dependency_ready_from_world(self, env, soup_name):
+    def _salad_dependency_ready_from_world(self, env, dish_name):
+        """serve_salad の前提となる「刻んだ食材」が実世界に存在するなら true。
+
+        サラダは鍋を使わないだけで、必要な食材が Chopped 以降であることは
+        cook と同じ。Fresh のまま置かれた食材で開始してしまうと、
+        TaskAgent が消費できず永久に待つのも同様なので判定を共有する。
+        """
+        return self._cook_dependency_ready_from_world(env, dish_name)
+
+    def _serve_dependency_ready_from_world(self, env, dish_name):
         """serve 直前の cook 依存は、実際の調理済み品があるかで判定する。"""
-        if not soup_name:
+        if not dish_name:
             return False
-        normalized = soup_name.replace(' soup', '').strip()
+        normalized = strip_dish_suffix(dish_name).strip()
         if not normalized:
             return False
         return self._owns_world_ingredient(env, normalized)
@@ -2907,6 +3090,9 @@ class CSPAgent:
         available_chopped = {}
         available_chopped_by_pos = {}
         pot_states = []
+        # 皿の上に食材が乗っている状態(サラダの完成品/作りかけ)。
+        # サラダは鍋を使わないので、pot_states の代わりにこれで進捗を見る。
+        plate_states = []
         held_object_ids = {
             id(getattr(agent, 'holding', None))
             for agent in getattr(env, 'agents', [])
@@ -3017,6 +3203,17 @@ class CSPAgent:
             if name.startswith('Chopped'):
                 base_name = name.replace('Chopped', '')
                 add_chopped(base_name)
+
+        def plated_food_names(item):
+            """皿の上に乗っている食材名(sorted)。皿でなければ、または空皿なら None。"""
+            contents = getattr(item, 'contents', [])
+            if not any(getattr(c, 'name', '') == 'Plate' for c in contents):
+                return None
+            foods = sorted(
+                c.name for c in contents
+                if getattr(c, 'name', '') and c.name != 'Plate'
+            )
+            return foods or None
 
         # この注文で「切らずに運ぶだけ」にできる食材 -> 運び元カウンター
         carry_sources = {}
@@ -3144,6 +3341,9 @@ class CSPAgent:
                     pot_states.append({'names': c_names, 'obj': obj, 'used': False})
                 else:
                     if obj.location not in cutboard_locs:
+                        plated_names = plated_food_names(obj)
+                        if plated_names is not None:
+                            plate_states.append({'names': plated_names, 'obj': obj, 'used': False})
                         register_chopped_item(obj, obj.location)
 
         resources = self._get_resources(env)
@@ -3170,8 +3370,13 @@ class CSPAgent:
             if not ings_lower:
                 continue
 
+            # サラダ(材料は Chopped のまま)かスープ(Cooked)か。
+            # ここを見ずにゴール名の材料だけを拾っていたため、サラダにも
+            # 無条件で cook タスクが作られ、スープとして提供されていた。
+            is_salad = self._goal_name_is_salad(name)
+
             order_uid = order_uids[order_idx]
-            self._emit_counter_debug(f"[StateCheck] order_slot={order_idx} order_uid={order_uid} recipe={name} ingredients={ings_lower}")
+            self._emit_counter_debug(f"[StateCheck] order_slot={order_idx} order_uid={order_uid} recipe={name} is_salad={is_salad} ingredients={ings_lower}")
             display_order = order_uid
             ings_cap = [ing.capitalize() for ing in ings_lower]
             self._emit_counter_debug(f"[StateCheck] counter_snapshot order_uid={order_uid} assigned_counter={self._get_assigned_counter(order_uid)}")
@@ -3194,16 +3399,22 @@ class CSPAgent:
             #   * 既に鍋に入っている              -> 集める段階が終わっている
             # このときは割り当てを解除し、他の注文がそのテーブルを使えるようにする。
             # その後また誰かがテーブルに置いた場合は、(3) の retarget が拾い直す。
-            soup_name = '-'.join(ings_lower) + ' soup'
+            dish_name = '-'.join(ings_lower) + (SALAD_SUFFIX if is_salad else SOUP_SUFFIX)
             sorted_ings = sorted(ings_cap)
-            cook_needed = True
-            for ps in pot_states:
+            # assembly_needed: まだ「材料を集める」段階が残っているか。
+            #   スープ: 鍋にこのレシピが入っていれば集め終わり
+            #   サラダ: 皿にこのレシピが乗っていれば集め終わり
+            assembly_needed = True
+            states = plate_states if is_salad else pot_states
+            for ps in states:
                 if not ps['used'] and ps['names'] == sorted_ings:
                     ps['used'] = True
-                    cook_needed = False
+                    assembly_needed = False
                     break
 
-            merge_point_needed = cook_needed and not self._agent_holds_complete_set(env, ings_cap)
+            cook_needed = assembly_needed and not is_salad
+
+            merge_point_needed = assembly_needed and not self._agent_holds_complete_set(env, ings_cap)
 
             assigned_counter, _ = self._resolve_assigned_counter(
                 env,
@@ -3212,7 +3423,7 @@ class CSPAgent:
             self._debug_order_counter_state(env, current_orders, order_idx=order_idx, order_uid=order_uid, assigned_counter=assigned_counter, reason='before_conflict_check')
 
             if not merge_point_needed and assigned_counter is not None:
-                reason = "reason=already_cooking" if not cook_needed else "reason=ingredients_collected"
+                reason = "reason=already_assembled" if not assembly_needed else "reason=ingredients_collected"
                 self._set_assigned_counter(order_uid, None)
                 self._log_counter_policy(order_uid, "release", assigned_counter, reason)
                 if assigned_counter in used_counters:
@@ -3278,12 +3489,12 @@ class CSPAgent:
 
             assigned_counters_display_map[display_order + 1] = assigned_counter
 
-            # soup_name / sorted_ings / cook_needed は、置き場が要るかを決めるために
+            # dish_name / sorted_ings / assembly_needed は、置き場が要るかを決めるために
             # このループの先頭(割り当て判定の前)で算出済み。
             tasks = []
 
             for ing in ings_cap:
-                if not cook_needed:
+                if not assembly_needed:
                     continue
                 reserved_other_counters = {
                     counter for counter in used_counters
@@ -3308,11 +3519,11 @@ class CSPAgent:
                 })
 
             if cook_needed:
-                dur = self._task_duration_frames(env, 'cook', soup_name, order_idx)
+                dur = self._task_duration_frames(env, 'cook', dish_name, order_idx)
                 if dur is not None:
                     tasks.append({
-                        'id': ('cook', soup_name, order_uid),
-                        'verb': 'cook', 'obj': soup_name, 'order': order_uid,
+                        'id': ('cook', dish_name, order_uid),
+                        'verb': 'cook', 'obj': dish_name, 'order': order_uid,
                         'slot_idx': order_idx,
                         'display_order': display_order,
                         'dur': dur,
@@ -3320,11 +3531,13 @@ class CSPAgent:
                         'assigned_counter': assigned_counter
                     })
 
-            dur = self._task_duration_frames(env, 'serve', soup_name, order_idx)
+            # サラダは鍋を経由せず、刻んだ食材をそのまま皿に乗せて提供する。
+            serve_verb = 'serve_salad' if is_salad else 'serve'
+            dur = self._task_duration_frames(env, serve_verb, dish_name, order_idx, assigned_counter)
             if dur is not None:
                 tasks.append({
-                    'id': ('serve', soup_name, order_uid),
-                    'verb': 'serve', 'obj': soup_name, 'order': order_uid,
+                    'id': (serve_verb, dish_name, order_uid),
+                    'verb': serve_verb, 'obj': dish_name, 'order': order_uid,
                     'slot_idx': order_idx,
                     'display_order': display_order,
                     'dur': dur,
@@ -3332,7 +3545,7 @@ class CSPAgent:
                     'assigned_counter': assigned_counter
                 })
 
-            orders.append({'order': order_uid, 'display_order': display_order, 'name': soup_name, 'ingredients': ings_lower, 'tasks': tasks})
+            orders.append({'order': order_uid, 'display_order': display_order, 'name': dish_name, 'ingredients': ings_lower, 'tasks': tasks})
 
         self.assigned_counters_display_map = assigned_counters_display_map
         return orders
@@ -3716,6 +3929,12 @@ class CSPAgent:
                 chops = [v for v in order_vars if v['task']['verb'] == 'chop']
                 for c in chops:
                     model.Add(starts[i] >= c['end'])
+            elif verb == 'serve_salad':
+                # サラダは調理を挟まないので、chop が全部終われば提供できる。
+                order_vars = vars_by_order.get(t['order'], [])
+                chops = [v for v in order_vars if v['task']['verb'] == 'chop']
+                for c in chops:
+                    model.Add(starts[i] >= c['end'])
             elif verb == 'serve':
                 order_vars = vars_by_order.get(t['order'], [])
                 cooks = [v for v in order_vars if v['task']['verb'] == 'cook']
@@ -3783,7 +4002,7 @@ class CSPAgent:
                                 for v_curr in curr_tasks_v:
                                     model.Add(v_next['start'] >= v_curr['end'])
                         elif mode == 'pipeline':
-                            for verb in ['chop', 'cook', 'serve']:
+                            for verb in ['chop', 'cook', 'serve', 'serve_salad']:
                                 curr_verb_tasks = [v for v in curr_tasks_v if v['task']['verb'] == verb]
                                 next_verb_tasks = [v for v in next_tasks_v if v['task']['verb'] == verb]
                                 for v_next in next_verb_tasks:
@@ -3966,7 +4185,7 @@ class CSPAgent:
                         res_timeline['pot'][best_id] = end 
                         schedule.append({'id':t['id'],'start':start,'end':end,'res':('pot',best_id)})
                         prev_finish = end
-            serves = [t for t in o['tasks'] if t['verb']=='serve']
+            serves = [t for t in o['tasks'] if t['verb'] in self.SERVE_VERBS]
             if serves:
                 t = serves[0]
                 start = prev_finish

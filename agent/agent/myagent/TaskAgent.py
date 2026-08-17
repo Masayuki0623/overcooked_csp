@@ -483,6 +483,12 @@ class TaskAgent:
             if len(parts) > 1:
                 ingredients = [p.capitalize() for p in parts[1:]]
             return self.process_cook_task(env, ingredients, assigned_pot=self.assigned_pot, assigned_counter=self.assigned_counter, dynamic_obstacles=dynamic_obstacles)
+        elif self.task_name.startswith('serve_salad'):
+            # 'serve' より先に判定する。サラダは鍋を使わない別工程なので
+            # process_serve_task (cook 専用の提供) に流してはいけない。
+            parts = self.task_name.split('_')
+            ingredients = [p.capitalize() for p in parts[2:]]
+            return self.process_serve_salad_task(env, ingredients, assigned_counter=self.assigned_counter, assigned_serve_loc=self.assigned_serve_loc, dynamic_obstacles=dynamic_obstacles)
         elif self.task_name.startswith('serve'):
             parts = self.task_name.split('_')
             ingredients = []
@@ -747,43 +753,9 @@ class TaskAgent:
                 
         # 5. 手が空の場合 -> 足りない食材のいずれかを探すが、すでにマージが進んでいるものを優先する
         def find_best_ingredient_target(only_assigned_counter):
-            local_target_ing_loc = None
-            local_best_score = -float('inf')
-            local_assigned_counter_candidate = None
-            local_assigned_counter_score = -float('inf')
-
-            for pos, obj in env.pos_obj.items():
-                if not self._is_available_object(obj):
-                    continue
-                if only_assigned_counter and assigned_counter and pos != assigned_counter:
-                    continue
-
-                obj_name = getattr(obj, 'full_name', '')
-                parts = obj_name.replace('Cooking', 'Chopped').replace('Cooked', 'Chopped').replace('Charred', 'Chopped').split('-')
-
-                valid_count = 0
-                has_unwanted = False
-                order_allowed_names = {f"Chopped{i.capitalize()}" for i in ingredients}
-                for p in parts:
-                    if p in order_allowed_names:
-                        valid_count += 1
-                    else:
-                        has_unwanted = True
-
-                if valid_count > 0 and not has_unwanted:
-                    dist = abs(self_pos[0] - pos[0]) + abs(self_pos[1] - pos[1])
-                    score = (valid_count * 100) - dist
-                    if assigned_counter and pos == assigned_counter and 0 < valid_count < len(missing_ings):
-                        if score > local_assigned_counter_score:
-                            local_assigned_counter_score = score
-                            local_assigned_counter_candidate = pos
-                        continue
-
-                    if score > local_best_score:
-                        local_best_score = score
-                        local_target_ing_loc = pos
-
-            return local_target_ing_loc, local_best_score, local_assigned_counter_candidate, local_assigned_counter_score
+            return self._find_chopped_pickup_target(
+                env, ingredients, missing_ings, assigned_counter, only_assigned_counter
+            )
 
         target_ing_loc = None
         best_score = -float('inf')
@@ -809,6 +781,192 @@ class TaskAgent:
             
         # print(f"[DEBUG] cook: 必要食材が見つからない missing={missing_ings} counter={assigned_counter}")
         # print(f"[DEBUG]   カウンター上: { {p: env.pos_obj[p].full_name for p in env.get_pos_by_obj_gs('Counter') if env.pos_obj.get(p)} }")
+        return (0, 0), "必要な食材 (Chopped) を待機中"
+
+    def _find_chopped_pickup_target(self, env, ingredients, missing_ings, assigned_counter, only_assigned_counter):
+        """置かれている刻んだ食材のうち、次に取りに行くべき場所を探す。
+
+        戻り値: (target_pos, best_score, assigned_counter_candidate, assigned_counter_score)
+
+        assigned_counter に「一部だけ」集まっている場合は、そこから取ってしまうと
+        せっかく進んだマージが巻き戻るため、通常候補とは分けて返す
+        (呼び出し側が、他に何も見つからないときの最後の手段として使う)。
+        """
+        self_pos = env.self_pos
+        order_allowed_names = {f"Chopped{i.capitalize()}" for i in ingredients}
+
+        local_target_ing_loc = None
+        local_best_score = -float('inf')
+        local_assigned_counter_candidate = None
+        local_assigned_counter_score = -float('inf')
+
+        for pos, obj in env.pos_obj.items():
+            if not self._is_available_object(obj):
+                continue
+            if only_assigned_counter and assigned_counter and pos != assigned_counter:
+                continue
+
+            obj_name = getattr(obj, 'full_name', '')
+            parts = obj_name.replace('Cooking', 'Chopped').replace('Cooked', 'Chopped').replace('Charred', 'Chopped').split('-')
+
+            valid_count = 0
+            has_unwanted = False
+            for p in parts:
+                if p in order_allowed_names:
+                    valid_count += 1
+                else:
+                    has_unwanted = True
+
+            if valid_count > 0 and not has_unwanted:
+                dist = abs(self_pos[0] - pos[0]) + abs(self_pos[1] - pos[1])
+                score = (valid_count * 100) - dist
+                if assigned_counter and pos == assigned_counter and 0 < valid_count < len(missing_ings):
+                    if score > local_assigned_counter_score:
+                        local_assigned_counter_score = score
+                        local_assigned_counter_candidate = pos
+                    continue
+
+                if score > local_best_score:
+                    local_best_score = score
+                    local_target_ing_loc = pos
+
+        return local_target_ing_loc, local_best_score, local_assigned_counter_candidate, local_assigned_counter_score
+
+    def process_serve_salad_task(self, env, ingredients=None, assigned_counter=None,
+                                 assigned_serve_loc=None, dynamic_obstacles=None):
+        """サラダの提供タスク(鍋を使わない)。
+
+        サラダは「刻む → 皿に乗せる → 提供」で完成する。process_serve_task が
+        「鍋の調理済み料理を皿ですくって運ぶ」のに対し、こちらは
+        置き場に集めた刻んだ食材をまとめて取り、皿タイルに触れて皿に乗せ
+        (食材を持ったまま皿タイルに触れると、皿に乗った状態で手に持てる)、
+        提供口へ運ぶ。
+        """
+        self_pos = env.self_pos
+        holding = env.hold
+        holding_name = holding.full_name if holding else None
+
+        if not ingredients:
+            return (0, 0), "提供する食材が指定されていません"
+
+        target_ing_names = sorted([f"Chopped{i}" for i in ingredients])
+        target_set = set(target_ing_names)
+
+        holding_parts = holding_name.split('-') if holding_name else []
+        has_plate = 'Plate' in holding_parts
+        held_ings = [p for p in holding_parts if p in target_set]
+        unwanted = [p for p in holding_parts if p != 'Plate' and p not in target_set]
+
+        # 0. この注文に関係ないものを持っている -> 置きに行く
+        if unwanted:
+            return self.drop_unwanted_item(
+                env,
+                holding,
+                reason=f"サラダの提供タスクですが、{holding_name} を持っています",
+                dynamic_obstacles=dynamic_obstacles,
+                allow_strict_override=True,
+            )
+
+        missing_ings = [n for n in target_ing_names if n not in held_ings]
+
+        # 1. 皿の上に材料が全部そろっている(=サラダ完成) -> 提供口へ
+        if has_plate and not missing_ings:
+            if assigned_serve_loc:
+                deliveries = [assigned_serve_loc]
+            else:
+                deliveries = env.get_pos_by_obj_gs(gs='Delivery')
+            if not deliveries:
+                return (0, 0), "受取場所が見つかりません"
+            target = min(deliveries, key=lambda p: abs(p[0] - self_pos[0]) + abs(p[1] - self_pos[1]))
+            dist = abs(self_pos[0] - target[0]) + abs(self_pos[1] - target[1])
+            if dist == 1:
+                return self.move_to(env, target, dynamic_obstacles=dynamic_obstacles), "サラダの配膳 (完了)"
+            return self.move_to(env, target, dynamic_obstacles=dynamic_obstacles), "サラダの配膳"
+
+        # 2. 皿なしで材料が全部そろっている -> 皿タイルへ行って皿に乗せる
+        #    カウンター上に置かれた皿と合流させると、マージ結果がカウンター側に
+        #    残って手放してしまうため、必ず皿タイル(無限に皿が出る供給口)を使う。
+        if not has_plate and not missing_ings:
+            plate_tiles = env.get_pos_by_obj_gs(gs='PlateTile')
+            if not plate_tiles:
+                return (0, 0), "皿タイルが見つかりません"
+            target = min(plate_tiles, key=lambda p: abs(p[0] - self_pos[0]) + abs(p[1] - self_pos[1]))
+            return self.move_to(env, target, dynamic_obstacles=dynamic_obstacles), "サラダを皿に乗せる"
+
+        # ここから先は材料がまだ足りない。cook と同じく置き場で合流させる。
+        # 3. 一部だけ持っている -> 指定テーブルへ運んでマージする
+        #    (皿を持っていれば拾い上げてそのまま盛り付けになり、
+        #     皿を持っていなければ一旦テーブルに置いて合流させる)
+        if holding_name:
+            target_merge_loc, blocked_details = self._resolve_assigned_counter_target(
+                env,
+                holding,
+                assigned_counter,
+                "指定テーブルが使用中のため待機中"
+            )
+
+            if target_merge_loc:
+                return (self.move_to(env, target_merge_loc, dynamic_obstacles=dynamic_obstacles),
+                        "指定テーブルにて食材をマージさせるために置く")
+            if assigned_counter:
+                return (0, 0), blocked_details or "指定テーブルが使用中のため待機中"
+
+            def fallback_func():
+                order_allowed_names = {f"Chopped{i.capitalize()}" for i in ingredients}
+                min_dist = float('inf')
+                local_target_merge_loc = None
+                for pos, obj in env.pos_obj.items():
+                    if not self._is_available_object(obj):
+                        continue
+                    obj_name = getattr(obj, 'full_name', '')
+                    parts = obj_name.split('-')
+
+                    is_valid_target = False
+                    has_unwanted = False
+                    for p in parts:
+                        if p in missing_ings or p in order_allowed_names:
+                            is_valid_target = True
+                        if p not in order_allowed_names:
+                            has_unwanted = True
+
+                    if is_valid_target and not has_unwanted:
+                        dist = abs(self_pos[0] - pos[0]) + abs(self_pos[1] - pos[1])
+                        if dist < min_dist:
+                            min_dist = dist
+                            local_target_merge_loc = pos
+
+                if local_target_merge_loc:
+                    return (self.move_to(env, local_target_merge_loc, dynamic_obstacles=dynamic_obstacles),
+                            "離れた食材とマージさせるために置く")
+                return (0, 0), "マージ対象の食材を待機中"
+
+            return self._handle_counter_fallback("共有置き場ID未割当のため待機中", fallback_func)
+
+        # 4. 手が空 -> 足りない食材を探す(マージが進んでいるものを優先)
+        target_ing_loc = None
+        assigned_counter_candidate = None
+
+        if assigned_counter:
+            target_ing_loc, _, assigned_counter_candidate, _ = self._find_chopped_pickup_target(
+                env, ingredients, missing_ings, assigned_counter, True)
+            if target_ing_loc is None:
+                # 指定テーブルに「一部だけ」乗っている状態で、それを拾ってしまうと
+                # 次のフレームに同じ場所へ置き直すだけの往復になる。
+                # 先に他の場所から不足分を運んできて合流させる方を必ず優先する。
+                target_ing_loc, _, other_candidate, _ = self._find_chopped_pickup_target(
+                    env, ingredients, missing_ings, assigned_counter, False)
+                if assigned_counter_candidate is None:
+                    assigned_counter_candidate = other_candidate
+        else:
+            target_ing_loc, _, assigned_counter_candidate, _ = self._find_chopped_pickup_target(
+                env, ingredients, missing_ings, assigned_counter, False)
+
+        if target_ing_loc is None and assigned_counter_candidate is not None:
+            target_ing_loc = assigned_counter_candidate
+
+        if target_ing_loc:
+            return self.move_to(env, target_ing_loc, dynamic_obstacles=dynamic_obstacles), "食材の取得"
+
         return (0, 0), "必要な食材 (Chopped) を待機中"
 
     def drop_unwanted_item(self, env, holding, reason="", dynamic_obstacles=None, allow_strict_override=False):
