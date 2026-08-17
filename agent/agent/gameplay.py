@@ -294,9 +294,17 @@ class GamePlay(Game):
                 self._q_ai.put(('Env', {"EnvState": dcopy(e), "applied_actions": dict(ad)}))
                 action_dict = {agent.name: None for agent in self.sim_agents}
 
+            # last_t は sleep の「後」に更新すること。
+            # 前に更新すると、次の周回で測る経過時間に自分の sleep 時間が含まれてしまい、
+            # sleep_time が 0 になる周回と満額になる周回が交互に現れて、環境が設定 fps の
+            # 約2倍(fps=10 に対し実測 18.7 step/秒)で回ってしまう。
+            # AI は fps_ai(=10)/秒でしか行動を決められないため、環境だけが倍速で進むと
+            # AI は全ステップの半分しか動けず、毎ステップ入力が反映される人間に対して
+            # 半分の速度に見える(「AIの移動が遅い」の原因)。
             sleep_time = max(seconds_per_step - (time.time() - last_t), 0)
+            if sleep_time > 0:
+                time.sleep(sleep_time)
             last_t = time.time()
-            time.sleep(sleep_time)
 
             chat = chat_in + '\n\n' + chat_out
 
@@ -390,6 +398,14 @@ class GamePlay(Game):
 
     def _run_ai(self):
         time_per_step = 1 / self.fps_ai
+        # 環境からの状態push(_q_ai.get)がブロックするため、AIの実行レートは
+        # 何もしなくても環境のstep rateに一致する。これに加えて独自のsleepで
+        # 待つと、AI側とenv側の周期がわずかにずれて環境のstepを取りこぼし、
+        # AIが動けないフレームが生まれる(fps_ai=fps=10 の設定で、実測では
+        # 全stepの86%までしか動けなかった)。
+        # fps_ai が env の fps より明示的に低く設定されている場合、つまり
+        # 「AIをわざと遅くしたい」ときだけ間引く。
+        throttle_ai = self.fps_ai < self.fps
         time_last = time.time()
         human_act = True
         env = None
@@ -399,7 +415,7 @@ class GamePlay(Game):
         # None(未送信)になって初めて次のコマンドを送る。
         awaiting_confirm = {}
         while True:
-            # AI の判断レートを fps_ai に制限する。
+            # AIをわざと遅くしたい設定のときだけ間引く。
             # この sleep は「判断 → 送信」の間ではなくループ先頭に置くこと。
             # 間に置くと、決めた行動が最大 1/fps_ai 秒ぶん遅れて環境に届き、
             # その間に環境が数ステップ進んでしまう。さらに awaiting_confirm は
@@ -407,10 +423,11 @@ class GamePlay(Game):
             # 遅延ぶんがそのまま次の行動までの待ち時間に加算され、
             # AI が数フレームに1回しか動けなくなる。
             # 先頭で待ってから最新状態を取り込み、判断した行動は即座に送る。
-            sleep_time = max(time_per_step - (time.time() - time_last), 0)
-            if sleep_time > 0:
-                time.sleep(sleep_time)
-            time_last = time.time()
+            if throttle_ai:
+                sleep_time = max(time_per_step - (time.time() - time_last), 0)
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
+                time_last = time.time()
 
             event = self._q_ai.get()
             while True:
