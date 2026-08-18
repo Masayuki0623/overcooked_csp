@@ -3722,6 +3722,16 @@ class CSPAgent:
                 tasks.append(t)
         
         num_tasks = len(tasks)
+        # 直近の解の評価値。時間損失量 L(d) の計算
+        # (estimate_instruction_time_loss)が「指示制約あり/なし」を解き比べる
+        # ために読む。早期 return の前に必ず作り直すこと。前回の値が残ると
+        # 2回目が解けなかったときに L=0 と誤認してしまう。
+        self._last_solve_metrics = {
+            'status': 'no_tasks',
+            'num_tasks': num_tasks,
+            'makespan_frames': None,
+            'objective': None,
+        }
         if num_tasks == 0:
             self._emit_counter_debug("[CSPAgent] スケジュール対象タスクがありません。")
             return []
@@ -4096,9 +4106,13 @@ class CSPAgent:
         status_name = solver.StatusName(status)
         self._emit_counter_debug(f"[CSPAgent] ソルバー状態: {status_name}")
 
+        self._last_solve_metrics.update(status=status_name, num_tasks=num_tasks)
+
         schedule = []
         if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
             actual_makespan = solver.Value(makespan)
+            self._last_solve_metrics['makespan_frames'] = int(actual_makespan)
+            self._last_solve_metrics['objective'] = solver.ObjectiveValue()
             self._emit_counter_debug(f"[CSPAgent] 最適Makespan(移動込み): {actual_makespan} (評価値: {solver.ObjectiveValue()})")
             
             if not self.sc_2agent:
@@ -4171,6 +4185,97 @@ class CSPAgent:
                 pass
             
         return schedule
+
+    # ------------------------------------------------------------------
+    # 時間損失量 L(d)
+    # ------------------------------------------------------------------
+    def estimate_instruction_time_loss(self, env, pending, skip_budget=None):
+        """指示による時間損失量 L(d) = f'(d) - f を求める。
+
+        f      : その指示の制約を入れずに解いたときの最適 makespan
+        f'(d)  : 「指示タスクより前に同じエージェントが実行してよい他タスクは
+                 d 個まで」という制約を入れて解いたときの最適 makespan
+        L(d)   : その差。大きいほど、最適な段取りから外れた指示だったことになる。
+
+        L >= 0 が成り立つのは「同じタスク集合・同じ目的関数で、両方を最適まで
+        解いたとき」だけなので、ここでは時間制限を掛けずに解く。呼び出し側は
+        ゲーム進行を止めないよう別スレッドから呼ぶこと(1回 0.3〜2秒かかる)。
+
+        戻り値は秒単位。解けなかった場合は loss_seconds を None にして status に
+        理由を残す。
+        """
+        from copy import deepcopy as _dcopy
+
+        if skip_budget is None:
+            skip_budget = self.skip_budget
+        result = {
+            'loss_seconds': None,
+            'baseline_seconds': None,      # f
+            'constrained_seconds': None,   # f'(d)
+            'skip_budget': skip_budget,
+            'status': 'unknown',
+        }
+        if skip_budget is None:
+            result['status'] = 'no_constraint'
+            return result
+
+        try:
+            # 本番の状態を一切汚さないよう、評価用の複製の上だけで解く。
+            # replay は巨大で複製する意味がないため一時的に外す。
+            saved_replay = self.replay
+            self.replay = None
+            try:
+                probe = _dcopy(self)
+            finally:
+                self.replay = saved_replay
+            probe.replay = None
+            probe.debug_counter_trace = False
+
+            env_probe = _dcopy(env)
+            # 対象の指示だけが載った状態にする(A3: 指示は同時に1つだけ)。
+            probe._pending_instructions = [_dcopy(pending)]
+            env_probe._pending_instructions = [_dcopy(pending)]
+
+            # タスク集合は f / f'(d) で完全に同じでなければ比較にならないので、
+            # 1度だけ作って両方に渡す。
+            orders = probe._build_order_tasks(env_probe)
+
+            def solve_makespan_frames(budget):
+                probe.skip_budget = budget
+                # solve_csp_scheduling は orders 内のタスク辞書に order_obj を
+                # 書き込むため、毎回作り直した複製を渡す。
+                probe.solve_csp_scheduling(env_probe, orders=_dcopy(orders))
+                return dict(getattr(probe, '_last_solve_metrics', {}) or {})
+
+            # f: 指示制約なし (skip_budget=None だと制約自体が追加されない)
+            base = solve_makespan_frames(None)
+            # f'(d): 指示制約あり
+            cons = solve_makespan_frames(skip_budget)
+
+            if base.get('makespan_frames') is None:
+                result['status'] = f"baseline_{base.get('status', 'failed')}"
+                return result
+            if cons.get('makespan_frames') is None:
+                # d が厳しすぎて解が存在しない場合はここに来る。
+                result['status'] = f"constrained_{cons.get('status', 'failed')}"
+                result['baseline_seconds'] = base['makespan_frames'] / float(self.fps)
+                return result
+
+            f = base['makespan_frames'] / float(self.fps)
+            f_prime = cons['makespan_frames'] / float(self.fps)
+            result.update({
+                'loss_seconds': round(f_prime - f, 3),
+                'baseline_seconds': round(f, 3),
+                'constrained_seconds': round(f_prime, 3),
+                'num_tasks': base.get('num_tasks'),
+                'baseline_status': base.get('status'),
+                'constrained_status': cons.get('status'),
+                'status': 'ok',
+            })
+        except Exception as e:
+            result['status'] = f'error: {e}'
+        return result
+
 
     def solve_csp_selection(self, env, orders=None):
         if orders is None:

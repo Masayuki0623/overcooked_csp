@@ -253,6 +253,55 @@ class GamePlay(Game):
                     return
                 self._request_instruction(trigger='space')
 
+    def _start_time_loss_estimation(self, pending_entry, display_text):
+        """指示による時間損失量 L(d) = f'(d) - f を別スレッドで計算する。
+
+        f      : その指示の制約なしで解いた最適 makespan
+        f'(d)  : 「指示タスクより前に同エージェントが実行してよい他タスクは d 個まで」
+                 という制約ありで解いた最適 makespan
+
+        L が大きいほど、最適な段取りから外れた効率の悪い指示だったことになる。
+        1回あたり CP-SAT を2回解くため 0.3〜4秒かかる。ゲームの進行や AI の
+        再スケジューリングとは無関係に走らせたいので、必ず別スレッドで行う。
+        結果は pending_entry['time_loss'] に入れ、リプレイにも残す。
+        """
+        ai = getattr(self, 'ai', None)
+        if ai is None or not hasattr(ai, 'estimate_instruction_time_loss'):
+            return
+        env_state = getattr(self, '_latest_env_state', None)
+        if env_state is None:
+            return
+
+        pending_entry['time_loss'] = {'status': 'calculating'}
+
+        def work():
+            started = time.time()
+            try:
+                result = ai.estimate_instruction_time_loss(env_state, pending_entry)
+            except Exception as e:
+                result = {'status': f'error: {e}', 'loss_seconds': None}
+            result['elapsed_s'] = round(time.time() - started, 3)
+            pending_entry['time_loss'] = result
+
+            if result.get('loss_seconds') is not None:
+                print(f"[TimeLoss] id={pending_entry['id']:.6f} task={display_text} "
+                      f"d={result.get('skip_budget')} "
+                      f"L={result['loss_seconds']:.1f}s "
+                      f"(f={result['baseline_seconds']:.1f}s -> "
+                      f"f'={result['constrained_seconds']:.1f}s) "
+                      f"計算 {result['elapsed_s']:.2f}s")
+            else:
+                print(f"[TimeLoss] id={pending_entry['id']:.6f} task={display_text} "
+                      f"計算できず: {result.get('status')}")
+
+            try:
+                self.replay.log('instruction_time_loss',
+                                {'id': pending_entry['id'], 'task': display_text, **result})
+            except Exception:
+                pass
+
+        threading.Thread(target=work, daemon=True).start()
+
     def _request_instruction(self, trigger='space', allow_text_fallback=True):
         """指示画面を出し、選ばれた指示を env / AI / リプレイへ登録する。
 
@@ -310,6 +359,9 @@ class GamePlay(Game):
 
                 # Print to debug log (will be captured in debug_*.log)
                 print(f"[Instruction] accepted id={inst_id:.6f} task={display_text} agent_idx={target_idx} env_time={accepted_env_time:.6f} wall_time={inst_id:.6f} trigger={trigger}")
+
+                # 時間損失量 L(d) を計算する(別スレッド。進行は止めない)
+                self._start_time_loss_estimation(pending_entry, display_text)
 
                 # Signal AI to reschedule due to new instruction
                 try:

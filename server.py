@@ -386,6 +386,33 @@ async def perf():
     })
 
 
+@app.get('/api/instructions')
+async def instructions():
+    """受理した指示と、その時間損失量 L(d) の一覧。
+
+    L(d) = f'(d) - f。f は指示制約なしの最適 makespan、f'(d) は
+    「指示タスクの前に同エージェントが実行してよい他タスクは d 個まで」
+    という制約ありの最適 makespan。大きいほど段取りから外れた指示。
+    """
+    env = session.env
+    pending = list(getattr(env, '_pending_instructions', []) or []) if env else []
+    out = []
+    for p in pending:
+        task = p.get('task')
+        name = None
+        if isinstance(task, dict):
+            name = task.get('verb') and f"{task['verb']}_{task.get('obj', '')}"
+        out.append({
+            'id': p.get('id'),
+            'task': name or str(task),
+            'trigger': p.get('trigger'),
+            'accepted_env_time': p.get('accepted_env_time'),
+            'status': p.get('status'),
+            'time_loss': p.get('time_loss'),
+        })
+    return JSONResponse({'count': len(out), 'instructions': out})
+
+
 @app.websocket('/ws')
 async def ws(sock: WebSocket):
     await sock.accept()
