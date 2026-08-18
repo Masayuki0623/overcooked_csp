@@ -68,8 +68,6 @@ KEY_MAP = {
     'Escape': pygame.K_ESCAPE,
 }
 
-# 画面を送る頻度。環境は 10Hz で進むので、それより少し速く見に行けば取りこぼさない。
-CAPTURE_FPS = 15
 
 
 class RemoteMouse:
@@ -107,6 +105,8 @@ class WebGamePlay:
         # 描画完了した1枚をそのまま抱えておく退避先(描画スレッドが書く)。
         self._pending_surface = None
         self._pending_lock = threading.Lock()
+        # 新しい1枚が置かれたことを配信側へ知らせる。
+        self._frame_ready = threading.Event()
 
         # 最新フレーム。capture 側(executor スレッド)が書き、送信側が読む。
         self._frame = None            # PNG バイト列
@@ -117,6 +117,9 @@ class WebGamePlay:
         # 最初のブラウザ接続を待ってからゲームを開始する。
         # 誰も見ていない間に注文の時間が進んでしまうのを防ぐ。
         self.client_connected = threading.Event()
+
+        # 配信経路のどこでコマが落ちているかを見るための計数。/api/perf で読む。
+        self.perf = {'rendered': 0, 'encoded': 0, 'sent': 0, 'started': time.time()}
         self.state = 'waiting'        # waiting -> running -> finished
         self.result = None
 
@@ -148,6 +151,7 @@ class WebGamePlay:
         self.client_connected.wait()
 
         self.state = 'running'
+        self.perf.update(rendered=0, encoded=0, sent=0, started=time.time())
         print('[server] ゲームを開始します')
         try:
             success = self.game.on_execute()
@@ -196,6 +200,8 @@ class WebGamePlay:
                 return
             with self._pending_lock:
                 self._pending_surface = snapshot
+            self.perf['rendered'] += 1
+            self._frame_ready.set()
 
         pygame.display.flip = flip
 
@@ -239,7 +245,23 @@ class WebGamePlay:
             self._frame = data
             self._frame_version += 1
             self._frame_size = surface.get_size()
+            self.perf['encoded'] += 1
             return self._frame_version
+
+    def wait_and_capture(self, timeout=0.5):
+        """次の1枚が描かれるまで待ってから PNG にする。
+
+        以前は一定周期(15Hz)で見に行っていたが、描画は 10Hz なので
+        「描かれてから見に行くまで」に平均33ms・最悪67msの待ちが乗っていた。
+        描画完了を待って即座に送れば、この待ちがまるごと無くなる。
+
+        executor スレッドから呼ぶ。待っている間は GIL を手放すので、
+        ゲーム側のスレッドを邪魔しない。
+        """
+        if not self._frame_ready.wait(timeout):
+            return None
+        self._frame_ready.clear()
+        return self.capture()
 
     def latest_frame(self):
         with self._frame_lock:
@@ -335,6 +357,19 @@ async def state():
     })
 
 
+@app.get('/api/perf')
+async def perf():
+    p = dict(session.perf)
+    elapsed = max(1e-6, time.time() - p.pop('started'))
+    return JSONResponse({
+        'elapsed_s': round(elapsed, 1),
+        'rendered_fps': round(p['rendered'] / elapsed, 2),
+        'encoded_fps': round(p['encoded'] / elapsed, 2),
+        'sent_fps': round(p['sent'] / elapsed, 2),
+        **p,
+    })
+
+
 @app.websocket('/ws')
 async def ws(sock: WebSocket):
     await sock.accept()
@@ -343,7 +378,6 @@ async def ws(sock: WebSocket):
     loop = asyncio.get_running_loop()
     sent_version = 0
     sent_size = None
-    period = 1.0 / CAPTURE_FPS
     last_state = None
 
     async def pump_input():
@@ -369,8 +403,9 @@ async def ws(sock: WebSocket):
     task = asyncio.create_task(pump_input())
     try:
         while True:
-            # PNG エンコードは executor に逃がしてイベントループを塞がない。
-            await loop.run_in_executor(None, session.capture)
+            # 次の描画を待って PNG 化する。待ちもエンコードも executor 側なので
+            # イベントループは塞がらず、入力(ping/キー)は待たされない。
+            await loop.run_in_executor(None, session.wait_and_capture)
             version, data, size = session.latest_frame()
 
             if size != sent_size and size != (0, 0):
@@ -386,14 +421,13 @@ async def ws(sock: WebSocket):
             if data is not None and version != sent_version:
                 sent_version = version
                 await sock.send_bytes(data)
+                session.perf['sent'] += 1
 
             if session.state != last_state:
                 last_state = session.state
                 await sock.send_text(json.dumps(
                     {'type': 'status', 'state': session.state,
                      'result': session.result}))
-
-            await asyncio.sleep(period)
     except (WebSocketDisconnect, RuntimeError):
         pass
     finally:

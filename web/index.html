@@ -84,7 +84,7 @@
 <div class="bar">
   <span><span id="conn-dot" class="dot"></span><span id="conn">接続中...</span></span>
   <span>RTT <b id="rtt">--</b> ms</span>
-  <span>受信 <b id="fps">--</b> fps</span>
+  <span>受信/描画 <b id="fps">--</b> fps</span>
   <span>状態 <b id="state">--</b></span>
   <span id="cfg"></span>
 </div>
@@ -150,12 +150,21 @@
   }
 
   // ---- 描画 --------------------------------------------------------
-  let frameTimes = [];
+  let recvTimes = [];      // 受信した枚数
+  let drawTimes = [];      // 実際に描けた枚数
   let drawing = false;
+  let queued = null;       // 展開中に届いた最新の1枚
+
+  function rate(times) {
+    const now = performance.now();
+    while (times.length && now - times[0] > 2000) times.shift();
+    return (times.length / 2).toFixed(1);
+  }
 
   function drawBlob(blob) {
-    // 前の1枚をまだ展開中なら捨てる。溜め込むと表示が実時間から遅れていく。
-    if (drawing) return;
+    recvTimes.push(performance.now());
+    // 展開中なら「最新の1枚」だけ覚えておく。捨てずに、かつ溜めない。
+    if (drawing) { queued = blob; return; }
     drawing = true;
     createImageBitmap(blob).then(bmp => {
       // 左 baseW ぶんがゲーム画面、その右が指示パネル。切り分けて別々に描く。
@@ -173,10 +182,10 @@
       bmp.close();
       drawing = false;
 
-      const now = performance.now();
-      frameTimes.push(now);
-      while (frameTimes.length && now - frameTimes[0] > 2000) frameTimes.shift();
-      el.fps.textContent = (frameTimes.length / 2).toFixed(1);
+      drawTimes.push(performance.now());
+      el.fps.textContent = `${rate(recvTimes)} / ${rate(drawTimes)}`;
+
+      if (queued) { const b = queued; queued = null; drawBlob(b); }
     }).catch(() => { drawing = false; });
   }
 

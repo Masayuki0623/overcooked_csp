@@ -431,6 +431,37 @@ class GamePlay(Game):
                 self._q_ai.put(('Env', {"EnvState": dcopy(e), "applied_actions": dict(ad)}))
                 action_dict = {agent.name: None for agent in self.sim_agents}
 
+            # 描画は step の直後、sleep より前に行うこと。
+            # sleep の後ろに置くと、step N の結果が画面に出るのは次の周回、
+            # つまり約 1/fps 秒(既定で100ms)遅れになる。入力が反映されて
+            # 見えるまでに、キュー待ちに加えてこの1周期が丸ごと乗るため、
+            # 操作がはっきり重く感じられる。
+            chat = chat_in + '\n\n' + chat_out
+
+            debug_info = {}
+            if self.debug_mode:
+                if hasattr(self.ai, 'get_assigned_counters'):
+                    debug_info['counters'] = self.ai.get_assigned_counters()
+                if hasattr(self.ai, 'get_order_display_labels'):
+                    debug_info['order_labels'] = self.ai.get_order_display_labels()
+                if self.sc_2agent and hasattr(self.ai, 'task_agents'):
+                    debug_info['tasks'] = {
+                        "AI0": self.ai.task_agents[0].task_name if hasattr(self.ai.task_agents[0], 'task_name') and self.ai.task_agents[0].task_name else "Idle",
+                        "AI1": self.ai.task_agents[1].task_name if hasattr(self.ai.task_agents[1], 'task_name') and self.ai.task_agents[1].task_name else "Idle"
+                    }
+                elif hasattr(self.ai, 'task_agent'):
+                    debug_info['tasks'] = {
+                        "AI": self.ai.task_agent.task_name if hasattr(self.ai.task_agent, 'task_name') and self.ai.task_agent.task_name else "Idle"
+                    }
+
+            if not paused:
+                self.replay.log('on_render', {'paused': paused, 'chat': chat})
+            # 指示パネル表示中はこのスレッドから描画しない。
+            # on_render は screen.fill -> display.flip まで行うため、パネル側の
+            # 描画と交互に画面全体を上書きし合って激しく点滅してしまう。
+            if not self._instruction_panel_active:
+                self.on_render(paused=paused, chat=chat, debug_info=debug_info)
+
             # AI の判断が 1 ステップ分の時間より長くかかっているなら、環境の 1 ステップを
             # その分だけ引き伸ばす。--debug では詳細トレースの出力だけで判断1回が
             # 数百msかかるため、これをしないと AI が数フレームに1回しか動けなくなる。
@@ -457,32 +488,6 @@ class GamePlay(Game):
             if sleep_time > 0:
                 time.sleep(sleep_time)
             last_t = time.time()
-
-            chat = chat_in + '\n\n' + chat_out
-
-            debug_info = {}
-            if self.debug_mode:
-                if hasattr(self.ai, 'get_assigned_counters'):
-                    debug_info['counters'] = self.ai.get_assigned_counters()
-                if hasattr(self.ai, 'get_order_display_labels'):
-                    debug_info['order_labels'] = self.ai.get_order_display_labels()
-                if self.sc_2agent and hasattr(self.ai, 'task_agents'):
-                    debug_info['tasks'] = {
-                        "AI0": self.ai.task_agents[0].task_name if hasattr(self.ai.task_agents[0], 'task_name') and self.ai.task_agents[0].task_name else "Idle",
-                        "AI1": self.ai.task_agents[1].task_name if hasattr(self.ai.task_agents[1], 'task_name') and self.ai.task_agents[1].task_name else "Idle"
-                    }
-                elif hasattr(self.ai, 'task_agent'):
-                    debug_info['tasks'] = {
-                        "AI": self.ai.task_agent.task_name if hasattr(self.ai.task_agent, 'task_name') and self.ai.task_agent.task_name else "Idle"
-                    }
-
-            if not paused:
-                self.replay.log('on_render', {'paused': paused, 'chat': chat})
-            # 指示パネル表示中はこのスレッドから描画しない。
-            # on_render は screen.fill -> display.flip まで行うため、パネル側の
-            # 描画と交互に画面全体を上書きし合って激しく点滅してしまう。
-            if not self._instruction_panel_active:
-                self.on_render(paused=paused, chat=chat, debug_info=debug_info)
 
     def _refresh_instruction_states(self, env):
         """実行開始/完了に応じて pending instruction の状態を更新する。"""
