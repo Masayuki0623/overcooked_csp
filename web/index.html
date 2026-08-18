@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Overcooked CSP</title>
+<style>
+  :root {
+    --bg: #14161a;
+    --panel: #1e2229;
+    --text: #e8eaed;
+    --muted: #9aa2ad;
+    --accent: #6ea8fe;
+    --warn: #f0a35e;
+    --bad: #e8697d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    padding: 20px 16px 40px;
+    min-height: 100vh;
+  }
+  h1 { font-size: 18px; font-weight: 600; margin: 0; letter-spacing: .02em; }
+  #stage {
+    background: #000;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 8px 32px rgba(0,0,0,.5);
+    line-height: 0;
+  }
+  canvas {
+    image-rendering: pixelated;
+    display: block;
+    max-width: 100%;
+    height: auto;
+    cursor: pointer;
+  }
+  .bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 20px;
+    align-items: center;
+    justify-content: center;
+    background: var(--panel);
+    border-radius: 8px;
+    padding: 10px 16px;
+    font-size: 13px;
+    color: var(--muted);
+    max-width: 900px;
+  }
+  .bar b { color: var(--text); font-weight: 600; }
+  .dot {
+    display: inline-block; width: 8px; height: 8px;
+    border-radius: 50%; background: var(--bad); margin-right: 6px;
+    vertical-align: middle;
+  }
+  .dot.on { background: #6bd08a; }
+  .keys { font-size: 13px; color: var(--muted); text-align: center; line-height: 1.9; }
+  kbd {
+    background: #2a2f38; border: 1px solid #3a414c; border-bottom-width: 2px;
+    border-radius: 4px; padding: 1px 7px; font-family: inherit;
+    font-size: 12px; color: var(--text);
+  }
+  #overlay {
+    position: fixed; inset: 0; display: none;
+    align-items: center; justify-content: center;
+    background: rgba(10,12,15,.82); font-size: 16px; text-align: center;
+    padding: 24px;
+  }
+  #overlay.show { display: flex; }
+</style>
+</head>
+<body>
+
+<h1>Overcooked CSP — 実験用プレイ画面</h1>
+
+<div class="bar">
+  <span><span id="conn-dot" class="dot"></span><span id="conn">接続中...</span></span>
+  <span>RTT <b id="rtt">--</b> ms</span>
+  <span>受信 <b id="fps">--</b> fps</span>
+  <span>状態 <b id="state">--</b></span>
+  <span id="cfg"></span>
+</div>
+
+<div id="stage"><canvas id="screen" width="320" height="400"></canvas></div>
+
+<div class="keys">
+  <kbd>↑</kbd> <kbd>↓</kbd> <kbd>←</kbd> <kbd>→</kbd> で移動 / 向いている先へインタラクト<br>
+  <kbd>Space</kbd> でAIへの指示パネル（パネル内はマウスでカードをクリック）
+</div>
+
+<div id="overlay"><div id="overlay-text"></div></div>
+
+<script>
+(function () {
+  const canvas = document.getElementById('screen');
+  const ctx = canvas.getContext('2d');
+  const el = {
+    conn: document.getElementById('conn'),
+    dot: document.getElementById('conn-dot'),
+    rtt: document.getElementById('rtt'),
+    fps: document.getElementById('fps'),
+    state: document.getElementById('state'),
+    cfg: document.getElementById('cfg'),
+    overlay: document.getElementById('overlay'),
+    overlayText: document.getElementById('overlay-text'),
+  };
+
+  // 320x400 のドット絵なので、そのままだと小さすぎる。等倍整数で拡大する。
+  const SCALE = 2;
+  function applySize(w, h) {
+    canvas.width = w;
+    canvas.height = h;
+    canvas.style.width = (w * SCALE) + 'px';
+    canvas.style.height = (h * SCALE) + 'px';
+  }
+
+  // ---- 描画 --------------------------------------------------------
+  let frameTimes = [];
+  function drawBlob(blob) {
+    createImageBitmap(blob).then(bmp => {
+      if (bmp.width !== canvas.width || bmp.height !== canvas.height) {
+        applySize(bmp.width, bmp.height);
+      }
+      ctx.drawImage(bmp, 0, 0);
+      bmp.close();
+
+      const now = performance.now();
+      frameTimes.push(now);
+      while (frameTimes.length && now - frameTimes[0] > 2000) frameTimes.shift();
+      el.fps.textContent = (frameTimes.length / 2).toFixed(1);
+    });
+  }
+
+  // ---- 接続 --------------------------------------------------------
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.binaryType = 'blob';
+
+  ws.onopen = () => {
+    el.conn.textContent = '接続済み';
+    el.dot.classList.add('on');
+    setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'ping', t: performance.now() }));
+      }
+    }, 1000);
+  };
+
+  ws.onclose = () => {
+    el.conn.textContent = '切断されました';
+    el.dot.classList.remove('on');
+    showOverlay('サーバーとの接続が切れました。<br>ページを再読み込みしてください。');
+  };
+
+  ws.onmessage = (ev) => {
+    if (typeof ev.data !== 'string') { drawBlob(ev.data); return; }
+
+    const msg = JSON.parse(ev.data);
+    if (msg.type === 'meta') {
+      applySize(msg.w, msg.h);
+    } else if (msg.type === 'pong') {
+      el.rtt.textContent = (performance.now() - msg.t).toFixed(0);
+    } else if (msg.type === 'status') {
+      el.state.textContent = ({
+        waiting: '開始待ち', running: 'プレイ中', finished: '終了',
+      })[msg.state] || msg.state;
+      if (msg.state === 'finished' && msg.result) {
+        showOverlay(
+          `ゲーム終了<br><br>提供 ${msg.result.served} 件 / 失敗 ${msg.result.failed} 件` +
+          `<br>スコア ${msg.result.reward}`);
+      }
+    }
+  };
+
+  function showOverlay(html) {
+    el.overlayText.innerHTML = html;
+    el.overlay.classList.add('show');
+  }
+
+  function send(obj) {
+    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
+  }
+
+  // ---- 入力 --------------------------------------------------------
+  // キーは押した瞬間だけ送る。サーバーは次の tick(100ms)で適用する。
+  const KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'Escape']);
+  window.addEventListener('keydown', (e) => {
+    if (!KEYS.has(e.code)) return;
+    e.preventDefault();   // 矢印/Space でのページスクロールを止める
+    if (e.repeat) {
+      // キーリピートは OS 依存で速度がばらつく。実験条件を揃えるため無視する。
+      return;
+    }
+    send({ type: 'key', code: e.code });
+  });
+
+  // マウス座標は表示倍率を戻して、サーバー側の Surface 座標で送る。
+  function toSurface(e) {
+    const r = canvas.getBoundingClientRect();
+    return {
+      x: Math.round((e.clientX - r.left) * canvas.width / r.width),
+      y: Math.round((e.clientY - r.top) * canvas.height / r.height),
+    };
+  }
+  canvas.addEventListener('mousemove', (e) => {
+    const p = toSurface(e);
+    send({ type: 'mousemove', x: p.x, y: p.y });
+  });
+  canvas.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    const p = toSurface(e);
+    send({ type: 'mousedown', x: p.x, y: p.y });
+  });
+
+  // ---- 実験条件の表示 -----------------------------------------------
+  fetch('/api/config').then(r => r.json()).then(c => {
+    el.cfg.textContent = `map=${c.map} / ${c.agent0} vs ${c.agent1} / orders=${c.orders}`;
+  }).catch(() => {});
+
+  applySize(320, 400);
+})();
+</script>
+</body>
+</html>

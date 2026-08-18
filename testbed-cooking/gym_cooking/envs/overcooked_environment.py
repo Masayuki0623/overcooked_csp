@@ -626,8 +626,14 @@ class OvercookedEnvironment(gym.Env):
             order_onehot = np.array([int(e in order.full_name)
                                     for e in ALL_FOOD_ENTITIES])
             current_orders.append((order_onehot, restTime / timeLimit))
-        current_orders_np = np.concatenate(
-            [np.concatenate([order_onehot, np.array([t])]) for order_onehot, t in current_orders])
+        if current_orders:
+            current_orders_np = np.concatenate(
+                [np.concatenate([order_onehot, np.array([t])]) for order_onehot, t in current_orders])
+        else:
+            # 注文を全部さばききると current_orders が空になる。np.concatenate は
+            # 空リストを受け付けず ValueError で落ちるため、空配列を返しておく。
+            # (--orders experiment1 のように注文数が固定のときに必ず通る経路)
+            current_orders_np = np.zeros((0,), dtype=float)
 
         '''result = {
             'gridsquare': gridsquare_map,
