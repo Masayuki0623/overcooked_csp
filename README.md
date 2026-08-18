@@ -96,6 +96,31 @@ python agent/agent/play_main.py --map partition --agent TSPSolver
 python agent/agent/play_main.py --map quick --agent Greedy
 ```
 
+## ブラウザからのプレイ (`server.py`)
+
+`server.py` を起動すると、ブラウザからプレイできます。pygame をウィンドウなし（`SDL_VIDEODRIVER=dummy`）で動かし、描画結果をWebSocketでブラウザへ送り、ブラウザのキー入力をpygameのイベントに戻す方式です。ゲームの描画・指示パネル・イベント処理はローカル版と同じコードがそのまま動きます。
+
+```bash
+pip install fastapi uvicorn
+python server.py
+```
+
+起動後、表示されたURL（既定は `http://localhost:8000/`）を開きます。操作は矢印キーでの移動と、`Space` での指示パネル（パネル内はカードをマウスでクリック）です。
+
+`play_main.py` と同じオプション名を受け付けるため、実験条件は同じ書き方で指定できます。既定値は実験用の構成になっています。
+
+| 引数 | 既定値 |
+| --- | --- |
+| `--host` / `--port` | `127.0.0.1` / `8000` |
+| `--agent0` / `--agent1` | `CSP` / `human` |
+| `--map` | `ring` |
+| `--sc_2agent` | 有効（無効にするなら `--no-sc_2agent`） |
+| `--orders` | `experiment1` |
+| `--instruction_request_timing` | `free` |
+| `--deadline` | `0` |
+
+LANの別端末から接続する場合は `--host 0.0.0.0` を指定します。
+
 ## 注文の指定 (`--orders`)
 
 `--orders` には2種類の指定方法があります。既定は `sample.txt` です。
@@ -243,6 +268,8 @@ export OPENAI_API_KEY="your-api-key-here"
     - `agent/instruction_panel.py`: 指示カードの描画
     - `agent/myagent/`: `CSPAgent`、`TaskAgent`、`GreedyAgent` など
     - `agent/TSP/`: `TSPSolverAgent`
+- `server.py`: ブラウザからプレイするための実験用サーバー
+- `web/index.html`: ブラウザ側のクライアント
 - `testbed-cooking/`: Overcookedのゲーム環境（`gym-cooking`）が含まれています。
     - `gym_cooking/utils/levels/`: マップ定義
     - `gym_cooking/utils/order/`: 注文ファイル
