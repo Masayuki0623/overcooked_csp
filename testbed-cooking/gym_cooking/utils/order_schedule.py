@@ -8,6 +8,24 @@ import gym_cooking.recipe_planner.recipe as RECIPE
 import gym_cooking
 
 
+def resolve_order_path(order_file):
+    """注文ファイル名/パスを実ファイルのパスに解決する。
+
+    拡張子なしなら .txt を補い、相対パスなら gym_cooking/utils/order/ 配下も探す。
+    呼び出し側が「開く前に存在確認したい」ときにも使えるよう、モジュール関数にしている。
+    """
+    order_path = Path(order_file)
+    if order_path.suffix == '':
+        order_path = order_path.with_suffix('.txt')
+    if not order_path.is_absolute():
+        local_path = Path(gym_cooking.__file__).absolute().parent / 'utils' / 'order' / order_file
+        if local_path.suffix == '':
+            local_path = local_path.with_suffix('.txt')
+        if local_path.exists():
+            order_path = local_path
+    return order_path
+
+
 class OrderScheduler:
     def __init__(self, arglist, recipes):
         self.arglist = arglist
@@ -26,19 +44,17 @@ class OrderScheduler:
         self.failed_orders = 0
 
     def _load_recipe_name_list(self, arglist):
+        # レシピ名が直接指定されていればファイルより優先する。
+        # --orders のプリセット(ランダム生成)はこの経路で渡ってくる。
+        order_recipes = getattr(arglist, 'order_recipes', None)
+        if order_recipes:
+            return list(order_recipes)
+
         order_file = getattr(arglist, 'order_file', None)
         if not order_file:
             return None
 
-        order_path = Path(order_file)
-        if order_path.suffix == '':
-            order_path = order_path.with_suffix('.txt')
-        if not order_path.is_absolute():
-            local_path = Path(gym_cooking.__file__).absolute().parent / 'utils' / 'order' / order_file
-            if local_path.suffix == '':
-                local_path = local_path.with_suffix('.txt')
-            if local_path.exists():
-                order_path = local_path
+        order_path = resolve_order_path(order_file)
 
         with open(order_path, 'r', encoding='utf-8') as file:
             lines = [line.strip() for line in file if line.strip()]

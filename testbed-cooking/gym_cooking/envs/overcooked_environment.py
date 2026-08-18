@@ -36,6 +36,10 @@ class MapSetting:
     max_num_timesteps: int = 100    # max number of timesteps
     max_num_orders: int = 3         # max number of orders
     order_file: str | None = None
+    # 実際に出す注文のレシピ名を直接指定する(order_file より優先)。
+    # --orders のプリセットはここへ解決済みのレシピ名を載せるため、
+    # リプレイには「プリセット名」ではなく実際に出た注文が残る。
+    order_recipes: tuple[str, ...] | None = None
 
     num_agents: int = 2  # fixed
 

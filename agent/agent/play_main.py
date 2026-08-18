@@ -12,12 +12,15 @@ from copy import deepcopy
 
 import os
 import argparse
+import random
 from datetime import datetime
 from pathlib import Path
 from agent.myagent.GreedyAgent import GreedyAgent  # 追加
 from agent.myagent.ChopOnlyAgent import ChopOnlyAgent  # 追加
 from agent.myagent.DualAgentController import DualAgentController  # 追加
 from agent.myagent.CSPAgent import CSPAgent  # 追加
+from gym_cooking.utils.order_preset import generate_order_recipes, is_order_preset, preset_names
+from gym_cooking.utils.order_schedule import resolve_order_path
 
 
 
@@ -57,8 +60,16 @@ def parse_arguments():
         "--debug", action='store_true', help="Enable debug mode with overlay"
     )
     parser.add_argument(
-        "--order", type=str, default='sample',
-        help="Order definition file name without extension, or a path (e.g. sample)"
+        "--orders", "--order", dest='orders', type=str, default='sample.txt',
+        help=(
+            "Orders to serve. Either an order preset name "
+            f"({', '.join(preset_names())}) which randomizes the ingredients, "
+            "or an order definition file name/path (e.g. sample.txt)."
+        )
+    )
+    parser.add_argument(
+        "--order-seed", type=int, default=None,
+        help="Random seed used when --orders names a preset (for reproducible experiments)"
     )
     parser.add_argument(
         "--deadline", type=float, default=None,
@@ -107,10 +118,36 @@ def _iter_task_agents(ai):
                 yield task_agent
 
 
-def init_env_replay(map_name, agent0_name, agent1_name, task_name=None, no_reschedule=False, debug_mode=False, order_file=None):
+def resolve_orders(orders, order_seed=None):
+    """--orders の値を MapSetting へ渡す形に解決する。
+
+    プリセット名なら、ここで材料の組み合わせを選んで具体的なレシピ名まで
+    確定させる。env 側でランダム化しないのは、リプレイに残るのが
+    「プリセット名」ではなく「実際に出た注文」になるようにするため
+    (プリセット名のまま保存すると、再生のたびに別の注文になってしまう)。
+    """
+    if orders is None:
+        return {}
+    if is_order_preset(orders):
+        rng = random.Random(order_seed) if order_seed is not None else random
+        recipes = generate_order_recipes(orders, rng=rng)
+        seed_note = f" (seed={order_seed})" if order_seed is not None else ""
+        print(f"[Orders] preset '{orders}'{seed_note}: {', '.join(recipes)}")
+        return {'order_recipes': tuple(recipes)}
+
+    # プリセット名でなければ注文ファイル。ここで存在を確かめておかないと、
+    # プリセット名の打ち間違いが「ファイルが無い」という分かりにくい失敗になる。
+    order_path = resolve_order_path(orders)
+    if not order_path.exists():
+        raise FileNotFoundError(
+            f"--orders '{orders}' is neither an order preset "
+            f"({', '.join(preset_names())}) nor an existing order file ({order_path})")
+    return {'order_file': orders}
+
+
+def init_env_replay(map_name, agent0_name, agent1_name, task_name=None, no_reschedule=False, debug_mode=False, orders=None, order_seed=None):
     map_kwargs = dict(MAP_SETTINGS[map_name])
-    if order_file is not None:
-        map_kwargs['order_file'] = order_file
+    map_kwargs.update(resolve_orders(orders, order_seed))
     map_set = MapSetting(**map_kwargs)
     replay = Replay()
 
@@ -226,7 +263,9 @@ if __name__ == '__main__':
     agent1_name = arglist.agent1
 
     # initialize replay
-    game, env, replay = init_env_replay(arglist.map, agent0_name, agent1_name, arglist.task, arglist.no_reschedule, arglist.debug, arglist.order)
+    game, env, replay = init_env_replay(arglist.map, agent0_name, agent1_name, arglist.task,
+                                       arglist.no_reschedule, arglist.debug,
+                                       arglist.orders, arglist.order_seed)
 
     try:
         # play
