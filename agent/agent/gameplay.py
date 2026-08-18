@@ -82,13 +82,32 @@ class _SelectiveWriter:
 # 何倍まで引き伸ばすか(--debug で進行を遅くするときにだけ使う)。
 AI_PACE_ROUNDTRIP_FACTOR = 2.0
 
+# 指示を出せるタイミング(--instruction_request_timing)。
+#   free           : 従来どおり、人間が好きなときに Space で指示できる
+#   enable_cook    : 調理タスクに今すぐ着手できる状態になった瞬間、自動で指示画面を出す。
+#                    タイミングを実験条件として固定するため Space での任意呼び出しは無効
+#   no_instruction : 指示を出せない
+INSTRUCTION_TIMING_FREE = 'free'
+INSTRUCTION_TIMING_ENABLE_COOK = 'enable_cook'
+INSTRUCTION_TIMING_NO_INSTRUCTION = 'no_instruction'
+INSTRUCTION_TIMINGS = (
+    INSTRUCTION_TIMING_FREE,
+    INSTRUCTION_TIMING_ENABLE_COOK,
+    INSTRUCTION_TIMING_NO_INSTRUCTION,
+)
+
 
 class GamePlay(Game):
-    def __init__(self, env, replay: Replay, agent_set: AgentSetting, debug_mode: bool = False, human_agent_idx: int | None = 1, ai_agent_idx: int | None = 0, sc_2agent: bool = False):
+    def __init__(self, env, replay: Replay, agent_set: AgentSetting, debug_mode: bool = False, human_agent_idx: int | None = 1, ai_agent_idx: int | None = 0, sc_2agent: bool = False, instruction_request_timing: str = INSTRUCTION_TIMING_FREE):
         Game.__init__(self, env, play=True)
         self.replay = replay
         self.agent_set = agent_set
         self.debug_mode = debug_mode
+        if instruction_request_timing not in INSTRUCTION_TIMINGS:
+            raise ValueError(
+                f"Unknown instruction_request_timing: {instruction_request_timing} "
+                f"(available: {', '.join(INSTRUCTION_TIMINGS)})")
+        self.instruction_request_timing = instruction_request_timing
         self.human_agent_idx = human_agent_idx
         self.ai_agent_idx = ai_agent_idx
         self.sc_2agent = sc_2agent
@@ -139,6 +158,9 @@ class GamePlay(Game):
         # on_render は screen.fill -> display.flip まで行うため、パネルの描画と
         # 交互に画面全体を上書きし合って激しく点滅してしまう。
         self._instruction_panel_active = False
+        # enable_cook の立ち上がり検出用。「前回見たときに着手可能だった cook タスク」。
+        # 同じタスクで何度も指示画面を出さないよう、集合の差分でだけ発火させる。
+        self._seen_ready_cook_actions = set()
 
     def _get_unexecuted_task_candidates(self):
         env_state = self._latest_env_state
@@ -219,66 +241,109 @@ class GamePlay(Game):
                     ('Action', {"agent": "human", "action": action}))
 
             if pygame.key.name(event.key) == "space":
-                self._q_env.put(('Pause', {}))
+                if self.instruction_request_timing != INSTRUCTION_TIMING_FREE:
+                    # free 以外はタイミングを実験条件として固定しているので、
+                    # 人間の任意呼び出しは受け付けない。
+                    return
+                self._request_instruction(trigger='space')
 
-                candidates = self._get_unexecuted_task_candidates()
-                if candidates:
-                    s = self._show_instruction_panel(candidates)
-                else:
-                    s = popup_text("Say to AI:")
+    def _request_instruction(self, trigger='space', allow_text_fallback=True):
+        """指示画面を出し、選ばれた指示を env / AI / リプレイへ登録する。
 
-                if s is not None:
-                    # Record instruction and forward to env/AI
-                    inst_id = time.time()
-                    # get environment time (seconds) snapshot for correlation with CSP frames
-                    accepted_env_time = self._latest_env_state.time if getattr(self, '_latest_env_state', None) is not None else 0.0
-                    # target agent index for AI (default to configured ai_agent_idx or 0)
-                    target_idx = self.ai_agent_idx if self.ai_agent_idx is not None else 0
-                    # support structured return from popup: (display, payload)
-                    display_text = s[0] if isinstance(s, (list, tuple)) and len(s) >= 1 else str(s)
-                    pending_payload = s
-                    if isinstance(s, (list, tuple)) and len(s) >= 2:
-                        pending_payload = s[1]
-                    # attach pending instruction to env for later correlation with events
-                    skip_budget_val = getattr(self.ai, 'skip_budget', None) if hasattr(self, 'ai') and self.ai is not None else None
-                    pending_entry = {'id': inst_id, 'task': pending_payload, 'target_idx': target_idx, 'accepted_env_time': accepted_env_time, 'execution_logged': False, 'deadline_constraint_applied': False, 'status': 'pending', 'skip_budget': skip_budget_val, 'remaining_skip_budget': skip_budget_val, 'tasks_before_target_log': []}
-                    try:
-                        if not hasattr(self.env, '_pending_instructions'):
-                            self.env._pending_instructions = []
-                        self.env._pending_instructions.append(pending_entry)
-                    except Exception as e:
-                        print(f"[GamePlay] Failed to attach pending instruction to env: {e}")
+        Space 押下と、enable_cook の自動呼び出しの共通処理。
+        """
+        if self._instruction_panel_active:
+            return
 
-                    try:
-                        if hasattr(self, 'ai') and self.ai is not None:
-                            if not hasattr(self.ai, '_pending_instructions'):
-                                self.ai._pending_instructions = []
-                            self.ai._pending_instructions.append(pending_entry)
-                    except Exception as e:
-                        print(f"[GamePlay] Failed to attach pending instruction to agent: {e}")
+        self._q_env.put(('Pause', {}))
+        try:
+            candidates = self._get_unexecuted_task_candidates()
+            if candidates:
+                s = self._show_instruction_panel(candidates)
+            elif allow_text_fallback:
+                s = popup_text("Say to AI:")
+            else:
+                s = None
 
-                    # replay log for instruction accepted
-                    try:
-                        # log display text for human-readable logs, keep payload in pending entry
-                        self.replay.log('instruction_accepted', {'id': inst_id, 'task': display_text, 'accepted_time_wall': inst_id, 'accepted_time_env': accepted_env_time, 'target_idx': target_idx})
-                    except Exception:
-                        pass
+            if s is not None:
+                # Record instruction and forward to env/AI
+                inst_id = time.time()
+                # get environment time (seconds) snapshot for correlation with CSP frames
+                accepted_env_time = self._latest_env_state.time if getattr(self, '_latest_env_state', None) is not None else 0.0
+                # target agent index for AI (default to configured ai_agent_idx or 0)
+                target_idx = self.ai_agent_idx if self.ai_agent_idx is not None else 0
+                # support structured return from popup: (display, payload)
+                display_text = s[0] if isinstance(s, (list, tuple)) and len(s) >= 1 else str(s)
+                pending_payload = s
+                if isinstance(s, (list, tuple)) and len(s) >= 2:
+                    pending_payload = s[1]
+                # attach pending instruction to env for later correlation with events
+                skip_budget_val = getattr(self.ai, 'skip_budget', None) if hasattr(self, 'ai') and self.ai is not None else None
+                pending_entry = {'id': inst_id, 'task': pending_payload, 'target_idx': target_idx, 'accepted_env_time': accepted_env_time, 'execution_logged': False, 'deadline_constraint_applied': False, 'status': 'pending', 'skip_budget': skip_budget_val, 'remaining_skip_budget': skip_budget_val, 'tasks_before_target_log': [], 'trigger': trigger}
+                try:
+                    if not hasattr(self.env, '_pending_instructions'):
+                        self.env._pending_instructions = []
+                    self.env._pending_instructions.append(pending_entry)
+                except Exception as e:
+                    print(f"[GamePlay] Failed to attach pending instruction to env: {e}")
 
-                    # Print to debug log (will be captured in debug_*.log)
-                    print(f"[Instruction] accepted id={inst_id:.6f} task={display_text} agent_idx={target_idx} env_time={accepted_env_time:.6f} wall_time={inst_id:.6f}")
+                try:
+                    if hasattr(self, 'ai') and self.ai is not None:
+                        if not hasattr(self.ai, '_pending_instructions'):
+                            self.ai._pending_instructions = []
+                        self.ai._pending_instructions.append(pending_entry)
+                except Exception as e:
+                    print(f"[GamePlay] Failed to attach pending instruction to agent: {e}")
 
-                    # Signal AI to reschedule due to new instruction
-                    try:
-                        if hasattr(self, 'ai') and self.ai is not None:
-                            self.ai._mark_reschedule_needed('instruction_accepted')
-                    except Exception as e:
-                        print(f"[GamePlay] Failed to notify AI of instruction: {e}")
+                # replay log for instruction accepted
+                try:
+                    # log display text for human-readable logs, keep payload in pending entry
+                    self.replay.log('instruction_accepted', {'id': inst_id, 'task': display_text, 'accepted_time_wall': inst_id, 'accepted_time_env': accepted_env_time, 'target_idx': target_idx, 'trigger': trigger})
+                except Exception:
+                    pass
 
-                    # send human-readable display to chat queues
-                    self._q_env.put(('ChatIn', {"chat": display_text, "mode": "text"}))
-                    self._q_ai.put(('Chat', dict(chat=display_text)))
+                # Print to debug log (will be captured in debug_*.log)
+                print(f"[Instruction] accepted id={inst_id:.6f} task={display_text} agent_idx={target_idx} env_time={accepted_env_time:.6f} wall_time={inst_id:.6f} trigger={trigger}")
 
-                self._q_env.put(('Continue', {}))
+                # Signal AI to reschedule due to new instruction
+                try:
+                    if hasattr(self, 'ai') and self.ai is not None:
+                        self.ai._mark_reschedule_needed('instruction_accepted')
+                except Exception as e:
+                    print(f"[GamePlay] Failed to notify AI of instruction: {e}")
+
+                # send human-readable display to chat queues
+                self._q_env.put(('ChatIn', {"chat": display_text, "mode": "text"}))
+                self._q_ai.put(('Chat', dict(chat=display_text)))
+        finally:
+            self._q_env.put(('Continue', {}))
+
+    def _poll_cook_instruction_trigger(self):
+        """enable_cook: 調理タスクに今すぐ着手できる状態になった瞬間、指示画面を出す。
+
+        AI は判断サイクルごとに「いま着手できる cook タスク」を
+        ready_cook_actions へ書き出しているので、ここではそれを読むだけにする
+        (毎フレーム世界を評価し直すと重く、置き場の割り当てにも副作用が出る)。
+
+        発火は集合の差分、つまり「前回は着手できなかったタスクが着手可能になった」
+        立ち上がりのときだけ。着手可能なまま留まっている間に何度も画面を出さない。
+        """
+        if self.instruction_request_timing != INSTRUCTION_TIMING_ENABLE_COOK:
+            return
+        if self._instruction_panel_active or self.ai is None:
+            return
+
+        ready = set(getattr(self.ai, 'ready_cook_actions', ()) or ())
+        newly_ready = ready - self._seen_ready_cook_actions
+        # 着手できなくなったタスクは記憶から外す。再び条件が揃えば改めて発火させる。
+        self._seen_ready_cook_actions = ready
+        if not newly_ready:
+            return
+
+        print(f"[Instruction] enable_cook trigger: {sorted(newly_ready)}")
+        # 候補が無ければ何も出さない(テキスト入力へは落とさない)。
+        # 条件が成立した瞬間に選ばせるモードなので、選択肢のない入力欄は意味がない。
+        self._request_instruction(trigger='enable_cook', allow_text_fallback=False)
 
     def _run_env(self):
         seconds_per_step = 1 / self.fps
@@ -624,6 +689,9 @@ class GamePlay(Game):
         while True:
             for event in pygame.event.get():
                 self.on_event(event)
+            # 指示パネルの描画は pygame の main スレッドから行う必要があるため、
+            # 自動呼び出しの監視もこのループに置く。
+            self._poll_cook_instruction_trigger()
             if not self._q_control.empty():
                 event, args = self._q_control.get_nowait()
                 if event == 'Quit':

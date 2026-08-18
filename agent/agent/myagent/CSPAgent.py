@@ -137,6 +137,9 @@ class CSPAgent:
         self._predicted_human_task_id = None
         self._human_prediction_doubt = 0
         self.human_counterpart_mode = False
+        # 「いま即座に着手できる cook タスク」を (動詞, 対象) で保持する。
+        # __call__ ごとに更新し、GamePlay の指示タイミング監視(enable_cook)が読む。
+        self.ready_cook_actions = set()
         # CSP が実際に操作するプレイヤー番号 (0 or 1)。
         # sc_2agent=True かつ human_counterpart_mode=True のとき有効。
         # play_main.py が ai_idx を設定する。
@@ -1277,6 +1280,39 @@ class CSPAgent:
                 return True
         return False
 
+    def _collect_ready_cook_actions(self, env, current_orders):
+        """「いま即座に着手できる cook タスク」を (動詞, 対象) の集合で返す。
+
+        指示タイミングを cook に固定する実験モード(--instruction_request_timing
+        enable_cook)のための監視用。GamePlay 側から毎フレーム世界を評価し直すと
+        重いうえに _build_order_tasks の副作用(置き場の割り当て)まで走ってしまうため、
+        AI が通常の判断サイクルで作った current_orders を使ってここで求めておき、
+        GamePlay は結果を読むだけにする。
+
+        「即座に着手できる」= 材料が刻み終わって世界に存在し、かつ実際に
+        投入できる鍋がある状態。どちらか欠けていると、選ばせても AI はその場で
+        待つことしかできない。
+
+        注文番号(order_uid)を含めないのは、注文が1件配達されて補充されるたびに
+        番号が振り直され、中身が同じタスクなのに別物として再発火してしまうため。
+        指示パネルの候補も (動詞, 対象) 単位でまとめているので、粒度も揃う。
+        """
+        ready = set()
+        for order in current_orders:
+            for task in order.get('tasks', []):
+                task_id = task.get('id')
+                if not (isinstance(task_id, tuple) and len(task_id) >= 3):
+                    continue
+                verb, obj, _order_uid = task_id
+                if verb != 'cook' or task_id in self.completed_task_ids:
+                    continue
+                if not self._cook_dependency_ready_from_world(env, obj):
+                    continue
+                if not self._has_usable_pot_for_cook(env, obj):
+                    continue
+                ready.add((verb, obj))
+        return ready
+
     def _find_ready_serve_task(self, env, agent_idx):
         """鍋が塞がって cook が進めないとき、鍋を空けられる serve タスクを探す。
 
@@ -1340,6 +1376,9 @@ class CSPAgent:
                 current_task_ids.add(t['id'])
         current_task_ids = self._stabilize_task_ids_for_held_progress(env, current_task_ids)
         event_reason = self._collect_event_replan_reason(env)
+
+        # 指示タイミング固定モード(enable_cook)の監視用。GamePlay が読む。
+        self.ready_cook_actions = self._collect_ready_cook_actions(env, current_orders)
 
         # 人間が推測と違うことをしていたら、予測ミスとして再スケジューリングする
         if self.sc_2agent and self.human_counterpart_mode and self.use_predicted_human_model:
