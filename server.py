@@ -104,6 +104,10 @@ class WebGamePlay:
         self.replay = None
         self.mouse = None
 
+        # 描画完了した1枚をそのまま抱えておく退避先(描画スレッドが書く)。
+        self._pending_surface = None
+        self._pending_lock = threading.Lock()
+
         # 最新フレーム。capture 側(executor スレッド)が書き、送信側が読む。
         self._frame = None            # PNG バイト列
         self._frame_version = 0
@@ -161,8 +165,39 @@ class WebGamePlay:
         print(f'[server] ゲーム終了: {self.result}')
 
     def on_init_done(self):
-        """pygame の初期化後に呼ぶ(display が出来てから mouse を差し替える)。"""
+        """pygame の初期化後に呼ぶ(display が出来てから差し替える)。"""
         self.mouse = RemoteMouse()
+        self._install_frame_hook()
+
+    def _install_frame_hook(self):
+        """描画が完了した瞬間だけフレームを取り込むようにする。
+
+        display Surface を別スレッドから好きなタイミングで読むと、
+        on_render の「screen.fill -> 各オブジェクトを順に描く」の途中を
+        掴んでしまい、カウンターやプレイヤーが抜けたコマが混ざる
+        (毎フレーム何かが消えて見える原因)。
+
+        on_render も指示パネルも、1枚を描き終えた最後に必ず
+        pygame.display.flip() を呼ぶ。そこへ割り込んで、描画したスレッド
+        自身に完成品を複製させれば、常に整合の取れた1枚だけが手に入る。
+        """
+        original_flip = pygame.display.flip
+
+        def flip(*args, **kwargs):
+            original_flip(*args, **kwargs)
+            surface = pygame.display.get_surface()
+            if surface is None:
+                return
+            try:
+                # 複製しておけば、この後 PNG 化している間に次の描画が
+                # 始まっても壊れない。320x400 の複製は数十マイクロ秒。
+                snapshot = surface.copy()
+            except pygame.error:
+                return
+            with self._pending_lock:
+                self._pending_surface = snapshot
+
+        pygame.display.flip = flip
 
     def _save_replay(self):
         a = self.args
@@ -180,12 +215,14 @@ class WebGamePlay:
     # 画面キャプチャ
     # ------------------------------------------------------------------
     def capture(self):
-        """display Surface を PNG にする。変化が無ければ None を返す。
+        """描画完了済みのフレームを PNG にする。新しい絵が無ければ None。
 
         executor スレッドから呼ばれる(PNG エンコードに約3msかかるため、
         イベントループを塞がないようにする)。
         """
-        surface = pygame.display.get_surface()
+        with self._pending_lock:
+            surface = self._pending_surface
+            self._pending_surface = None
         if surface is None:
             return None
 
@@ -338,8 +375,13 @@ async def ws(sock: WebSocket):
 
             if size != sent_size and size != (0, 0):
                 sent_size = size
+                # base_w/base_h はゲーム画面そのものの大きさ。指示パネルを
+                # 出すと display はこれより横に広がるが、左側 base_w ぶんは
+                # 常にゲーム画面なので、クライアントはそこだけを切り出して
+                # 位置を動かさずに描き続けられる。
                 await sock.send_text(json.dumps(
-                    {'type': 'meta', 'w': size[0], 'h': size[1]}))
+                    {'type': 'meta', 'w': size[0], 'h': size[1],
+                     'base_w': session.game.width, 'base_h': session.game.height}))
 
             if data is not None and version != sent_version:
                 sent_version = version

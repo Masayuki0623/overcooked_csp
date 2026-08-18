@@ -10,8 +10,6 @@
     --panel: #1e2229;
     --text: #e8eaed;
     --muted: #9aa2ad;
-    --accent: #6ea8fe;
-    --warn: #f0a35e;
     --bad: #e8697d;
   }
   * { box-sizing: border-box; }
@@ -20,40 +18,41 @@
     background: var(--bg);
     color: var(--text);
     font-family: "Segoe UI", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", sans-serif;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 16px;
-    padding: 20px 16px 40px;
+    padding: 20px 24px 40px;
     min-height: 100vh;
   }
-  h1 { font-size: 18px; font-weight: 600; margin: 0; letter-spacing: .02em; }
+  h1 { font-size: 17px; font-weight: 600; margin: 0 0 12px; letter-spacing: .02em; }
+
+  /* ゲーム画面は必ず左端。指示パネルが出ても位置がずれないよう、
+     ゲームとパネルを別々の canvas にして横に並べる。 */
   #stage {
-    background: #000;
-    border-radius: 8px;
-    overflow: hidden;
-    box-shadow: 0 8px 32px rgba(0,0,0,.5);
-    line-height: 0;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
   }
-  canvas {
+  #stage canvas {
     image-rendering: pixelated;
     display: block;
-    max-width: 100%;
-    height: auto;
-    cursor: pointer;
+    background: #000;
+    border-radius: 6px;
+    box-shadow: 0 6px 24px rgba(0,0,0,.45);
   }
+  #game { cursor: default; }
+  #panel { cursor: pointer; }
+  #panel.hidden { display: none; }
+
   .bar {
     display: flex;
     flex-wrap: wrap;
     gap: 8px 20px;
     align-items: center;
-    justify-content: center;
     background: var(--panel);
     border-radius: 8px;
-    padding: 10px 16px;
-    font-size: 13px;
+    padding: 9px 14px;
+    font-size: 12.5px;
     color: var(--muted);
-    max-width: 900px;
+    margin-bottom: 12px;
+    width: fit-content;
   }
   .bar b { color: var(--text); font-weight: 600; }
   .dot {
@@ -62,7 +61,8 @@
     vertical-align: middle;
   }
   .dot.on { background: #6bd08a; }
-  .keys { font-size: 13px; color: var(--muted); text-align: center; line-height: 1.9; }
+
+  .keys { font-size: 12.5px; color: var(--muted); line-height: 1.9; margin-top: 14px; }
   kbd {
     background: #2a2f38; border: 1px solid #3a414c; border-bottom-width: 2px;
     border-radius: 4px; padding: 1px 7px; font-family: inherit;
@@ -89,7 +89,10 @@
   <span id="cfg"></span>
 </div>
 
-<div id="stage"><canvas id="screen" width="320" height="400"></canvas></div>
+<div id="stage">
+  <canvas id="game" width="320" height="400"></canvas>
+  <canvas id="panel" class="hidden" width="1" height="1"></canvas>
+</div>
 
 <div class="keys">
   <kbd>↑</kbd> <kbd>↓</kbd> <kbd>←</kbd> <kbd>→</kbd> で移動 / 向いている先へインタラクト<br>
@@ -100,8 +103,14 @@
 
 <script>
 (function () {
-  const canvas = document.getElementById('screen');
-  const ctx = canvas.getContext('2d');
+  // 320x400 のドット絵なので少しだけ拡大する。等倍に近いほど文字が読みやすい。
+  const SCALE = 1.5;
+
+  const gameCv = document.getElementById('game');
+  const panelCv = document.getElementById('panel');
+  const gameCtx = gameCv.getContext('2d');
+  const panelCtx = panelCv.getContext('2d');
+
   const el = {
     conn: document.getElementById('conn'),
     dot: document.getElementById('conn-dot'),
@@ -113,30 +122,62 @@
     overlayText: document.getElementById('overlay-text'),
   };
 
-  // 320x400 のドット絵なので、そのままだと小さすぎる。等倍整数で拡大する。
-  const SCALE = 2;
-  function applySize(w, h) {
-    canvas.width = w;
-    canvas.height = h;
-    canvas.style.width = (w * SCALE) + 'px';
-    canvas.style.height = (h * SCALE) + 'px';
+  // サーバー側 Surface の大きさ。base はゲーム画面のみ、full は指示パネル込み。
+  let baseW = 320, baseH = 400;
+  let fullW = 320, fullH = 400;
+
+  function setCanvas(cv, w, h) {
+    if (cv.width !== w) cv.width = w;
+    if (cv.height !== h) cv.height = h;
+    cv.style.width = (w * SCALE) + 'px';
+    cv.style.height = (h * SCALE) + 'px';
+  }
+
+  function applyMeta(msg) {
+    baseW = msg.base_w; baseH = msg.base_h;
+    fullW = msg.w;      fullH = msg.h;
+
+    // ゲーム画面の canvas は常に同じ大きさ・同じ位置のまま動かさない。
+    setCanvas(gameCv, baseW, baseH);
+
+    const panelW = Math.max(0, fullW - baseW);
+    if (panelW > 0) {
+      setCanvas(panelCv, panelW, fullH);
+      panelCv.classList.remove('hidden');
+    } else {
+      panelCv.classList.add('hidden');
+    }
   }
 
   // ---- 描画 --------------------------------------------------------
   let frameTimes = [];
+  let drawing = false;
+
   function drawBlob(blob) {
+    // 前の1枚をまだ展開中なら捨てる。溜め込むと表示が実時間から遅れていく。
+    if (drawing) return;
+    drawing = true;
     createImageBitmap(blob).then(bmp => {
-      if (bmp.width !== canvas.width || bmp.height !== canvas.height) {
-        applySize(bmp.width, bmp.height);
+      // 左 baseW ぶんがゲーム画面、その右が指示パネル。切り分けて別々に描く。
+      gameCtx.drawImage(bmp, 0, 0, baseW, baseH, 0, 0, baseW, baseH);
+
+      const panelW = bmp.width - baseW;
+      if (panelW > 0) {
+        if (panelCv.width !== panelW || panelCv.height !== bmp.height) {
+          setCanvas(panelCv, panelW, bmp.height);
+          panelCv.classList.remove('hidden');
+        }
+        panelCtx.drawImage(bmp, baseW, 0, panelW, bmp.height,
+                                0, 0, panelW, bmp.height);
       }
-      ctx.drawImage(bmp, 0, 0);
       bmp.close();
+      drawing = false;
 
       const now = performance.now();
       frameTimes.push(now);
       while (frameTimes.length && now - frameTimes[0] > 2000) frameTimes.shift();
       el.fps.textContent = (frameTimes.length / 2).toFixed(1);
-    });
+    }).catch(() => { drawing = false; });
   }
 
   // ---- 接続 --------------------------------------------------------
@@ -165,7 +206,7 @@
 
     const msg = JSON.parse(ev.data);
     if (msg.type === 'meta') {
-      applySize(msg.w, msg.h);
+      applyMeta(msg);
     } else if (msg.type === 'pong') {
       el.rtt.textContent = (performance.now() - msg.t).toFixed(0);
     } else if (msg.type === 'status') {
@@ -202,30 +243,35 @@
     send({ type: 'key', code: e.code });
   });
 
-  // マウス座標は表示倍率を戻して、サーバー側の Surface 座標で送る。
-  function toSurface(e) {
-    const r = canvas.getBoundingClientRect();
+  // マウス座標はサーバー側 Surface の座標へ戻して送る。
+  // パネルは display の右側に置かれているので、x に baseW を足す。
+  function toSurface(cv, e, offsetX) {
+    const r = cv.getBoundingClientRect();
     return {
-      x: Math.round((e.clientX - r.left) * canvas.width / r.width),
-      y: Math.round((e.clientY - r.top) * canvas.height / r.height),
+      x: Math.round((e.clientX - r.left) * cv.width / r.width) + offsetX,
+      y: Math.round((e.clientY - r.top) * cv.height / r.height),
     };
   }
-  canvas.addEventListener('mousemove', (e) => {
-    const p = toSurface(e);
-    send({ type: 'mousemove', x: p.x, y: p.y });
-  });
-  canvas.addEventListener('mousedown', (e) => {
-    if (e.button !== 0) return;
-    const p = toSurface(e);
-    send({ type: 'mousedown', x: p.x, y: p.y });
-  });
+  function bindMouse(cv, getOffsetX) {
+    cv.addEventListener('mousemove', (e) => {
+      const p = toSurface(cv, e, getOffsetX());
+      send({ type: 'mousemove', x: p.x, y: p.y });
+    });
+    cv.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      const p = toSurface(cv, e, getOffsetX());
+      send({ type: 'mousedown', x: p.x, y: p.y });
+    });
+  }
+  bindMouse(gameCv, () => 0);
+  bindMouse(panelCv, () => baseW);
 
   // ---- 実験条件の表示 -----------------------------------------------
   fetch('/api/config').then(r => r.json()).then(c => {
     el.cfg.textContent = `map=${c.map} / ${c.agent0} vs ${c.agent1} / orders=${c.orders}`;
   }).catch(() => {});
 
-  applySize(320, 400);
+  setCanvas(gameCv, baseW, baseH);
 })();
 </script>
 </body>
