@@ -57,6 +57,12 @@ from gym_cooking.utils.order_preset import preset_names  # noqa: E402
 
 WEB_DIR = ROOT / 'web'
 
+# スレッド間で GIL を渡す間隔(既定 5ms)。ローカル版と違い Web 版は
+# 環境・AI・配信・エンコードが同じプロセスで同時に動くため、既定のままだと
+# 1度 GIL を握ったスレッドが最大 5ms 手放さず、10Hz で回りたい環境スレッドの
+# 周期が伸びる。短くすると切り替えが増える代わりに、待たされる最大時間が縮む。
+sys.setswitchinterval(0.001)
+
 # ブラウザのキー名 -> pygame のキー定数。
 # 矢印キーは移動/インタラクト、Space は指示パネル、Escape はパネルのキャンセル。
 KEY_MAP = {
@@ -359,13 +365,23 @@ async def state():
 
 @app.get('/api/perf')
 async def perf():
+    """どこが遅いかを切り分けるための実測値。
+
+    env_period_ms が 1/fps(=100ms)より大きいのに env_work_ms が小さければ、
+    処理が重いのではなく、他スレッドに邪魔されて環境が回れていない。
+    """
     p = dict(session.perf)
     elapsed = max(1e-6, time.time() - p.pop('started'))
+    stats = getattr(session.game, 'loop_stats', {}) or {}
     return JSONResponse({
         'elapsed_s': round(elapsed, 1),
         'rendered_fps': round(p['rendered'] / elapsed, 2),
         'encoded_fps': round(p['encoded'] / elapsed, 2),
         'sent_fps': round(p['sent'] / elapsed, 2),
+        'env_work_ms': round(stats.get('work_s', 0.0) * 1000, 1),
+        'env_period_ms': round(stats.get('period_s', 0.0) * 1000, 1),
+        'env_target_ms': round(1000 / max(session.game.fps, 1), 1),
+        'cpu_count': os.cpu_count(),
         **p,
     })
 

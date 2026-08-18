@@ -82,6 +82,9 @@ class _SelectiveWriter:
 # 何倍まで引き伸ばすか(--debug で進行を遅くするときにだけ使う)。
 AI_PACE_ROUNDTRIP_FACTOR = 2.0
 
+# 入力イベントを拾うループの待ち時間(秒)。500Hz。
+HUMAN_POLL_INTERVAL = 0.002
+
 # 指示を出せるタイミング(--instruction_request_timing)。
 #   free           : 従来どおり、人間が好きなときに Space で指示できる
 #   enable_cook    : 調理タスクに今すぐ着手できる状態になった瞬間、自動で指示画面を出す。
@@ -158,6 +161,9 @@ class GamePlay(Game):
         # on_render は screen.fill -> display.flip まで行うため、パネルの描画と
         # 交互に画面全体を上書きし合って激しく点滅してしまう。
         self._instruction_panel_active = False
+
+        # 環境ループ1周の実測(Web版の /api/perf から読む)。
+        self.loop_stats = {'work_s': 0.0, 'period_s': 0.0, 'last_top': None}
         # enable_cook の立ち上がり検出用。「前回見たときに着手可能だった cook タスク」。
         # 同じタスクで何度も指示画面を出さないよう、集合の差分でだけ発火させる。
         self._seen_ready_cook_actions = set()
@@ -366,6 +372,7 @@ class GamePlay(Game):
         self._q_ai.put_nowait(('Env', {"EnvState": e}))
 
         while True:
+            loop_top = time.time()
             while not self._q_env.empty():
                 event = self._q_env.get_nowait()
                 event_type, args = event
@@ -461,6 +468,15 @@ class GamePlay(Game):
             # 描画と交互に画面全体を上書きし合って激しく点滅してしまう。
             if not self._instruction_panel_active:
                 self.on_render(paused=paused, chat=chat, debug_info=debug_info)
+
+            # 1周の実測。work は実際に処理へ使った時間、period は1周の間隔。
+            # period が 1/fps より大きいのに work が小さいなら、CPU ではなく
+            # 他スレッドに邪魔されて回れていないということ。
+            now = time.time()
+            self.loop_stats['work_s'] = now - loop_top
+            if self.loop_stats['last_top'] is not None:
+                self.loop_stats['period_s'] = loop_top - self.loop_stats['last_top']
+            self.loop_stats['last_top'] = loop_top
 
             # AI の判断が 1 ステップ分の時間より長くかかっているなら、環境の 1 ステップを
             # その分だけ引き伸ばす。--debug では詳細トレースの出力だけで判断1回が
@@ -702,6 +718,12 @@ class GamePlay(Game):
                 if event == 'Quit':
                     self._q_ai.put(('Quit', {}))
                     return
+            # 少しだけ待つ。待たずに回すとこのスレッドが GIL を握りっぱなしになり、
+            # 環境スレッド(10Hz)・AIスレッド・(Web版では)配信スレッドがその分だけ
+            # 割り込めなくなる。コア数が少ない環境ほど影響が大きく、環境の周期が
+            # 伸びて画面が重くなる。ゲームは 10Hz なので 500Hz も見れば十分で、
+            # 入力の取りこぼしや遅れは生じない。
+            time.sleep(HUMAN_POLL_INTERVAL)
 
     def on_execute(self):
         if self.on_init() == False:
