@@ -172,7 +172,7 @@ def build():
     for name in ASSEMBLE_MIXED_CUP_FOOD + ASSEMBLE_MIXING_CUP_FOOD:
         out[name] = draw_cup_with(name)
 
-    out['blender'] = draw_blender()
+    out['Blender'] = draw_blender()
     return out
 
 

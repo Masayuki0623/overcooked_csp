@@ -114,6 +114,39 @@ def interact(agent, world, current_time) -> Event:
                         fire.putout(agent.name, current_time)
                         return Event(playerA=agent.name, event=f'Putout_Fire', location=gs.location, time=current_time)
 
+        # if gs is Blender --> put fruits in / pour finished juice into a cup
+        elif isinstance(gs, Blender):
+            if not world.is_occupied(gs.location):
+                # 空のミキサーに、刻んだフルーツ(2種まとめたもの)を入れる。
+                # 鍋と同じく、入れたら混ぜ終わるまで取り出せない。
+                if agent.holding.is_mixable():
+                    food, cup = agent.holding.split_food_cup()
+                    world.remove(agent.holding)
+                    agent.release()
+                    obj_food = Object(location=gs.location, contents=food)
+                    event = Event(playerA=agent.name, event=f'Mix_{obj_food.full_name}',
+                                  location=gs.location, time=current_time)
+                    gs.acquire(obj_food)
+                    obj_food.mix(current_time)
+                    world.insert(obj_food)
+                    if cup is not None:
+                        obj_cup = Object(location=agent.location, contents=cup)
+                        agent.acquire(obj_cup)
+                        world.insert(obj_cup)
+                    return event
+            else:
+                # 空のコップを持って向かうと、混ぜ終わったジュースを注げる。
+                if agent.holding.contents[0] == Cup() and len(agent.holding.contents) == 1:
+                    obj = world.get_object_at(gs.location, None, find_held_objects=False)
+                    if obj.is_mixed():
+                        gs.release()
+                        world.remove(obj)
+                        world.remove(agent.holding)
+                        agent.holding.merge(obj)
+                        world.insert(agent.holding)
+                        return Event(playerA=agent.name, event=f'Pickup_{obj.full_name}_from_{gs.name}',
+                                     location=gs.location, time=current_time)
+
         # if occupied gridsquare in front --> try merging
         elif world.is_occupied(gs.location):
             # Get object on gridsquare/counter
@@ -200,6 +233,16 @@ def interact(agent, world, current_time) -> Event:
         # not empty in front --> pick up
         if isinstance(gs, Pot) or isinstance(gs, Delivery) or isinstance(gs, Bin):
             pass
+
+        # ミキサーは能動操作。手ぶらで向かってインタラクトするたび1段階進む。
+        # (まな板で刻むのと同じ挙動。待ちタイマーでは進まない)
+        elif isinstance(gs, Blender):
+            if world.is_occupied(gs.location):
+                obj = world.get_object_at(gs.location, None, find_held_objects=False)
+                if obj.is_mixing():
+                    # world の索引キーは Object.name(状態を含まない)なので、
+                    # 状態が進んでも張り替えは要らない。
+                    obj.update_state(current_time)
 
         elif world.is_occupied(gs.location) and not isinstance(gs, Delivery) and not isinstance(gs, Bin):
             obj = world.get_object_at(gs.location, None, find_held_objects=False)

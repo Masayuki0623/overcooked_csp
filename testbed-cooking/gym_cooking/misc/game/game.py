@@ -87,6 +87,7 @@ class Game:
             'normal': [],
             'chopping': [],
             'cook': [],
+            'mix': [],
             'held': [],
         }
 
@@ -102,6 +103,8 @@ class Game:
                         self.draw_gridsquare(o)
                 elif isinstance(self.world.get_gridsquare_at(o.location), Pot):
                     objs['cook'].append(o)
+                elif isinstance(self.world.get_gridsquare_at(o.location), Blender):
+                    objs.setdefault('mix', []).append(o)
                 elif len(o.contents) == 1 and o.contents[0].full_name.startswith('Chopping'):
                     objs['chopping'].append(o)
                 elif o.is_held:
@@ -124,6 +127,10 @@ class Game:
             else:
                 assert o.is_cooked()
                 self.draw_cooked_object_in_pot(o)
+
+        # Draw mixing objects (ミキサーの中身)
+        for o in objs['mix']:
+            self.draw_mixing_object(o)
 
         # Draw chopping objects
         for o in objs['chopping']:
@@ -201,7 +208,7 @@ class Game:
                 ('Rect', {'color': Color.DELIVERY, 'box': box}))
             self.draw('delivery', self.tile_size, sl)
 
-        elif isinstance(gs, Bin) or isinstance(gs, Tile) or isinstance(gs, Cutboard) or isinstance(gs, Pot):
+        elif isinstance(gs, (Bin, Tile, Cutboard, Pot, Blender)):
             pygame.draw.rect(self.screen, Color.COUNTER, fill)
             self.__plot_elements.append(
                 ('Rect', {'color': Color.COUNTER, 'box': box}))
@@ -236,18 +243,27 @@ class Game:
                   self.tile_size, self.scaled_location(agent.location))
         self.draw_agent_object(agent.holding)
 
+    @staticmethod
+    def _container_name(obj):
+        """中身と分けて描く容器(皿・コップ)の名前。無ければ None。"""
+        for c in obj.contents:
+            if isinstance(c, (Plate, Cup)):
+                return c.full_name
+        return None
+
     def draw_agent_object(self, obj):
         # Holding shows up in bottom right corner.
         if obj is None:
             return
-        if any([isinstance(c, Plate) for c in obj.contents]):
-            self.draw('Plate', self.holding_size,
+        container = self._container_name(obj)
+        if container is not None:
+            self.draw(container, self.holding_size,
                       self.holding_location(obj.location))
             if len(obj.contents) > 1:
-                plate = obj.unmerge('Plate')
+                held = obj.unmerge(container)
                 self.draw(obj.full_name, self.holding_container_size,
                           self.holding_container_location(obj.location))
-                obj.merge(plate)
+                obj.merge(held)
         else:
             self.draw(obj.full_name, self.holding_size,
                       self.holding_location(obj.location))
@@ -255,17 +271,32 @@ class Game:
     def draw_object(self, obj):
         if obj is None:
             return
-        if any([isinstance(c, Plate) for c in obj.contents]):
-            self.draw('Plate', self.tile_size,
+        container = self._container_name(obj)
+        if container is not None:
+            self.draw(container, self.tile_size,
                       self.scaled_location(obj.location))
             if len(obj.contents) > 1:
-                plate = obj.unmerge('Plate')
+                held = obj.unmerge(container)
                 self.draw(obj.full_name, self.container_size,
                           self.container_location(obj.location))
-                obj.merge(plate)
+                obj.merge(held)
         else:
             self.draw(obj.full_name, self.tile_size,
                       self.scaled_location(obj.location))
+
+    def draw_mixing_object(self, obj):
+        """ミキサーの中身。鍋と違い時間では進まないので、残り回数を棒で示す。"""
+        if obj is None:
+            return
+        name = obj.full_name.replace('Mixing', 'Mixed')
+        self.draw_by_scale_loc(name, (obj.location[0], obj.location[1] - 0.05), 0.6)
+        if obj.is_mixing():
+            loc = self.scaled_location(obj.location)
+            rest = obj.contents[0].state._rest_steps
+            self.draw_bar(loc[0] + (0.6 - 0.4) * self.tile_size[0],
+                          loc[1] + (0.5 + 0.35) * self.tile_size[1],
+                          0.7 * self.tile_size[0] * rest / BLENDING_NUM_STEPS,
+                          0.1 * self.tile_size[1], (60, 140, 220))
 
     def draw_cooking_object(self, obj):
         if obj is None:

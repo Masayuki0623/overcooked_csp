@@ -99,6 +99,9 @@ class Mixing(Predicate):
 class Mixed(Predicate):
     def __init__(self, obj, **kwargs):
         Predicate.__init__(self, 'Mixed', (obj,))
+        # 状態列の終端。誤って update_state が呼ばれても次の状態へ進まないよう、
+        # Charred と同じく実質無限の残りステップにしておく。
+        self._rest_steps = 1e9
 
 class Cooked(Predicate):
     def __init__(self, obj, start_time=None):

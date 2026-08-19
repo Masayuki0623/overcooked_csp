@@ -125,8 +125,9 @@ class OvercookedEnvironment(gym.Env):
                 # Phase 1: Read in kitchen map.
                 elif phase == 1:
                     for x, rep in enumerate(line):
-                        # Object, i.e. Tomato, Lettuce, Onion, or Plate.
-                        if rep in 'tlopf':
+                        # Object, i.e. Tomato, Lettuce, Onion, Plate, fruits or Cup.
+                        # (マスではなく「カウンターの上に置かれた物」として読む文字)
+                        if rep in 'tlopfarnc':
                             counter = Counter(location=(x, y))
                             obj = Object(
                                 location=(x, y),
@@ -571,11 +572,10 @@ class OvercookedEnvironment(gym.Env):
                     objs.append(o)
 
         # objects
-        ALL_ENTITIES = FRESH_FOOD + CHOPPING_FOOD + CHOPPED_FOOD + COOKING_FOOD + COOKED_FOOD + CHARRED_FOOD + ['Plate',
-                                                                                                                'Fire',
-                                                                                                                'FireExtinguisher']
+        ALL_ENTITIES = FRESH_FOOD + CHOPPING_FOOD + CHOPPED_FOOD + COOKING_FOOD + COOKED_FOOD \
+            + CHARRED_FOOD + MIXING_FOOD + MIXED_FOOD + ['Plate', 'Cup', 'Fire', 'FireExtinguisher']
         ALL_FOOD_ENTITIES = FRESH_FOOD + CHOPPED_FOOD + \
-            COOKED_FOOD + CHARRED_FOOD + ['Plate']
+            COOKED_FOOD + CHARRED_FOOD + MIXED_FOOD + ['Plate', 'Cup']
         obj_map = {
             e: np.zeros(self.world_size, dtype=np.uint8) for e in ALL_ENTITIES
         }
