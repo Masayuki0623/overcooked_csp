@@ -82,6 +82,24 @@ class Chopped(Predicate):
     def __init__(self, obj, **kwargs):
         Predicate.__init__(self, 'Chopped', (obj,))
 
+class Mixing(Predicate):
+    """ミキサーで混ぜている最中。
+
+    Cooking(鍋)と違い、時間が経てば勝手に進む待ちタイマーではなく、
+    Chopping と同じく「インタラクトした回数だけ進む」能動的な操作。
+    そのため update_one_step 側を実装する。
+    """
+    def __init__(self, obj, **kwargs):
+        Predicate.__init__(self, 'Mixing', (obj,))
+        self._rest_steps = BLENDING_NUM_STEPS
+
+    def update_one_step(self, **kwargs):
+        Predicate.update_one_step(self, passed=1)
+
+class Mixed(Predicate):
+    def __init__(self, obj, **kwargs):
+        Predicate.__init__(self, 'Mixed', (obj,))
+
 class Cooked(Predicate):
     def __init__(self, obj, start_time=None):
         Predicate.__init__(self, 'Cooked', (obj,), start_time=start_time, time_limit=COOKED_BEFORE_FIRE_TIME_SECONDS)

@@ -6,6 +6,7 @@ from gym_cooking.utils.config import *
 import copy
 from termcolor import colored as color
 from collections import namedtuple
+import itertools
 
 
 # -----------------------------------------------------------
@@ -29,6 +30,17 @@ class Rep:
     ONION_TILE = "O"
     PLATE_TILE = "P"
     FIRE_EXTINGUISHER = "f"
+    # --- ジュース用に追加した資材 ---
+    # 野菜(t/l/o, T/L/O)と衝突しない文字を使う。
+    APPLE = 'a'
+    ORANGE = 'r'
+    BANANA = 'n'
+    CUP = 'c'
+    APPLE_TILE = "A"
+    ORANGE_TILE = "R"
+    BANANA_TILE = "N"
+    CUP_TILE = "C"
+    BLENDER = "M"
 
 class GridSquare:
     def __init__(self, name, location):
@@ -156,15 +168,36 @@ class Pot(GridSquare):
     def acquire(self, obj):
         GridSquare.acquire(self, obj)
 
+class Blender(GridSquare):
+    """ミキサー。鍋と同じ占有制約(入れたら混ぜ終わるまで触れない)を持つが、
+    進行は待ちタイマーではなくインタラクト回数による能動操作。"""
+    def __init__(self, location):
+        GridSquare.__init__(self, "Blender", location)
+        self.rep = Rep.BLENDER
+        self.collidable = True
+
+    def acquire(self, obj):
+        GridSquare.acquire(self, obj)
+
+    def __eq__(self, other):
+        return GridSquare.__eq__(self, other)
+
+    def __hash__(self):
+        return GridSquare.__hash__(self)
+
 # -----------------------------------------------------------
 # OBJECTS
 # -----------------------------------------------------------
 # Objects are wrappers around foods items, plates, and any combination of them
 
 ObjectRepr = namedtuple("ObjectRepr", "name location is_held")
-ValidFoodNames = ('ChoppedLettuce', 'ChoppedOnion', 'ChoppedTomato',
-                  'ChoppedLettuce-ChoppedOnion', 'ChoppedLettuce-ChoppedTomato', 'ChoppedOnion-ChoppedTomato',
-                  'ChoppedLettuce-ChoppedOnion-ChoppedTomato')
+# 下の ASSEMBLE_* と同じ組み合わせ規則。定義順の都合でここでは直接組み立てる。
+ValidFoodNames = tuple(
+    '-'.join(sorted(f'Chopped{i}' for i in combo))
+    for group in (['Tomato', 'Lettuce', 'Onion'], ['Apple', 'Orange', 'Banana'])
+    for r in range(1, len(group) + 1)
+    for combo in itertools.combinations(sorted(group), r)
+)
 
 class Object:
     def __init__(self, location, contents):
@@ -264,11 +297,47 @@ class Object:
         return len(self.contents) > 1
 
     def is_deliverable(self):
-        # must be merged, and all contents must be Plates or Foods in done state
+        # must be merged, and all contents must be containers (Plate/Cup)
+        # or Foods in done state
         for c in self.contents:
-            if not (isinstance(c, Plate) or (isinstance(c, Food) and c.is_deliverable())):
+            if not (isinstance(c, (Plate, Cup)) or (isinstance(c, Food) and c.is_deliverable())):
                 return False
         return self.is_merged()
+
+    # mix logic (ミキサー)
+    def is_mixable(self):
+        for c in self.contents:
+            if not (isinstance(c, Cup) or isinstance(c, Food) and c.is_mixable()):
+                return False
+        return any([isinstance(c, Food) for c in self.contents])
+
+    def is_mixed(self):
+        foods = [c for c in self.contents if isinstance(c, Food)]
+        if not foods:
+            return False
+        return all(f.is_mixed() for f in foods)
+
+    def is_mixing(self):
+        foods = [c for c in self.contents if isinstance(c, Food)]
+        if not foods:
+            return False
+        return all(f.is_mixing() for f in foods)
+
+    def mix(self, current_time):
+        for c in self.contents:
+            if isinstance(c, Food):
+                c.mix(current_time)
+
+    def split_food_cup(self):
+        food = []
+        cup = None
+        for c in self.contents:
+            if isinstance(c, Cup):
+                assert cup is None
+                cup = c
+            else:
+                food.append(c)
+        return food, cup
 
     # cook logic
     def is_cookable(self):
@@ -333,20 +402,28 @@ def mergeable(obj1, obj2):
     if obj2.is_cooked() and len(obj1.contents) == 1 and Plate() in obj1.contents:
         return True
 
+    # 混ぜ終わったジュースと空のコップ -> 注げる(鍋と皿の関係と同じ)
+    if obj1.is_mixed() and len(obj2.contents) == 1 and Cup() in obj2.contents:
+        return True
+    if obj2.is_mixed() and len(obj1.contents) == 1 and Cup() in obj1.contents:
+        return True
+
     contents = obj1.contents + obj2.contents
-    # check that there is at most one plate
-    try:
-        contents.remove(Plate())
-    except:
-        pass  # do nothing, 1 plate is ok
-    finally:
-        try:
-            contents.remove(Plate())
-        except:
-            pass
-        else:
-            return False  # more than 1 plate
-    sorted_contents = sorted(contents, key=lambda c: c.name)
+
+    # 容器(皿・コップ)は合わせて1つまで。
+    containers = [c for c in contents if isinstance(c, (Plate, Cup))]
+    if len(containers) > 1:
+        return False
+
+    foods = [c for c in contents if isinstance(c, Food)]
+    if containers and foods:
+        # 野菜は皿、フルーツはコップ。取り違えると行き止まりの状態になるため禁じる。
+        is_cup = isinstance(containers[0], Cup)
+        for f in foods:
+            if (f.name in FRUITS) != is_cup:
+                return False
+
+    sorted_contents = sorted(foods, key=lambda c: c.name)
     merged_name = "-".join([c.full_name for c in sorted_contents])
     return merged_name in ValidFoodNames
 
@@ -360,7 +437,10 @@ class FoodState:
     COOKING = getattr(RECIPY_UTIL, 'Cooking')
     COOKED = getattr(RECIPY_UTIL, 'Cooked')
     CHARRED = getattr(RECIPY_UTIL, 'Charred')
-    DELIVERABLE = [CHOPPED, COOKED]
+    MIXING = getattr(RECIPY_UTIL, 'Mixing')
+    MIXED = getattr(RECIPY_UTIL, 'Mixed')
+    # 提供できる状態。ジュースは Mixed で完成。
+    DELIVERABLE = [CHOPPED, COOKED, MIXED]
 
 class FoodSequence:
     FRESH = [FoodState.FRESH]
@@ -368,6 +448,9 @@ class FoodSequence:
     FRESH_CHOPPING_CHOPPED = [FoodState.FRESH, FoodState.CHOPPING, FoodState.CHOPPED]
     FRESH_CHOPPING_CHOPPED_COOKING_COOKED = FRESH_CHOPPING_CHOPPED + [FoodState.COOKING, FoodState.COOKED]
     FRESH_CHOPPING_CHOPPED_COOKING_COOKED_CHARRED = FRESH_CHOPPING_CHOPPED_COOKING_COOKED + [FoodState.CHARRED]
+    # フルーツ用。鍋(Cooking)ではなくミキサー(Mixing)へ進む。
+    # 焦げる状態は無い(ミキサーは待ちタイマーを持たないため)。
+    FRESH_CHOPPING_CHOPPED_MIXING_MIXED = FRESH_CHOPPING_CHOPPED + [FoodState.MIXING, FoodState.MIXED]
 
 class Food:
     def __init__(self):
@@ -434,6 +517,23 @@ class Food:
         assert self.state_seq[self.state_index] == FoodState.COOKING
         self.state = FoodState.COOKING(obj=self.name, start_time=current_time)
 
+    # mix logic (ミキサー)。cook と同じ形だが、Mixing は待ちタイマーではなく
+    # インタラクト回数で進むため start_time を持たない。
+    def is_mixable(self):
+        return FoodState.MIXING in self.state_seq and 0 <= self.state_index < len(self.state_seq)             and self.state_seq[(self.state_index + 1) % len(self.state_seq)] == FoodState.MIXING
+
+    def is_mixed(self):
+        return isinstance(self.state, FoodState.MIXED)
+
+    def is_mixing(self):
+        return isinstance(self.state, FoodState.MIXING)
+
+    def mix(self, current_time):
+        assert self.is_mixable()
+        self.state_index += 1
+        assert self.state_seq[self.state_index] == FoodState.MIXING
+        self.state = FoodState.MIXING(obj=self.name)
+
 class Tomato(Food):
     def __init__(self, state_index = 0):
         self.state_index = state_index   # index in food's state sequence
@@ -473,6 +573,44 @@ class Onion(Food):
         return Food.__hash__(self)
 
 
+
+class Apple(Food):
+    def __init__(self, state_index = 0):
+        self.state_index = state_index
+        self.state_seq = FoodSequence.FRESH_CHOPPING_CHOPPED_MIXING_MIXED
+        self.rep = Rep.APPLE
+        self.name = 'Apple'
+        Food.__init__(self)
+    def __eq__(self, other):
+        return Food.__eq__(self, other)
+    def __hash__(self):
+        return Food.__hash__(self)
+
+class Orange(Food):
+    def __init__(self, state_index = 0):
+        self.state_index = state_index
+        self.state_seq = FoodSequence.FRESH_CHOPPING_CHOPPED_MIXING_MIXED
+        self.rep = Rep.ORANGE
+        self.name = 'Orange'
+        Food.__init__(self)
+    def __eq__(self, other):
+        return Food.__eq__(self, other)
+    def __hash__(self):
+        return Food.__hash__(self)
+
+class Banana(Food):
+    def __init__(self, state_index = 0):
+        self.state_index = state_index
+        self.state_seq = FoodSequence.FRESH_CHOPPING_CHOPPED_MIXING_MIXED
+        self.rep = Rep.BANANA
+        self.name = 'Banana'
+        Food.__init__(self)
+    def __eq__(self, other):
+        return Food.__eq__(self, other)
+    def __hash__(self):
+        return Food.__hash__(self)
+
+
 # -----------------------------------------------------------
 
 class Plate:
@@ -489,6 +627,32 @@ class Plate:
         return isinstance(other, Plate)
     def __copy__(self):
         return Plate()
+    def needs_chopped(self):
+        return False
+
+# -----------------------------------------------------------
+
+class Cup:
+    """ジュース用の容器。
+
+    皿(Plate)を流用すると、ジュースの full_name が
+    'ChoppedApple-ChoppedOrange-Plate' となり「りんごとオレンジのサラダ」と
+    完全に同じ文字列になってしまう(料理の識別は full_name だけで行われる)。
+    そのため皿とは別のクラスにしている。
+    """
+    def __init__(self):
+        self.rep = Rep.CUP
+        self.name = 'Cup'
+        self.full_name = 'Cup'
+        self.color = 'white'
+    def __hash__(self):
+        return hash((self.name))
+    def __str__(self):
+        return color(self.rep, self.color)
+    def __eq__(self, other):
+        return isinstance(other, Cup)
+    def __copy__(self):
+        return Cup()
     def needs_chopped(self):
         return False
 
@@ -586,19 +750,51 @@ class PlateTile(Tile):
         Tile.__init__(self, location, 'PlateTile', Plate)
         self.rep = Rep.PLATE_TILE
 
+class AppleTile(Tile):
+    def __init__(self, location):
+        Tile.__init__(self, location, 'FreshAppleTile', Apple)
+        self.rep = Rep.APPLE_TILE
+
+class OrangeTile(Tile):
+    def __init__(self, location):
+        Tile.__init__(self, location, 'FreshOrangeTile', Orange)
+        self.rep = Rep.ORANGE_TILE
+
+class BananaTile(Tile):
+    def __init__(self, location):
+        Tile.__init__(self, location, 'FreshBananaTile', Banana)
+        self.rep = Rep.BANANA_TILE
+
+class CupTile(Tile):
+    def __init__(self, location):
+        Tile.__init__(self, location, 'CupTile', Cup)
+        self.rep = Rep.CUP_TILE
+
 
 # -----------------------------------------------------------
 # NAMES
 # -----------------------------------------------------------
-GRIDSQUARES = ["Floor", "Counter", "Cutboard", "Delivery", "Bin", "Pot", "FreshTomatoTile", "FreshOnionTile", "FreshLettuceTile", "PlateTile"]
+# 食材は「野菜(鍋で煮る)」と「フルーツ(ミキサーで混ぜる)」の2グループに分かれる。
+# 組み合わせ名は全部分集合の直積になるため、食材を増やすと指数的に増える
+# (3種なら7通りだが、6種を無差別に混ぜると63通り)。実際には野菜とフルーツを
+# 混ぜた料理は存在しないので、グループ内の組み合わせだけを生成する。
+VEGETABLES = ['Tomato', 'Lettuce', 'Onion']
+FRUITS = ['Apple', 'Orange', 'Banana']
+ALL_INGREDIENTS = VEGETABLES + FRUITS
+
+GRIDSQUARES = ["Floor", "Counter", "Cutboard", "Delivery", "Bin", "Pot", "Blender"]     + [f'Fresh{i}Tile' for i in ALL_INGREDIENTS] + ["PlateTile", "CupTile"]
 PUTTABLE_GRIDSQUARES = ['Counter', 'Cutboard']
-FOOD_TILE = ['FreshTomatoTile', 'FreshLettuceTile', 'FreshOnionTile']
-FRESH_FOOD = ['FreshTomato', 'FreshLettuce', 'FreshOnion']
-CHOPPING_FOOD = ['ChoppingTomato', 'ChoppingOnion', 'ChoppingLettuce']
-CHOPPED_FOOD = ['ChoppedTomato', 'ChoppedOnion', 'ChoppedLettuce']
-COOKING_FOOD = ['CookingTomato', 'CookingOnion', 'CookingLettuce']
-COOKED_FOOD = ['CookedTomato', 'CookedOnion', 'CookedLettuce']
-CHARRED_FOOD = ['CharredTomato', 'CharredOnion', 'CharredLettuce']
+FOOD_TILE = [f'Fresh{i}Tile' for i in ALL_INGREDIENTS]
+
+FRESH_FOOD = [f'Fresh{i}' for i in ALL_INGREDIENTS]
+CHOPPING_FOOD = [f'Chopping{i}' for i in ALL_INGREDIENTS]
+CHOPPED_FOOD = [f'Chopped{i}' for i in ALL_INGREDIENTS]
+# 煮る/焦げるのは野菜だけ、混ぜるのはフルーツだけ。
+COOKING_FOOD = [f'Cooking{i}' for i in VEGETABLES]
+COOKED_FOOD = [f'Cooked{i}' for i in VEGETABLES]
+CHARRED_FOOD = [f'Charred{i}' for i in VEGETABLES]
+MIXING_FOOD = [f'Mixing{i}' for i in FRUITS]
+MIXED_FOOD = [f'Mixed{i}' for i in FRUITS]
 
 
 def add_something(obj_list, x):
@@ -609,14 +805,38 @@ def add_something(obj_list, x):
         objs = sorted(objs)
         ret.append('-'.join(objs))
     return ret
-ASSEMBLE_CHOPPED_FOOD = ['ChoppedTomato', 'ChoppedOnion', 'ChoppedLettuce', 'ChoppedLettuce-ChoppedOnion', 'ChoppedLettuce-ChoppedTomato', 'ChoppedOnion-ChoppedTomato', 'ChoppedLettuce-ChoppedOnion-ChoppedTomato']
-ASSEMBLE_CHOPPED_PLATE_FOOD = add_something(ASSEMBLE_CHOPPED_FOOD, 'Plate')
-ASSEMBLE_COOKING_FOOD = [f.replace('Chopped', 'Cooking') for f in ASSEMBLE_CHOPPED_FOOD]
+
+
+def _combinations(ingredients, state):
+    """グループ内の空でない部分集合すべてを、料理名の文字列にして返す。
+
+    Object.full_name は中身を名前順に並べて '-' で連結したものなので、
+    ここでも同じ順序に揃えておく必要がある。
+    """
+    names = []
+    for r in range(1, len(ingredients) + 1):
+        for combo in itertools.combinations(sorted(ingredients), r):
+            names.append('-'.join(sorted(f'{state}{i}' for i in combo)))
+    return names
+
+
+# 野菜の組み合わせ(サラダ/スープ)とフルーツの組み合わせ(ジュース)を別々に作る。
+ASSEMBLE_CHOPPED_VEGETABLE = _combinations(VEGETABLES, 'Chopped')
+ASSEMBLE_CHOPPED_FRUIT = _combinations(FRUITS, 'Chopped')
+ASSEMBLE_CHOPPED_FOOD = ASSEMBLE_CHOPPED_VEGETABLE + ASSEMBLE_CHOPPED_FRUIT
+ASSEMBLE_CHOPPED_PLATE_FOOD = add_something(ASSEMBLE_CHOPPED_VEGETABLE, 'Plate')
+# 煮る系は野菜のみ
+ASSEMBLE_COOKING_FOOD = [f.replace('Chopped', 'Cooking') for f in ASSEMBLE_CHOPPED_VEGETABLE]
 ASSEMBLE_COOKING_PLATE_FOOD = add_something(ASSEMBLE_COOKING_FOOD, 'Plate')
-ASSEMBLE_COOKED_FOOD = [f.replace('Chopped', 'Cooked') for f in ASSEMBLE_CHOPPED_FOOD]
+ASSEMBLE_COOKED_FOOD = [f.replace('Chopped', 'Cooked') for f in ASSEMBLE_CHOPPED_VEGETABLE]
 ASSEMBLE_COOKED_PLATE_FOOD = add_something(ASSEMBLE_COOKED_FOOD, 'Plate')
-ASSEMBLE_CHARRED_FOOD = [f.replace('Chopped', 'Charred') for f in ASSEMBLE_CHOPPED_FOOD]
+ASSEMBLE_CHARRED_FOOD = [f.replace('Chopped', 'Charred') for f in ASSEMBLE_CHOPPED_VEGETABLE]
 ASSEMBLE_CHARRED_PLATE_FOOD = add_something(ASSEMBLE_CHARRED_FOOD, 'Plate')
+# 混ぜる系はフルーツのみ。容器は皿ではなくコップ。
+ASSEMBLE_MIXING_FOOD = [f.replace('Chopped', 'Mixing') for f in ASSEMBLE_CHOPPED_FRUIT]
+ASSEMBLE_MIXING_CUP_FOOD = add_something(ASSEMBLE_MIXING_FOOD, 'Cup')
+ASSEMBLE_MIXED_FOOD = [f.replace('Chopped', 'Mixed') for f in ASSEMBLE_CHOPPED_FRUIT]
+ASSEMBLE_MIXED_CUP_FOOD = add_something(ASSEMBLE_MIXED_FOOD, 'Cup')
 
 # -----------------------------------------------------------
 # PARSING
@@ -636,7 +856,16 @@ RepToClass = {
     Rep.LETTUCE_TILE: globals()['LettuceTile'],
     Rep.ONION_TILE: globals()['OnionTile'],
     Rep.PLATE_TILE: globals()['PlateTile'],
-    Rep.FIRE_EXTINGUISHER: globals()['FireExtinguisher']
+    Rep.FIRE_EXTINGUISHER: globals()['FireExtinguisher'],
+    Rep.APPLE: globals()['Apple'],
+    Rep.ORANGE: globals()['Orange'],
+    Rep.BANANA: globals()['Banana'],
+    Rep.CUP: globals()['Cup'],
+    Rep.APPLE_TILE: globals()['AppleTile'],
+    Rep.ORANGE_TILE: globals()['OrangeTile'],
+    Rep.BANANA_TILE: globals()['BananaTile'],
+    Rep.CUP_TILE: globals()['CupTile'],
+    Rep.BLENDER: globals()['Blender']
 }
 
 
