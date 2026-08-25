@@ -16,6 +16,9 @@ class TaskAgent:
         self.assigned_pot = None
         self.assigned_plate = None
         self.assigned_serve_loc = None
+        # ジュース用。鍋・皿と同じ役割のミキサーとコップ。
+        self.assigned_blender = None
+        self.assigned_cup = None
         self.assigned_counter = None 
         self.assigned_task_id = None
         self.protected_counters = set()
@@ -483,6 +486,35 @@ class TaskAgent:
             if len(parts) > 1:
                 ingredients = [p.capitalize() for p in parts[1:]]
             return self.process_cook_task(env, ingredients, assigned_pot=self.assigned_pot, assigned_counter=self.assigned_counter, dynamic_obstacles=dynamic_obstacles)
+        elif self.task_name.startswith('mix'):
+            parts = self.task_name.split('_')
+            ingredients = [p.capitalize() for p in parts[1:]]
+            return self.process_mix_task(env, ingredients, assigned_blender=self.assigned_blender,
+                                         assigned_counter=self.assigned_counter,
+                                         dynamic_obstacles=dynamic_obstacles)
+        elif self.task_name.startswith('serve_juice'):
+            # 'serve' より先に判定する(ジュースは鍋ではなくミキサー、皿ではなくコップ)。
+            parts = self.task_name.split('_')
+            ingredients = [p.capitalize() for p in parts[2:]]
+            return self.process_serve_juice_task(env, ingredients, assigned_cup=self.assigned_cup,
+                                                 assigned_serve_loc=self.assigned_serve_loc,
+                                                 assigned_blender=self.assigned_blender,
+                                                 dynamic_obstacles=dynamic_obstacles)
+        elif self.task_name.startswith('serve_from_counter'):
+            parts = self.task_name.split('_')
+            ingredients = [p.capitalize() for p in parts[3:]]
+            return self.process_serve_from_counter_task(
+                env, ingredients, assigned_counter=self.assigned_counter,
+                assigned_serve_loc=self.assigned_serve_loc,
+                dynamic_obstacles=dynamic_obstacles)
+        elif self.task_name.startswith('handover'):
+            parts = self.task_name.split('_')
+            ingredients = [p.capitalize() for p in parts[1:]]
+            return self.process_handover_task(env, ingredients,
+                                              assigned_counter=self.assigned_counter,
+                                              assigned_plate=self.assigned_plate,
+                                              assigned_pot=self.assigned_pot,
+                                              dynamic_obstacles=dynamic_obstacles)
         elif self.task_name.startswith('serve_salad'):
             # 'serve' より先に判定する。サラダは鍋を使わない別工程なので
             # process_serve_task (cook 専用の提供) に流してはいけない。
@@ -497,7 +529,132 @@ class TaskAgent:
             return self.process_serve_task(env, ingredients, assigned_plate=self.assigned_plate, assigned_serve_loc=self.assigned_serve_loc, assigned_pot=self.assigned_pot, dynamic_obstacles=dynamic_obstacles)
         return (0,0), f"不明なタスク: {self.task_name}"
 
-    def process_serve_task(self, env, ingredients=None, assigned_plate=None, assigned_serve_loc=None, assigned_pot=None, dynamic_obstacles=None):
+    def process_mix_task(self, env, ingredients=None, assigned_blender=None,
+                         assigned_counter=None, dynamic_obstacles=None):
+        """ジュース: 刻んだフルーツをミキサーへ入れ、混ぜ終わるまで回す。
+
+        材料を集めて器具へ入れるところまでは鍋(cook)と同じなので、そこは
+        process_cook_task に任せる。違うのは投入後で、鍋のように放っておいても
+        進まず、手ぶらで向かってインタラクトした回数だけ混ざる。
+        """
+        blenders = [assigned_blender] if assigned_blender else env.get_pos_by_obj_gs(gs='Blender')
+        holding = env.hold
+
+        for b_loc in blenders:
+            obj = env.pos_obj.get(b_loc)
+            if obj is None:
+                continue
+            if getattr(obj, 'is_mixed', lambda: False)():
+                return (0, 0), "混ぜ完了 (Done)"
+            if getattr(obj, 'is_mixing', lambda: False)():
+                if holding is not None:
+                    # 手が塞がっているとインタラクトが「入れる/取り出す」に
+                    # 化けてしまうので、まず置きに行く。
+                    return self.drop_unwanted_item(
+                        env, holding,
+                        reason=f"ミキサーを回すため {holding.full_name} を置く",
+                        dynamic_obstacles=dynamic_obstacles,
+                        allow_strict_override=True,
+                    )
+                return self.move_to(env, b_loc, dynamic_obstacles=dynamic_obstacles), "ミキサーを回す"
+
+        return self.process_cook_task(
+            env, ingredients, assigned_pot=assigned_blender,
+            assigned_counter=assigned_counter, dynamic_obstacles=dynamic_obstacles,
+            appliance='Blender', appliance_label='ミキサー')
+
+    def process_serve_juice_task(self, env, ingredients=None, assigned_cup=None,
+                                 assigned_serve_loc=None, assigned_blender=None,
+                                 dynamic_obstacles=None):
+        """ジュース: ミキサーの中身をコップに注いで提供する。
+
+        鍋->皿の提供とまったく同じ形なので、完成状態の名前・容器・器具だけを
+        差し替えて process_serve_task を使う。
+        """
+        return self.process_serve_task(
+            env, ingredients, assigned_plate=assigned_cup,
+            assigned_serve_loc=assigned_serve_loc, assigned_pot=assigned_blender,
+            dynamic_obstacles=dynamic_obstacles,
+            done_state='Mixed', mid_states=('Mixing',),
+            container='Cup', container_tile='CupTile', appliance='Blender',
+            appliance_label='ミキサー')
+
+    def process_handover_task(self, env, ingredients=None, assigned_counter=None,
+                              assigned_plate=None, assigned_pot=None, dynamic_obstacles=None):
+        """仕切りの向こうへ渡す: 鍋の中身を皿に盛って受け渡し台に置く。
+
+        提供口が反対側にあって自分では配膳できないときに使う。皿に盛るまでは
+        通常の提供とまったく同じなので、そこは process_serve_task に任せ、
+        盛り終わったら提供口ではなく受け渡し台へ置きに行く。
+        """
+        holding = env.hold
+        holding_name = holding.full_name if holding else None
+
+        target = sorted([f"Cooked{i}" for i in (ingredients or [])])
+        if holding_name and 'Plate' in holding_name and                 all(t in holding_name for t in target) and target:
+            if assigned_counter is None:
+                return (0, 0), "受け渡し台が割り当てられていません"
+            self_pos = env.self_pos
+            dist = abs(self_pos[0] - assigned_counter[0]) + abs(self_pos[1] - assigned_counter[1])
+            action = self.move_to(env, assigned_counter, dynamic_obstacles=dynamic_obstacles)
+            return action, "受け渡し台に置く (完了)" if dist == 1 else "受け渡し台へ運ぶ"
+
+        # まだ盛っていない段階は通常の提供と同じ(皿を取る -> 鍋から盛る)。
+        return self.process_serve_task(
+            env, ingredients, assigned_plate=assigned_plate,
+            assigned_serve_loc=assigned_counter, assigned_pot=assigned_pot,
+            dynamic_obstacles=dynamic_obstacles)
+
+    def process_serve_from_counter_task(self, env, ingredients=None, assigned_counter=None,
+                                        assigned_serve_loc=None, dynamic_obstacles=None):
+        """受け渡し台に置かれた完成品を取って提供口へ運ぶ。"""
+        self_pos = env.self_pos
+        holding = env.hold
+        holding_name = holding.full_name if holding else None
+        target = sorted([f"Cooked{i}" for i in (ingredients or [])])
+
+        def is_target(name):
+            return bool(name) and 'Plate' in name and target and all(t in name for t in target)
+
+        if is_target(holding_name):
+            deliveries = ([assigned_serve_loc] if assigned_serve_loc
+                          else env.get_pos_by_obj_gs(gs='Delivery'))
+            if not deliveries:
+                return (0, 0), "提供口が見つかりません"
+            d = min(deliveries, key=lambda p: abs(p[0]-self_pos[0]) + abs(p[1]-self_pos[1]))
+            dist = abs(self_pos[0]-d[0]) + abs(self_pos[1]-d[1])
+            action = self.move_to(env, d, dynamic_obstacles=dynamic_obstacles)
+            return action, "配膳 (完了)" if dist == 1 else "配膳"
+
+        if holding is not None:
+            return self.drop_unwanted_item(
+                env, holding,
+                reason=f"受け取りタスクですが {holding_name} を持っています",
+                dynamic_obstacles=dynamic_obstacles, allow_strict_override=True)
+
+        # 受け渡し台に完成品が置かれるのを待って、置かれたら取りに行く。
+        candidates = [assigned_counter] if assigned_counter else env.get_pos_by_obj_gs(gs='Counter')
+        for c in candidates:
+            if c is None:
+                continue
+            obj = env.pos_obj.get(c)
+            if obj is not None and is_target(getattr(obj, 'full_name', '')):
+                return self.move_to(env, c, dynamic_obstacles=dynamic_obstacles), "受け渡し台から取る"
+
+        if assigned_counter:
+            return self.move_to(env, assigned_counter, dynamic_obstacles=dynamic_obstacles),                 "受け渡し待ち"
+        return (0, 0), "受け渡し台が割り当てられていません"
+
+    def process_serve_task(self, env, ingredients=None, assigned_plate=None, assigned_serve_loc=None,
+                           assigned_pot=None, dynamic_obstacles=None,
+                           done_state='Cooked', mid_states=('Cooking', 'Charred'),
+                           container='Plate', container_tile='PlateTile', appliance='Pot',
+                           appliance_label='鍋'):
+        """調理器具の中身を容器に移して提供する。
+
+        スープ(鍋->皿)とジュース(ミキサー->コップ)は工程が同じ形なので、
+        「完成状態の名前・容器・器具」だけを差し替えて共用する。
+        """
         self_pos = env.self_pos
         holding = env.hold
         holding_name = holding.full_name if holding else None
@@ -505,30 +662,32 @@ class TaskAgent:
         target_food_name = None
         if ingredients:
             ingredients.sort()
-            target_food_name = "-".join([f"Cooked{i}" for i in ingredients])
+            target_food_name = "-".join([f"{done_state}{i}" for i in ingredients])
             #print(f"[TaskAgent] 配膳ターゲット: {target_food_name}")
         
         def is_target_food(name):
             if not name: return False
             if target_food_name:
                 return name == target_food_name
-            return 'Cooked' in name and '-' in name
+            return done_state in name and '-' in name
 
         def has_target_recipe(name):
             if not name:
                 return False
-            normalized = name.replace('Cooking', 'Cooked').replace('Charred', 'Cooked')
+            normalized = name
+            for mid in mid_states:
+                normalized = normalized.replace(mid, done_state)
             if target_food_name:
                 return normalized == target_food_name
-            return 'Cooked' in normalized and '-' in normalized
+            return done_state in normalized and '-' in normalized
 
         def is_target_plate_food(name):
             if not name: return False
-            if 'Plate' not in name: return False
+            if container not in name: return False
             if target_food_name:
                 parts = target_food_name.split('-')
                 return all(part in name for part in parts)
-            return 'Cooked' in name and '-' in name
+            return done_state in name and '-' in name
 
         # 1. If holding Plate + Food -> Go to Delivery
         if is_target_plate_food(holding_name):
@@ -547,7 +706,7 @@ class TaskAgent:
             return (0,0), "受取場所が見つかりません"
 
         # 2. If holding Plate -> Go to Pot with Cooked Food
-        if holding_name == 'Plate':
+        if holding_name == container:
             def find_matching_pots(pots):
                 target_pot = None
                 waiting_pot = None
@@ -569,7 +728,7 @@ class TaskAgent:
 
                 return target_pot, waiting_pot
 
-            all_pots = env.get_pos_by_obj_gs(gs='Pot')
+            all_pots = env.get_pos_by_obj_gs(gs=appliance)
             preferred_pots = [assigned_pot] if assigned_pot else all_pots
             target_pot, waiting_pot = find_matching_pots(preferred_pots)
             if (target_pot is None and waiting_pot is None) and assigned_pot:
@@ -587,23 +746,23 @@ class TaskAgent:
                     action = self.move_to(env, waiting_pot, dynamic_obstacles=None)
                 return action, "調理完了待ち"
             
-            return (0,0), "ターゲットの調理済み料理が入った鍋が見つかりません"
+            return (0,0), f"ターゲットの完成品が入った{appliance_label}が見つかりません"
 
         # 3. If holding nothing -> Get Plate
         if not holding:
             if assigned_plate:
                 plate_locs = [assigned_plate]
             else:
-                plate_locs = self._filter_unheld_positions(env, env.get_pos_by_obj_gs(obj='Plate'))
+                plate_locs = self._filter_unheld_positions(env, env.get_pos_by_obj_gs(obj=container))
                 if not plate_locs:
-                    plate_locs = env.get_pos_by_obj_gs(gs='PlateTile')
+                    plate_locs = env.get_pos_by_obj_gs(gs=container_tile)
             
             if plate_locs:
                 target = min(plate_locs, key=lambda p: abs(p[0]-self_pos[0]) + abs(p[1]-self_pos[1]))
                 #print(f"  -> {target} から皿を取得しに行きます")
-                return self.move_to(env, target, dynamic_obstacles=dynamic_obstacles), "皿の取得"
+                return self.move_to(env, target, dynamic_obstacles=dynamic_obstacles), f"{container}の取得"
             
-            return (0,0), "皿が見つかりません"
+            return (0,0), f"{container}が見つかりません"
             
         # ここまで来たのは、配膳に使えないもの(食材など)を持っている場合。
         # chop/cook タスクには「不要な持ち物を空きカウンターに置く」経路があるが、
@@ -617,7 +776,12 @@ class TaskAgent:
             allow_strict_override=True,
         )
 
-    def process_cook_task(self, env, ingredients=None, assigned_pot=None, assigned_counter=None, dynamic_obstacles=None):
+    def process_cook_task(self, env, ingredients=None, assigned_pot=None, assigned_counter=None,
+                          dynamic_obstacles=None, appliance='Pot', appliance_label='鍋'):
+        """刻んだ食材を集めて調理器具へ入れる。
+
+        鍋(cook)とミキサー(mix)は「材料を集めて器具へ入れる」までが同じなので、
+        器具の種類だけを差し替えて共用する。"""
         self_pos = env.self_pos
         holding = env.hold
         holding_name = holding.full_name if holding else None
@@ -628,7 +792,7 @@ class TaskAgent:
         target_ing_names = sorted([f"Chopped{i}" for i in ingredients])
         # print(f"[DEBUG] cook:start agent={env.agent_idx} task={self.task_name} pos={self_pos} holding={holding_name} target={target_ing_names} assigned_counter={assigned_counter} assigned_pot={assigned_pot}")
         
-        pots = [assigned_pot] if assigned_pot else env.get_pos_by_obj_gs(gs='Pot')
+        pots = [assigned_pot] if assigned_pot else env.get_pos_by_obj_gs(gs=appliance)
         if env.agent_idx == 1:
             pots = list(reversed(pots))
             
@@ -644,7 +808,7 @@ class TaskAgent:
                     target_pot_loc = p_loc
             else:
                 obj_name = getattr(obj, 'full_name', '')
-                parts = obj_name.replace('Cooking', 'Chopped').replace('Cooked', 'Chopped').replace('Charred', 'Chopped').split('-')
+                parts = obj_name.replace('Cooking', 'Chopped').replace('Cooked', 'Chopped').replace('Charred', 'Chopped').replace('Mixing', 'Chopped').replace('Mixed', 'Chopped').split('-')
                 is_subset = True
                 curr_ings = []
                 for p in parts:
@@ -684,7 +848,7 @@ class TaskAgent:
         # 2. 手持ちアイテムの解析
         held_ings = []
         if holding_name:
-            holding_parts = holding_name.replace('Cooking', 'Chopped').replace('Cooked', 'Chopped').replace('Charred', 'Chopped').split('-')
+            holding_parts = holding_name.replace('Cooking', 'Chopped').replace('Cooked', 'Chopped').replace('Charred', 'Chopped').replace('Mixing', 'Chopped').replace('Mixed', 'Chopped').split('-')
             for p in holding_parts:
                 if p in missing_ings:
                     held_ings.append(p)
@@ -729,7 +893,7 @@ class TaskAgent:
                     for pos, obj in env.pos_obj.items():
                         if self._is_available_object(obj):
                             obj_name = getattr(obj, 'full_name', '')
-                            parts = obj_name.replace('Cooking', 'Chopped').replace('Cooked', 'Chopped').replace('Charred', 'Chopped').split('-')
+                            parts = obj_name.replace('Cooking', 'Chopped').replace('Cooked', 'Chopped').replace('Charred', 'Chopped').replace('Mixing', 'Chopped').replace('Mixed', 'Chopped').split('-')
 
                             is_valid_target = False
                             has_unwanted = False

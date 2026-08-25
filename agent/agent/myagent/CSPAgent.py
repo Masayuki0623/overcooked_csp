@@ -235,14 +235,15 @@ class CSPAgent:
     def _find_order_recipe_for_partial(self, env, held_parts):
         """持っている組み合わせが、どの注文の作りかけかを探す。
 
-        戻り値は (完成レシピの材料リスト, その注文の置き場, サラダか) 。
+        戻り値は (完成レシピの材料リスト, その注文の置き場, 系統) 。
+        系統は 'salad' / 'soup' / 'juice' のいずれか(該当なしは None)。
         完全一致する注文があればそれを優先し、無ければ held_parts を
         真に含む注文(まだ材料が足りない作りかけ)を返す。
         どれにも当てはまらなければ (None, None, False)。
         """
         held = set(held_parts)
         if not held:
-            return None, None, False
+            return None, None, None
 
         current_orders = []
         if hasattr(env, 'order') and hasattr(env.order, 'current_orders'):
@@ -260,22 +261,22 @@ class CSPAgent:
             ings = [ing for ing in ALL_INGREDIENTS if ing in name]
             if not ings:
                 continue
-            is_salad = self._goal_name_is_salad(name)
+            kind = goal_dish_kind(name)
             ing_set = set(ings)
             counter = None
             uid = uid_by_idx.get(order_idx)
             if uid is not None:
                 counter = self._get_assigned_counter(uid)
             if ing_set == held:
-                return sorted(ings), counter, is_salad
+                return sorted(ings), counter, kind
             if held < ing_set:
-                supersets.append((len(ing_set), sorted(ings), counter, is_salad))
+                supersets.append((len(ing_set), sorted(ings), counter, kind))
 
         if supersets:
             # 一番少ない材料で済む注文(=完成が近い)を選ぶ
             supersets.sort(key=lambda e: e[0])
             return supersets[0][1], supersets[0][2], supersets[0][3]
-        return None, None, False
+        return None, None, None
 
     @staticmethod
     def _goal_name_is_salad(goal_full_name):
@@ -803,6 +804,75 @@ class CSPAgent:
 
         return None
 
+    def _resolve_mutual_block(self, env, actions):
+        """相手に道をふさがれて進めない状態を解く。
+
+        2つのパターンがある。
+          (1) 2体が同じマスへ同時に入ろうとして、環境の衝突判定で両方の移動が
+              取り消され続ける
+          (2) 片方が通りたいマスに、もう片方が用事もなく立ち止まっている
+        既存の停止検知は「行動が (0,0) のとき」しか働かないため、行動は出して
+        いるのに進めないこれらの状態は素通りしてしまう。数フレーム続いたら
+        片方を強制的にどかして解く。
+        """
+        agents = getattr(env, 'agents', None)
+        if not agents or len(agents) < 2:
+            return actions
+
+        positions = [tuple(a.location) for a in agents[:2]]
+        moved = positions != getattr(self, '_last_agent_positions', None)
+        self._last_agent_positions = list(positions)
+        if moved:
+            self._block_counts = {0: 0, 1: 0}
+            return actions
+
+        counts = getattr(self, '_block_counts', None) or {0: 0, 1: 0}
+        for i in (0, 1):
+            if actions.get(f'ai_{i}', (0, 0)) != (0, 0):
+                counts[i] = counts.get(i, 0) + 1
+            else:
+                counts[i] = 0
+        self._block_counts = counts
+
+        for i in (0, 1):
+            if counts.get(i, 0) < 3:
+                continue
+            other = 1 - i
+            act = actions.get(f'ai_{i}', (0, 0))
+            target = (positions[i][0] + act[0], positions[i][1] + act[1])
+
+            if target == positions[other]:
+                # 相手が目的のマスに居座っている -> 相手をどかす
+                escape = self._find_escape_step(env, positions[other], positions[i])
+                if escape is not None:
+                    actions[f'ai_{other}'] = escape
+                    self._block_counts = {0: 0, 1: 0}
+                    self._emit_counter_debug(
+                        f"[CSPAgent] AI{i} の進路をふさぐ AI{other} を {escape} へどかす")
+                    return actions
+
+            if actions.get(f'ai_{other}', (0, 0)) == act or target == (
+                    positions[other][0] + actions.get(f'ai_{other}', (0, 0))[0],
+                    positions[other][1] + actions.get(f'ai_{other}', (0, 0))[1]):
+                # 同じマスを取り合っている -> 片方(常に AI1)を1フレーム譲らせる
+                actions['ai_1'] = (0, 0)
+                self._block_counts = {0: 0, 1: 0}
+                self._emit_counter_debug("[CSPAgent] 同じマスの取り合いを検知: AI1 を譲らせる")
+                return actions
+
+        return actions
+
+    def _find_escape_step(self, env, pos, avoid):
+        """pos にいるエージェントが avoid 以外の隣接マスへ1歩どく方向を返す。"""
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nx, ny = pos[0] + dx, pos[1] + dy
+            if not (0 <= nx < env.world_width and 0 <= ny < env.world_height):
+                continue
+            if env.to_grid[nx][ny] != 1 or (nx, ny) == avoid:
+                continue
+            return (dx, dy)
+        return None
+
     def _update_stall_state(self, agent_idx, action, reason):
         if self.sc_2agent:
             if action == (0, 0) and reason not in ("待機(相手のターン)", "AI0:Idle", "AI1:Idle"):
@@ -930,7 +1000,11 @@ class CSPAgent:
             if obj_loc in pot_locs:
                 inv_pots_ings.append(obj_foods)
             elif obj_loc in blender_locs:
-                inv_blender_ings.append(obj_foods)
+                # 入れただけ(Mixing)と混ぜ終わり(Mixed)を区別する。
+                # 入れた時点で完了扱いにすると、まだ回している最中に
+                # 提供タスクへ移ってしまい、誰も回さなくなる。
+                inv_blender_ings.append(
+                    (obj_foods, bool(getattr(obj, 'is_mixed', lambda: False)())))
             elif has_plate(obj):
                 inv_plates_ings.append(obj_foods)
                     
@@ -954,10 +1028,12 @@ class CSPAgent:
             needs_serve = True
 
             if is_juice:
-                for b in list(inv_blender_ings):
+                for entry in list(inv_blender_ings):
+                    b, mixed = entry
                     if b == req_set or (b.issubset(req_set) and b):
-                        inv_blender_ings.remove(b)
-                        if b == req_set:
+                        inv_blender_ings.remove(entry)
+                        # 混ぜ終わって初めて mix タスクは不要になる。
+                        if b == req_set and mixed:
                             needs_mix = False
                         for ing in b:
                             if ing in needs_chop:
@@ -1176,12 +1252,26 @@ class CSPAgent:
                     'res': ('delivery', None),
                 }
 
+        # コップに混ぜたものが入っている = ジュースの完成品。提供口へ運ぶだけ。
+        if 'Cup' in holding_name and 'Mixed' in holding_name:
+            mixed_parts = sorted(
+                part.replace('Mixed', '').lower()
+                for part in holding_name.split('-') if part.startswith('Mixed'))
+            if mixed_parts:
+                return {
+                    'id': ('serve_juice', f"{'-'.join(mixed_parts)}{JUICE_SUFFIX}", -1),
+                    'res': ('delivery', None),
+                }
+
         # 皿の上に刻んだ食材が乗っている = サラダの完成品。あとは提供口へ運ぶだけ。
         if 'Plate' in holding_name and 'Chopped' in holding_name:
             chopped_parts = []
             for part in holding_name.split('-'):
                 if part.startswith('Chopped'):
                     chopped_parts.append(part.replace('Chopped', '').lower())
+            # フルーツは皿ではなくコップに入れるので、サラダ扱いにしない。
+            if any(part in FRUITS for part in chopped_parts):
+                chopped_parts = []
             if chopped_parts:
                 chopped_parts.sort()
                 return {
@@ -1271,7 +1361,7 @@ class CSPAgent:
             # まだ材料が足りない注文の一部なら、その注文の完成レシピを目標にする。
             # process_cook_task 側は「一部しか持っていない」と判断して、
             # 残りが集まる置き場へマージしに行く。
-            recipe_parts, recipe_counter, recipe_is_salad = self._find_order_recipe_for_partial(
+            recipe_parts, recipe_counter, recipe_kind = self._find_order_recipe_for_partial(
                 env, chopped_combo_parts
             )
             if recipe_parts is None:
@@ -1282,7 +1372,15 @@ class CSPAgent:
             # サラダ注文の作りかけなら、鍋ではなく皿へ運ぶタスクとして扱う。
             # ここで cook を返すと、刻んだ食材がそのまま鍋に入れられて
             # サラダがスープとして提供されてしまう。
-            if recipe_is_salad:
+            if recipe_kind == KIND_JUICE:
+                # ジュースの作りかけは鍋でも皿でもなく、ミキサーへ運ぶ。
+                return {
+                    'id': ('mix', f"{'-'.join(recipe_parts)}{JUICE_SUFFIX}", -1),
+                    'res': ('blender', None),
+                    'assigned_counter': assigned_counter,
+                }
+
+            if recipe_kind == KIND_SALAD:
                 return {
                     'id': ('serve_salad', f"{'-'.join(recipe_parts)}{SALAD_SUFFIX}", -1),
                     'res': ('delivery', None),
@@ -1662,6 +1760,25 @@ class CSPAgent:
                 task_name = f"serve_salad_{'_'.join(parts)}"
                 if getattr(self.task_agent, 'assigned_task_id', None) != tid or getattr(self.task_agent, 'assigned_counter', None) is None:
                     self.task_agent.assigned_counter = task.get('assigned_counter')
+            elif verb == 'mix':
+                # ミキサーへ入れる材料は置き場に集めてあるので、chop/cook と
+                # 同じく assigned_counter を保持する。
+                parts = dish_ingredients(obj)
+                task_name = f"mix_{'_'.join(parts)}"
+                if getattr(self.task_agent, 'assigned_task_id', None) != tid or getattr(self.task_agent, 'assigned_counter', None) is None:
+                    self.task_agent.assigned_counter = task.get('assigned_counter')
+            elif verb == 'serve_juice':
+                parts = dish_ingredients(obj)
+                task_name = f"serve_juice_{'_'.join(parts)}"
+                self.task_agent.assigned_counter = None
+            elif verb == 'handover':
+                parts = dish_ingredients(obj)
+                task_name = f"handover_{'_'.join(parts)}"
+                self.task_agent.assigned_counter = task.get('assigned_counter')
+            elif verb == 'serve_from_counter':
+                parts = dish_ingredients(obj)
+                task_name = f"serve_from_counter_{'_'.join(parts)}"
+                self.task_agent.assigned_counter = task.get('assigned_counter')
             elif verb == 'serve':
                 parts = dish_ingredients(obj)
                 task_name = f"serve_{'_'.join(parts)}"
@@ -1872,14 +1989,36 @@ class CSPAgent:
                 # 「切らずに運ぶだけ」の指定(既に切られた物が別テーブルにある場合)
                 ta.carry_from = task.get('carry_from') if verb == 'chop' else None
 
+                # 置き場(assigned_counter)は「刻んだ材料を1か所に集める」ための
+                # 指定で、chop/cook/serve_salad/mix はこれを見て動く。単体エージェント
+                # 経路では渡していたが、2エージェント経路では渡していなかったため、
+                # 指定なしのフォールバックに落ちて材料を持ったまま止まることがあった。
                 if verb == 'chop':
                     task_name = f"chop_{obj}"
+                    ta.assigned_counter = task.get('assigned_counter')
                 elif verb == 'cook':
                     parts = dish_ingredients(obj)
                     task_name = f"cook_{'_'.join(parts)}"
+                    ta.assigned_counter = task.get('assigned_counter')
                 elif verb == 'serve_salad':
                     parts = dish_ingredients(obj)
                     task_name = f"serve_salad_{'_'.join(parts)}"
+                    ta.assigned_counter = task.get('assigned_counter')
+                elif verb == 'mix':
+                    parts = dish_ingredients(obj)
+                    task_name = f"mix_{'_'.join(parts)}"
+                    ta.assigned_counter = task.get('assigned_counter')
+                elif verb == 'serve_juice':
+                    parts = dish_ingredients(obj)
+                    task_name = f"serve_juice_{'_'.join(parts)}"
+                elif verb == 'handover':
+                    parts = dish_ingredients(obj)
+                    task_name = f"handover_{'_'.join(parts)}"
+                    ta.assigned_counter = task.get('assigned_counter')
+                elif verb == 'serve_from_counter':
+                    parts = dish_ingredients(obj)
+                    task_name = f"serve_from_counter_{'_'.join(parts)}"
+                    ta.assigned_counter = task.get('assigned_counter')
                 elif verb == 'serve':
                     parts = dish_ingredients(obj)
                     task_name = f"serve_{'_'.join(parts)}"
@@ -1935,6 +2074,7 @@ class CSPAgent:
                     actions[f"ai_{agent_idx}"] = (0, 0)
                     reasons.append("アイドル")
 
+            actions = self._resolve_mutual_block(env, actions)
             return actions, " | ".join(reasons)
 
     # ============ OR-Tools: 0-1選択問題（予算内で重み最大化） ============ 
@@ -3244,6 +3384,23 @@ class CSPAgent:
         pot = pots[order_idx % len(pots)] if pots else (0, 0)
 
         counters = resources.get('counters', [])
+
+        # 置き場は2人で材料を持ち寄る場所なので、隣接して立てる床マスが1つしか
+        # ないテーブルを選ぶと、片方が居座っている間もう片方が近づけず詰む。
+        # 2マス以上から使えるテーブルを優先する(候補が無ければ従来どおり)。
+        def access_count(loc):
+            n = 0
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                nx, ny = loc[0] + dx, loc[1] + dy
+                if (0 <= nx < env.world_width and 0 <= ny < env.world_height
+                        and env.to_grid[nx][ny] == 1):
+                    n += 1
+            return n
+
+        shared_access = [c for c in counters if access_count(c) >= 2]
+        if shared_access:
+            counters = shared_access
+
         if self._map_is_partitioned(env):
             # 仕切りのあるマップでは、置き場は「両側から使えるカウンター」に
             # 限る。片側にしか届かない台を集合場所にすると、相手が材料を
@@ -3546,8 +3703,11 @@ class CSPAgent:
                     c_names = sorted([c.name for c in obj.contents])
                     pot_states.append({'names': c_names, 'obj': obj, 'used': False})
                 elif obj.location in blender_locs:
-                    c_names = sorted([c.name for c in obj.contents])
-                    blender_states.append({'names': c_names, 'obj': obj, 'used': False})
+                    # 混ぜ終わっていないうちは「集め終わった」とみなさない
+                    # (mix タスクを消してしまうと誰も回さなくなる)。
+                    if getattr(obj, 'is_mixed', lambda: False)():
+                        c_names = sorted([c.name for c in obj.contents])
+                        blender_states.append({'names': c_names, 'obj': obj, 'used': False})
                 else:
                     if obj.location not in cutboard_locs:
                         plated_names = plated_food_names(obj)

@@ -252,8 +252,15 @@ class Object:
         return self.contents[0].needs_chopped()
 
     def is_chopped(self):
+        """中身が「刻んだ食材だけ」かどうか。
+
+        皿・コップ・消火器などが混ざっていれば False。Food 以外は
+        get_state() を持たないので、型を先に確かめること。
+        (以前は Plate だけを弾いていたため、消火器やコップが入ると
+         AttributeError で落ちていた)
+        """
         for c in self.contents:
-            if isinstance(c, Plate) or c.get_state() != 'Chopped':
+            if not isinstance(c, Food) or c.get_state() != 'Chopped':
                 return False
         return True
 
