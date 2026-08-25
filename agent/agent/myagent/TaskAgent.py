@@ -19,6 +19,8 @@ class TaskAgent:
         # ジュース用。鍋・皿と同じ役割のミキサーとコップ。
         self.assigned_blender = None
         self.assigned_cup = None
+        # 受け渡し系のタスクは、料理の種類が分からないと完成品を判別できない。
+        self.dish_kind = None
         self.assigned_counter = None 
         self.assigned_task_id = None
         self.protected_counters = set()
@@ -506,7 +508,7 @@ class TaskAgent:
             return self.process_serve_from_counter_task(
                 env, ingredients, assigned_counter=self.assigned_counter,
                 assigned_serve_loc=self.assigned_serve_loc,
-                dynamic_obstacles=dynamic_obstacles)
+                dish_kind=self.dish_kind, dynamic_obstacles=dynamic_obstacles)
         elif self.task_name.startswith('handover'):
             parts = self.task_name.split('_')
             ingredients = [p.capitalize() for p in parts[1:]]
@@ -514,6 +516,9 @@ class TaskAgent:
                                               assigned_counter=self.assigned_counter,
                                               assigned_plate=self.assigned_plate,
                                               assigned_pot=self.assigned_pot,
+                                              assigned_cup=self.assigned_cup,
+                                              assigned_blender=self.assigned_blender,
+                                              dish_kind=self.dish_kind,
                                               dynamic_obstacles=dynamic_obstacles)
         elif self.task_name.startswith('serve_salad'):
             # 'serve' より先に判定する。サラダは鍋を使わない別工程なので
@@ -633,41 +638,48 @@ class TaskAgent:
             appliance_label='ミキサー')
 
     def process_handover_task(self, env, ingredients=None, assigned_counter=None,
-                              assigned_plate=None, assigned_pot=None, dynamic_obstacles=None):
-        """仕切りの向こうへ渡す: 鍋の中身を皿に盛って受け渡し台に置く。
+                              assigned_plate=None, assigned_pot=None,
+                              assigned_cup=None, assigned_blender=None,
+                              dish_kind=None, dynamic_obstacles=None):
+        """仕切りの向こうへ渡す: 完成させて、提供口ではなく受け渡し台に置く。
 
-        提供口が反対側にあって自分では配膳できないときに使う。皿に盛るまでは
-        通常の提供とまったく同じなので、そこは process_serve_task に任せ、
-        盛り終わったら提供口ではなく受け渡し台へ置きに行く。
+        完成させるまでの手順は通常の提供とまったく同じで、違うのは行き先だけ。
+        サラダは鍋を使わず、ジュースは鍋ではなくミキサーとコップを使うので、
+        料理の種類ごとの提供処理へ、行き先を受け渡し台に差し替えて任せる。
         """
-        holding = env.hold
-        holding_name = holding.full_name if holding else None
+        if assigned_counter is None:
+            return (0, 0), "受け渡し台が割り当てられていません"
 
-        target = sorted([f"Cooked{i}" for i in (ingredients or [])])
-        if holding_name and 'Plate' in holding_name and                 all(t in holding_name for t in target) and target:
-            if assigned_counter is None:
-                return (0, 0), "受け渡し台が割り当てられていません"
-            self_pos = env.self_pos
-            dist = abs(self_pos[0] - assigned_counter[0]) + abs(self_pos[1] - assigned_counter[1])
-            action = self.move_to(env, assigned_counter, dynamic_obstacles=dynamic_obstacles)
-            return action, "受け渡し台に置く (完了)" if dist == 1 else "受け渡し台へ運ぶ"
+        if dish_kind == 'juice':
+            return self.process_serve_juice_task(
+                env, ingredients, assigned_cup=assigned_cup,
+                assigned_serve_loc=assigned_counter, assigned_blender=assigned_blender,
+                dynamic_obstacles=dynamic_obstacles)
 
-        # まだ盛っていない段階は通常の提供と同じ(皿を取る -> 鍋から盛る)。
+        if dish_kind == 'salad':
+            return self.process_serve_salad_task(
+                env, ingredients, assigned_counter=assigned_counter,
+                assigned_serve_loc=assigned_counter, dynamic_obstacles=dynamic_obstacles)
+
         return self.process_serve_task(
             env, ingredients, assigned_plate=assigned_plate,
             assigned_serve_loc=assigned_counter, assigned_pot=assigned_pot,
             dynamic_obstacles=dynamic_obstacles)
 
     def process_serve_from_counter_task(self, env, ingredients=None, assigned_counter=None,
-                                        assigned_serve_loc=None, dynamic_obstacles=None):
+                                        assigned_serve_loc=None, dish_kind=None,
+                                        dynamic_obstacles=None):
         """受け渡し台に置かれた完成品を取って提供口へ運ぶ。"""
         self_pos = env.self_pos
         holding = env.hold
         holding_name = holding.full_name if holding else None
-        target = sorted([f"Cooked{i}" for i in (ingredients or [])])
+        # 完成品の名前は料理の種類で変わる(サラダは刻んだまま、ジュースはコップ)。
+        done_state, container = {'juice': ('Mixed', 'Cup'),
+                                 'salad': ('Chopped', 'Plate')}.get(dish_kind, ('Cooked', 'Plate'))
+        target = sorted([f"{done_state}{i}" for i in (ingredients or [])])
 
         def is_target(name):
-            return bool(name) and 'Plate' in name and target and all(t in name for t in target)
+            return bool(name) and container in name and target and all(t in name for t in target)
 
         if is_target(holding_name):
             deliveries = ([assigned_serve_loc] if assigned_serve_loc
@@ -921,6 +933,21 @@ class TaskAgent:
             remaining_ings = list(set(missing_ings) - set(held_ings))
             target_merge_loc = None
             order_allowed_names = {f"Chopped{i.capitalize()}" for i in ingredients}
+
+            # 指定テーブルに必要な分がもう全部揃っている場合、いま手に持って
+            # いるものは余り。同じ食材は重ねられないので、置きに行っても何も
+            # 起きず永久に固まる。手放してから、完成した山を取りに行く。
+            counter_obj = env.pos_obj.get(assigned_counter) if assigned_counter else None
+            counter_name = getattr(counter_obj, 'full_name', '') or ''
+            if counter_name:
+                counter_parts = (counter_name.replace('Cooking', 'Chopped')
+                                 .replace('Cooked', 'Chopped').replace('Charred', 'Chopped')
+                                 .replace('Mixing', 'Chopped').replace('Mixed', 'Chopped').split('-'))
+                if all(i in counter_parts for i in missing_ings):
+                    return self.drop_unwanted_item(
+                        env, holding,
+                        reason=f"指定テーブルに{appliance_label}の材料が揃っているため",
+                        dynamic_obstacles=dynamic_obstacles, allow_strict_override=True)
             
             # 常にCSPで指定された特定のカウンター(assigned_counter) をマージ先とする
             target_merge_loc, blocked_details = self._resolve_assigned_counter_target(
@@ -1201,10 +1228,11 @@ class TaskAgent:
         if self.strict_counter_management and not allow_strict_override:
             return (0, 0), f"共有置き場管理中のため待機: {reason}"
 
-        counters = env.get_pos_by_obj_gs(gs='Counter')
+        # 通路が分断された地図では、近くても反対側のカウンターには置けない。
+        counters = self.reachable_positions(env, env.get_pos_by_obj_gs(gs='Counter'))
         best_dist = float('inf')
         best_c = None
-        
+
         for c_pos in counters:
             if env.pos_obj.get(c_pos) is None:  # 空いているカウンター
                 dist = abs(env.self_pos[0] - c_pos[0]) + abs(env.self_pos[1] - c_pos[1])

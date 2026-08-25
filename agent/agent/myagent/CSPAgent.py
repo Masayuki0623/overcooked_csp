@@ -1277,6 +1277,24 @@ class CSPAgent:
                 self.carry_task_by_agent = None
             return scheduled_task
 
+        def finish_or_handover(verb, dish, kind):
+            """完成品を持っているときの行き先。
+
+            提供口が仕切りの向こうにあると自分では配膳できない。その場合は
+            受け渡し台に置いて相手に渡す。サラダ・スープ・ジュースのどれでも
+            事情は同じなので、ここに集約する。
+            """
+            if not self._can_reach_delivery(env, agent_idx):
+                counter = self._find_shared_counter(env, env.self_pos)
+                if counter is not None:
+                    return {
+                        'id': ('handover', dish, -1),
+                        'res': ('delivery', None),
+                        'assigned_counter': counter,
+                        'dish_kind': kind,
+                    }
+            return {'id': (verb, dish, -1), 'res': ('delivery', None)}
+
         if 'Plate' in holding_name and 'Cooked' in holding_name:
             cooked_parts = []
             for part in holding_name.split('-'):
@@ -1284,21 +1302,8 @@ class CSPAgent:
                     cooked_parts.append(part.replace('Cooked', '').lower())
             if cooked_parts:
                 cooked_parts.sort()
-                dish = f"{'-'.join(cooked_parts)}{SOUP_SUFFIX}"
-                if not self._can_reach_delivery(env, agent_idx):
-                    # 提供口が仕切りの向こうにある。自分では配膳できないので、
-                    # 受け渡し台に置いて相手に渡す。
-                    counter = self._find_shared_counter(env, env.self_pos)
-                    if counter is not None:
-                        return {
-                            'id': ('handover', dish, -1),
-                            'res': ('delivery', None),
-                            'assigned_counter': counter,
-                        }
-                return {
-                    'id': ('serve', dish, -1),
-                    'res': ('delivery', None),
-                }
+                return finish_or_handover(
+                    'serve', f"{'-'.join(cooked_parts)}{SOUP_SUFFIX}", KIND_SOUP)
 
         # コップに混ぜたものが入っている = ジュースの完成品。提供口へ運ぶだけ。
         if 'Cup' in holding_name and 'Mixed' in holding_name:
@@ -1306,10 +1311,8 @@ class CSPAgent:
                 part.replace('Mixed', '').lower()
                 for part in holding_name.split('-') if part.startswith('Mixed'))
             if mixed_parts:
-                return {
-                    'id': ('serve_juice', f"{'-'.join(mixed_parts)}{JUICE_SUFFIX}", -1),
-                    'res': ('delivery', None),
-                }
+                return finish_or_handover(
+                    'serve_juice', f"{'-'.join(mixed_parts)}{JUICE_SUFFIX}", KIND_JUICE)
 
         # 皿の上に刻んだ食材が乗っている = サラダの完成品。あとは提供口へ運ぶだけ。
         if 'Plate' in holding_name and 'Chopped' in holding_name:
@@ -1322,10 +1325,8 @@ class CSPAgent:
                 chopped_parts = []
             if chopped_parts:
                 chopped_parts.sort()
-                return {
-                    'id': ('serve_salad', f"{'-'.join(chopped_parts)}{SALAD_SUFFIX}", -1),
-                    'res': ('delivery', None),
-                }
+                return finish_or_handover(
+                    'serve_salad', f"{'-'.join(chopped_parts)}{SALAD_SUFFIX}", KIND_SALAD)
 
         chopped_combo_parts = []
         if 'Plate' not in holding_name and '-' in holding_name:
@@ -1823,10 +1824,12 @@ class CSPAgent:
                 parts = dish_ingredients(obj)
                 task_name = f"handover_{'_'.join(parts)}"
                 self.task_agent.assigned_counter = task.get('assigned_counter')
+                self.task_agent.dish_kind = task.get('dish_kind') or dish_kind_of(obj)
             elif verb == 'serve_from_counter':
                 parts = dish_ingredients(obj)
                 task_name = f"serve_from_counter_{'_'.join(parts)}"
                 self.task_agent.assigned_counter = task.get('assigned_counter')
+                self.task_agent.dish_kind = task.get('dish_kind') or dish_kind_of(obj)
             elif verb == 'serve':
                 parts = dish_ingredients(obj)
                 task_name = f"serve_{'_'.join(parts)}"
@@ -2078,10 +2081,12 @@ class CSPAgent:
                     parts = dish_ingredients(obj)
                     task_name = f"handover_{'_'.join(parts)}"
                     ta.assigned_counter = task.get('assigned_counter')
+                    ta.dish_kind = task.get('dish_kind') or dish_kind_of(obj)
                 elif verb == 'serve_from_counter':
                     parts = dish_ingredients(obj)
                     task_name = f"serve_from_counter_{'_'.join(parts)}"
                     ta.assigned_counter = task.get('assigned_counter')
+                    ta.dish_kind = task.get('dish_kind') or dish_kind_of(obj)
                 elif verb == 'serve':
                     parts = dish_ingredients(obj)
                     task_name = f"serve_{'_'.join(parts)}"
@@ -2780,22 +2785,26 @@ class CSPAgent:
             pot_pos = pot_pos_list[order_idx % len(pot_pos_list)]
 
             needed_ings = dish_ingredients(obj)
-            start_candidates = []
+            # 材料は指定テーブルに集めるので、そこが実際の出発点。指定が無い
+            # ときだけ、置かれている材料や適当なカウンターから見積もる。
+            start_pos = assigned_counter
+            if start_pos is None:
+                start_candidates = []
 
-            for pos, world_obj in env.pos_obj.items():
-                if world_obj is None:
-                    continue
-                base_name = chopped_base_name(world_obj)
-                if base_name is not None and base_name.lower() in needed_ings:
-                    start_candidates.append(pos)
+                for pos, world_obj in env.pos_obj.items():
+                    if world_obj is None:
+                        continue
+                    base_name = chopped_base_name(world_obj)
+                    if base_name is not None and base_name.lower() in needed_ings:
+                        start_candidates.append(pos)
 
-            if start_candidates:
-                start_pos = get_nearest(pot_pos, start_candidates)
-            else:
-                counters = env.get_pos_by_obj_gs(gs="Counter")
-                if not counters: return None
-                start_pos = get_nearest(pot_pos, counters)
-            
+                if start_candidates:
+                    start_pos = get_nearest(pot_pos, start_candidates)
+                else:
+                    counters = env.get_pos_by_obj_gs(gs="Counter")
+                    if not counters: return None
+                    start_pos = get_nearest(pot_pos, counters)
+
             d = self.astar_distance(env, start_pos, pot_pos)
             if d is None: return None
             return int(d + 2)
@@ -4014,6 +4023,7 @@ class CSPAgent:
                 # 「自分ができず相手ができる」ので、受け渡しを挟んで2つに割る。
                 #   handover           : 鍋から盛って受け渡し台に置く(こちら側)
                 #   serve_from_counter : 受け渡し台から取って提供する(向こう側)
+                dish_kind = dish_kind_of(dish_name)
                 handover_counter = self._find_shared_counter(
                     env, resources['pots'][0] if resources['pots'] else None)
                 dur_h = self._task_duration_frames(
@@ -4024,6 +4034,8 @@ class CSPAgent:
                     tasks.append({
                         'id': ('handover', dish_name, order_uid),
                         'verb': 'handover', 'obj': dish_name, 'order': order_uid,
+                        # 受け渡し系は「何料理か」が分からないと完成品を判別できない。
+                        'dish_kind': dish_kind,
                         'slot_idx': order_idx,
                         'display_order': display_order,
                         'dur': dur_h,
@@ -4033,6 +4045,8 @@ class CSPAgent:
                     tasks.append({
                         'id': ('serve_from_counter', dish_name, order_uid),
                         'verb': 'serve_from_counter', 'obj': dish_name, 'order': order_uid,
+                        # 受け渡し系は「何料理か」が分からないと完成品を判別できない。
+                        'dish_kind': dish_kind,
                         'slot_idx': order_idx,
                         'display_order': display_order,
                         'dur': dur_s,
@@ -4367,7 +4381,7 @@ class CSPAgent:
                             # 仕切りのあるマップでは、AI が物理的に行けないタスクがある。
                             # それを AI に割り当てると永久に実行できず全体が止まるので、
                             # 到達できる側のエージェントへ回す。
-                            allowed = self._task_allowed_agents(env, tasks[i])
+                            allowed = self._assignable_agents(env, tasks[i])
                             if len(allowed) == 1:
                                 forced = next(iter(allowed))
                         model.Add(is_a1[i] == forced)
@@ -4380,7 +4394,7 @@ class CSPAgent:
                 elif self._map_is_partitioned(env):
                     # 両方AIのモードでも、行ける側にしか割り当てないよう縛る。
                     for i in range(num_tasks):
-                        allowed = self._task_allowed_agents(env, tasks[i])
+                        allowed = self._assignable_agents(env, tasks[i])
                         if len(allowed) == 1:
                             model.Add(is_a1[i] == next(iter(allowed)))
 
@@ -5091,6 +5105,25 @@ class CSPAgent:
         comps = self._task_components(env, task)
         return {a for a in (0, 1) if self._agent_component(env, a) in comps}
 
+    def _agents_reaching(self, env, pos):
+        """その位置を使える(隣に立てる)エージェント番号の集合。"""
+        if pos is None:
+            return set()
+        comps = self._components_touching(env, tuple(pos))
+        return {a for a in (0, 1) if self._agent_component(env, a) in comps}
+
+    def _assignable_agents(self, env, task):
+        """そのタスクを割り当ててよいエージェント番号の集合。
+
+        1人で完結できるならその人。誰も完結できない(仕切りを跨ぐ)場合でも、
+        「誰でもいい」にすると行けない側に割り当たって永久に止まる。最後の
+        工程(end_pos)へ行ける側に寄せておけば、少なくとも仕上げはできる。
+        """
+        allowed = self._task_allowed_agents(env, task)
+        if allowed:
+            return allowed
+        return self._agents_reaching(env, task.get('end_pos'))
+
     def astar_distance(self, env, start, goal):
         import heapq
         width = env.world_width
@@ -5102,6 +5135,16 @@ class CSPAgent:
 
         def walkable(x, y):
             return in_bounds(x, y) and grid[x][y] == 1
+
+        # 出発点にはカウンターや調理器具のマスを渡されることがある。人はその
+        # 隣に立って触るので、隣の床から測る。ここで諦めると「そのタスクは
+        # 不可能」と誤判定され、工程がまるごと計画から消える。
+        if not walkable(start[0], start[1]):
+            neighbours = [(start[0]+dx, start[1]+dy) for dx, dy in [(0,1),(0,-1),(1,0),(-1,0)]
+                          if walkable(start[0]+dx, start[1]+dy)]
+            if not neighbours:
+                return None
+            start = min(neighbours, key=lambda p: abs(p[0]-goal[0]) + abs(p[1]-goal[1]))
 
         original_goal = goal
         if not walkable(goal[0], goal[1]):
