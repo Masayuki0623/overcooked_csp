@@ -83,9 +83,9 @@ def make_agent():
     return ai
 
 
-def make_env(map_name, seed):
+def make_env(map_name, seed, preset='experiment1'):
     kw = dict(MAP_SETTINGS[map_name])
-    kw['order_recipes'] = generate_order_recipes('experiment1', random.Random(seed))
+    kw['order_recipes'] = generate_order_recipes(preset, random.Random(seed))
     env = OvercookedEnvironment(MapSetting(**kw))
     env.reset()
     return env
@@ -133,21 +133,29 @@ def find_rank(agent, schedule_per_agent, fixed_task_ids):
     return best if best else (None, None)
 
 
+def order_uids_with_verb(orders, verb):
+    """その工程を含む注文の order_uid 集合。"""
+    return {t['order'] for o in orders for t in o['tasks'] if t['verb'] == verb}
+
+
 def soup_order_uids(orders):
-    """スープ(鍋を使う注文)の order_uid 集合。good/bad の判定に使う。"""
-    uids = set()
-    for o in orders:
-        for t in o['tasks']:
-            if t['verb'] == 'cook':
-                uids.add(t['order'])
-    return uids
+    """スープ(鍋を使う注文)の order_uid 集合。良い指示の判定に使う。"""
+    return order_uids_with_verb(orders, 'cook')
 
 
-def pick_target(candidates, quality, soup_uids, rng):
+def juice_order_uids(orders):
+    """ジュース(ミキサーを使う注文)の order_uid 集合。悪い指示の判定に使う。"""
+    return order_uids_with_verb(orders, 'mix')
+
+
+def pick_target(candidates, quality, soup_uids, rng, bad_uids=None):
     """指示の質に応じて対象タスクを1つ選ぶ。
 
-    good : スープに寄与する下ごしらえ(chop)。ボトルネックを早める指示。
-    bad  : スープに一切寄与しない、サラダ専用の下ごしらえ。後回しでよい作業。
+    good : スープ(ボトルネック)に寄与する下ごしらえ(chop)。全体最適の指示。
+    bad  : スープに寄与しない下ごしらえ。目先の都合を優先した指示。
+           ジュースがある構成では「ジュースの注文に属する chop」を選ぶ
+           (人間が自分のミキサー作業を早く始めたい、という動機のある悪い指示)。
+           ジュースが無い構成では、従来どおりサラダ専用の chop。
     random: 候補から一様に1つ。
     """
     if quality == 'random':
@@ -159,19 +167,23 @@ def pick_target(candidates, quality, soup_uids, rng):
     chops = [(d, p) for d, p in candidates if p['verb'] == 'chop']
     if quality == 'good':
         pool = [c for c in chops if soup_uids & set(c[1]['order_uids'])]
+    elif bad_uids:
+        pool = [c for c in chops
+                if (bad_uids & set(c[1]['order_uids']))
+                and not (soup_uids & set(c[1]['order_uids']))]
     else:
         pool = [c for c in chops if not (soup_uids & set(c[1]['order_uids']))]
     return rng.choice(pool) if pool else None
 
 
-def seed_is_usable(map_name, seed):
+def seed_is_usable(map_name, seed, preset='experiment1'):
     """good と bad の両方を chop で選べる初期条件かどうか。
 
     スープが3種の具材を使う(FullSoup)と、すべての chop がスープにも寄与する
     ため「サラダ専用の下ごしらえ」が存在せず、bad が定義できない。
     そういう注文構成は条件として成立しないので、シードごと除外する。
     """
-    env = make_env(map_name, seed)
+    env = make_env(map_name, seed, preset)
     agent = make_agent()
     state = snapshot(env)
     orders = agent._build_order_tasks(dcopy(state))
@@ -179,20 +191,21 @@ def seed_is_usable(map_name, seed):
         return False
     candidates = agent.get_instruction_candidates(dcopy(state))
     soup_uids = soup_order_uids(orders)
+    bad_uids = juice_order_uids(orders)
     rng = random.Random(0)
-    return all(pick_target(candidates, q, soup_uids, rng) is not None
+    return all(pick_target(candidates, q, soup_uids, rng, bad_uids) is not None
                for q in ('good', 'bad'))
 
 
-def run_trial(map_name, seed, quality, skip_budget):
-    env = make_env(map_name, seed)
+def run_trial(map_name, seed, quality, skip_budget, preset='experiment1'):
+    env = make_env(map_name, seed, preset)
     agent = make_agent()
     state = snapshot(env)
     orders = agent._build_order_tasks(dcopy(state))
     tasks_total = sum(len(o['tasks']) for o in orders)
 
     row = {
-        'map': map_name, 'seed': seed, 'quality': quality,
+        'map': map_name, 'preset': preset, 'seed': seed, 'quality': quality,
         'skip_budget': skip_budget,
         'orders': '|'.join(env.arglist.order_recipes),
         'num_tasks': tasks_total,
@@ -215,8 +228,9 @@ def run_trial(map_name, seed, quality, skip_budget):
     # --- 指示対象を選ぶ ---------------------------------------------------
     candidates = agent.get_instruction_candidates(dcopy(state))
     soup_uids = soup_order_uids(orders)
+    bad_uids = juice_order_uids(orders)
     rng = random.Random(f'{map_name}-{seed}-{quality}')
-    target = pick_target(candidates, quality, soup_uids, rng)
+    target = pick_target(candidates, quality, soup_uids, rng, bad_uids)
     if target is None:
         row['status'] = 'no_candidate_for_quality'
         row['num_candidates'] = len(candidates)
@@ -265,7 +279,7 @@ def run_trial(map_name, seed, quality, skip_budget):
     return row
 
 
-FIELDS = ['map', 'seed', 'quality', 'skip_budget', 'status', 'orders', 'num_tasks',
+FIELDS = ['map', 'preset', 'seed', 'quality', 'skip_budget', 'status', 'orders', 'num_tasks',
           'num_candidates', 'target', 'target_verb', 'target_obj', 'target_serves_soup',
           'natural_rank', 'natural_rank_agent', 'excess',
           'makespan_baseline_s', 'makespan_constrained_s', 'loss_s',
@@ -277,6 +291,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--map', default='ring', help='比較するマップ名(カンマ区切りで複数可)')
     ap.add_argument('--seeds', type=int, default=30, help='各条件あたりの試行数')
+    ap.add_argument('--preset', default='experiment1',
+                    help='注文プリセット(experiment1=サラダ2+スープ1 / experiment2=サラダ1+スープ1+ジュース1)')
     ap.add_argument('--out', default=str(ROOT / 'results' / 'instruction_experiment.csv'))
     args = ap.parse_args()
 
@@ -292,7 +308,7 @@ def main():
         # 条件として成立するシードだけを、必要数そろうまで拾う。
         seeds, probe, skipped = [], 0, 0
         while len(seeds) < args.seeds and probe < args.seeds * 20:
-            if seed_is_usable(map_name, probe):
+            if seed_is_usable(map_name, probe, args.preset):
                 seeds.append(probe)
             else:
                 skipped += 1
@@ -303,7 +319,7 @@ def main():
         for seed in seeds:
             for quality in QUALITIES:
                 for d in SKIP_BUDGETS:
-                    rows.append(run_trial(map_name, seed, quality, d))
+                    rows.append(run_trial(map_name, seed, quality, d, args.preset))
                     done += 1
                     if done % 25 == 0 or done == total:
                         el = time.time() - started

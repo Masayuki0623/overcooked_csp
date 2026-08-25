@@ -43,10 +43,13 @@ def load(path):
 
 
 def maps_of(rows):
+    """比較の軸。マップと注文構成の組でひとつの条件とする。"""
     seen = []
     for r in rows:
-        if r['map'] not in seen:
-            seen.append(r['map'])
+        key = r['map'] if not r.get('preset') else f"{r['map']}/{r['preset']}"
+        r['_cond'] = key
+        if key not in seen:
+            seen.append(key)
     return seen
 
 
@@ -76,10 +79,10 @@ def fig1_natural_rank(rows, maps, out):
         bins = np.arange(-0.5, 5.5)
     for ax, m in zip(axes, maps):
         for q in QUALITIES:
-            vals = [r['natural_rank'] for r in ok if r['map'] == m and r['quality'] == q]
+            vals = [r['natural_rank'] for r in ok if r['_cond'] == m and r['quality'] == q]
             ax.hist(vals, bins=bins, alpha=0.55, label=f'{QUALITY_JA[q]} (n={len(vals)})',
                     color=COLORS[q])
-        ax.set_title(f'マップ: {m}')
+        ax.set_title(f'条件: {m}')
         ax.set_xlabel('自然順位（指示なしの最適計画での実行順、0始まり）')
         ax.set_ylabel('試行数')
         ax.legend()
@@ -92,7 +95,7 @@ def fig2_loss_vs_excess(rows, maps, out):
     fig, axes = grid(maps, '図2: 効率損失 L と超過分（自然順位 − skip_budget）の関係')
     ok = [r for r in rows if r['status'] == 'ok' and r['excess'] is not None]
     for ax, m in zip(axes, maps):
-        sub = [r for r in ok if r['map'] == m]
+        sub = [r for r in ok if r['_cond'] == m]
         for q in QUALITIES:
             pts = [(r['excess'], r['loss_s']) for r in sub if r['quality'] == q]
             if pts:
@@ -110,7 +113,7 @@ def fig2_loss_vs_excess(rows, maps, out):
             ax.plot(xs, [np.mean(by_excess[x]) for x in xs], color='#222',
                     lw=1.8, marker='o', ms=4, label='超過分ごとの平均')
         ax.axhline(0, color='#999', lw=1, ls='--')
-        ax.set_title(f'マップ: {m}')
+        ax.set_title(f'条件: {m}')
         ax.set_xlabel('超過分 = max(0, 自然順位 − skip_budget)')
         ax.set_ylabel('効率損失 L（秒）')
         ax.legend()
@@ -128,7 +131,7 @@ def fig3_loss_by_budget(rows, maps, out):
             means, errs = [], []
             for d in SKIP_BUDGETS:
                 vals = [r['loss_s'] for r in ok
-                        if r['map'] == m and r['quality'] == q and r['skip_budget'] == d]
+                        if r['_cond'] == m and r['quality'] == q and r['skip_budget'] == d]
                 means.append(np.mean(vals) if vals else 0)
                 errs.append(np.std(vals) / np.sqrt(len(vals)) if len(vals) > 1 else 0)
             xs = np.arange(len(SKIP_BUDGETS)) + (i - 1) * width
@@ -136,7 +139,7 @@ def fig3_loss_by_budget(rows, maps, out):
                    color=COLORS[q], label=QUALITY_JA[q], alpha=0.9)
         ax.set_xticks(np.arange(len(SKIP_BUDGETS)))
         ax.set_xticklabels([f'd={d}' for d in SKIP_BUDGETS])
-        ax.set_title(f'マップ: {m}')
+        ax.set_title(f'条件: {m}')
         ax.set_xlabel('skip_budget')
         ax.set_ylabel('効率損失 L の平均（秒）')
         ax.legend()
@@ -151,12 +154,12 @@ def fig4_inserted(rows, maps, out):
                  fontsize=13, fontweight='bold')
     ok = [r for r in rows if r['status'] == 'ok' and r['inserted_count'] is not None]
     for col, m in enumerate(maps):
-        sub = [r for r in ok if r['map'] == m]
+        sub = [r for r in ok if r['_cond'] == m]
         ax = axes[0][col]
         data = [[r['inserted_count'] for r in sub if r['skip_budget'] == d]
                 for d in SKIP_BUDGETS]
         ax.boxplot(data, tick_labels=[f'd={d}' for d in SKIP_BUDGETS])
-        ax.set_title(f'マップ: {m} — 挟まった個数')
+        ax.set_title(f'条件: {m} — 挟まった個数')
         ax.set_ylabel('個数')
         ax.grid(alpha=0.25, axis='y')
 
@@ -165,7 +168,7 @@ def fig4_inserted(rows, maps, out):
                  if r['skip_budget'] == d and r['inserted_total_s'] is not None]
                 for d in SKIP_BUDGETS]
         ax.boxplot(data, tick_labels=[f'd={d}' for d in SKIP_BUDGETS])
-        ax.set_title(f'マップ: {m} — 合計所要時間')
+        ax.set_title(f'条件: {m} — 合計所要時間')
         ax.set_xlabel('skip_budget')
         ax.set_ylabel('秒')
         ax.grid(alpha=0.25, axis='y')
@@ -181,7 +184,7 @@ def fig5_infeasible(rows, maps, out):
             rates = []
             for d in SKIP_BUDGETS:
                 sub = [r for r in rows
-                       if r['map'] == m and r['quality'] == q and r['skip_budget'] == d]
+                       if r['_cond'] == m and r['quality'] == q and r['skip_budget'] == d]
                 bad = sum(1 for r in sub if r.get('constrained_status') == 'INFEASIBLE')
                 rates.append(100 * bad / len(sub) if sub else 0)
             xs = np.arange(len(SKIP_BUDGETS)) + (i - 1) * width
@@ -189,7 +192,7 @@ def fig5_infeasible(rows, maps, out):
         ax.set_xticks(np.arange(len(SKIP_BUDGETS)))
         ax.set_xticklabels([f'd={d}' for d in SKIP_BUDGETS])
         ax.set_ylim(0, 100)
-        ax.set_title(f'マップ: {m}')
+        ax.set_title(f'条件: {m}')
         ax.set_xlabel('skip_budget')
         ax.set_ylabel('INFEASIBLE の割合（%）')
         ax.legend()
@@ -204,7 +207,8 @@ def summarize(rows, maps):
     for m in maps:
         print(f'\n[{m}]')
         for q in QUALITIES:
-            ranks = [r['natural_rank'] for r in ok if r['map'] == m and r['quality'] == q]
+            ranks = [r['natural_rank'] for r in ok
+                     if r['_cond'] == m and r['quality'] == q and r['natural_rank'] is not None]
             if ranks:
                 print(f'  {QUALITY_JA[q]:<6} 自然順位 中央値={np.median(ranks):.1f} '
                       f'平均={np.mean(ranks):.2f} 範囲={min(ranks)}-{max(ranks)}')
@@ -213,11 +217,11 @@ def summarize(rows, maps):
             line = []
             for d in SKIP_BUDGETS:
                 vals = [r['loss_s'] for r in ok
-                        if r['map'] == m and r['quality'] == q and r['skip_budget'] == d]
+                        if r['_cond'] == m and r['quality'] == q and r['skip_budget'] == d]
                 line.append(f'd={d}: {np.mean(vals):5.2f}' if vals else f'd={d}:   n/a')
             print(f'    {QUALITY_JA[q]:<6} ' + '  '.join(line))
-        zero = [r['loss_s'] for r in ok if r['map'] == m and r['excess'] == 0]
-        pos = [r['loss_s'] for r in ok if r['map'] == m and r['excess'] and r['excess'] > 0]
+        zero = [r['loss_s'] for r in ok if r['_cond'] == m and r['excess'] == 0]
+        pos = [r['loss_s'] for r in ok if r['_cond'] == m and r['excess'] and r['excess'] > 0]
         print(f'  超過分=0 のとき L: 平均={np.mean(zero):.2f} '
               f'最大={max(zero):.2f} (n={len(zero)})' if zero else '  超過分=0 のデータなし')
         print(f'  超過分>0 のとき L: 平均={np.mean(pos):.2f} '
@@ -226,11 +230,14 @@ def summarize(rows, maps):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--csv', default='results/instruction_experiment.csv')
+    ap.add_argument('--csv', default='results/instruction_experiment.csv',
+                    help='カンマ区切りで複数指定すると、まとめて比較図にする')
     ap.add_argument('--out', default='results/figures')
     args = ap.parse_args()
 
-    rows = load(args.csv)
+    rows = []
+    for path in args.csv.split(','):
+        rows.extend(load(path.strip()))
     maps = maps_of(rows)
     Path(args.out).mkdir(parents=True, exist_ok=True)
     print(f'{len(rows)} 行 / マップ {maps}\n図を出力:')

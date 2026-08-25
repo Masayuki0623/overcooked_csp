@@ -205,10 +205,13 @@ def _draw_radial_timer(surface, center, remaining, total, bg_color=PANEL_BG):
 class InstructionPanel:
     """指示カード画面。選ばれた候補(display, payload)、またはキャンセル時 None を返す。"""
 
-    def __init__(self, candidates, env_summary=None):
+    def __init__(self, candidates, env_summary=None, allow_cancel=True):
         self.candidates = candidates or []
         self.env_summary = env_summary or {}
         self.card_rects = []
+        # 見送り不可のモード(once_at_start)では、時間切れも ESC も受け付けない。
+        # 参加者は必ず1つ選ぶ。
+        self.allow_cancel = allow_cancel
 
     def _draw_env_strip(self, surface, rect):
         """どちらのキャラクターがAIで、どちらがあなたかをゲーム内の絵で示す帯。"""
@@ -374,7 +377,8 @@ class InstructionPanel:
                 if event.type == pygame.QUIT:
                     return None
                 if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                    return None
+                    if self.allow_cancel:
+                        return None
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     for rect, choice in self.card_rects:
                         if rect.collidepoint(event.pos):

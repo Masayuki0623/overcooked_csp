@@ -1096,6 +1096,22 @@ class CSPAgent:
             if needs_serve:
                 serve_verb = ('serve_juice' if is_juice
                               else 'serve_salad' if is_salad else 'serve')
+                # 仕切りのあるマップでは、鍋の側から提供口へ行けない。
+                # 実際に作られるタスクは serve ではなく handover +
+                # serve_from_counter なので、候補としてもそちらを出す。
+                # (ここで serve を出すと、実在しないタスクが指示の候補に並び、
+                #  選ばれても制約が効かない)
+                if serve_verb == 'serve' and self._map_is_partitioned(env):
+                    pot_side = set()
+                    for pot in env.get_pos_by_obj_gs(gs='Pot'):
+                        pot_side |= self._components_touching(env, pot)
+                    reach = any(
+                        pot_side & self._components_touching(env, d)
+                        for d in env.get_pos_by_obj_gs(gs='Delivery'))
+                    if not reach:
+                        remaining_tids.add(('handover', dish_name, order_uid))
+                        remaining_tids.add(('serve_from_counter', dish_name, order_uid))
+                        continue
                 remaining_tids.add((serve_verb, dish_name, order_uid))
 
         return remaining_tids

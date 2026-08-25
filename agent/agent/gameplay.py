@@ -93,10 +93,15 @@ HUMAN_POLL_INTERVAL = 0.002
 INSTRUCTION_TIMING_FREE = 'free'
 INSTRUCTION_TIMING_ENABLE_COOK = 'enable_cook'
 INSTRUCTION_TIMING_NO_INSTRUCTION = 'no_instruction'
+#   once_at_start  : セッション開始直後に1回だけ、自動で指示画面を出す。
+#                    見送り不可(ESCで閉じられない)。実験条件としてタイミングと
+#                    回数を完全に固定するためのモード。
+INSTRUCTION_TIMING_ONCE_AT_START = 'once_at_start'
 INSTRUCTION_TIMINGS = (
     INSTRUCTION_TIMING_FREE,
     INSTRUCTION_TIMING_ENABLE_COOK,
     INSTRUCTION_TIMING_NO_INSTRUCTION,
+    INSTRUCTION_TIMING_ONCE_AT_START,
 )
 
 
@@ -167,6 +172,8 @@ class GamePlay(Game):
         # enable_cook の立ち上がり検出用。「前回見たときに着手可能だった cook タスク」。
         # 同じタスクで何度も指示画面を出さないよう、集合の差分でだけ発火させる。
         self._seen_ready_cook_actions = set()
+        # once_at_start で、開始直後の1回を出したかどうか。
+        self._once_instruction_done = False
 
     def _get_unexecuted_task_candidates(self):
         env_state = self._latest_env_state
@@ -221,7 +228,11 @@ class GamePlay(Game):
         panel_width = max(360, old_size[0])
         try:
             widened = pygame.display.set_mode((old_size[0] + panel_width, old_size[1]))
-            panel = InstructionPanel(candidates, env_summary=self._build_env_summary())
+            # once_at_start は見送り不可。ESC で閉じられないようにする。
+            allow_cancel = (self.instruction_request_timing
+                            != INSTRUCTION_TIMING_ONCE_AT_START)
+            panel = InstructionPanel(candidates, env_summary=self._build_env_summary(),
+                                     allow_cancel=allow_cancel)
             return panel.run(widened, snapshot)
         finally:
             self._instruction_panel_active = False
@@ -248,6 +259,7 @@ class GamePlay(Game):
 
             if pygame.key.name(event.key) == "space":
                 if self.instruction_request_timing != INSTRUCTION_TIMING_FREE:
+                    # free 以外はタイミングを実験条件として固定している。
                     # free 以外はタイミングを実験条件として固定しているので、
                     # 人間の任意呼び出しは受け付けない。
                     return
@@ -353,12 +365,25 @@ class GamePlay(Game):
                 # replay log for instruction accepted
                 try:
                     # log display text for human-readable logs, keep payload in pending entry
-                    self.replay.log('instruction_accepted', {'id': inst_id, 'task': display_text, 'accepted_time_wall': inst_id, 'accepted_time_env': accepted_env_time, 'target_idx': target_idx, 'trigger': trigger})
+                    self.replay.log('instruction_accepted', {
+                        'id': inst_id, 'task': display_text,
+                        'accepted_time_wall': inst_id,
+                        'accepted_time_env': accepted_env_time,
+                        'target_idx': target_idx, 'trigger': trigger,
+                        **self._describe_instruction_target(pending_payload),
+                    })
                 except Exception:
                     pass
 
                 # Print to debug log (will be captured in debug_*.log)
-                print(f"[Instruction] accepted id={inst_id:.6f} task={display_text} agent_idx={target_idx} env_time={accepted_env_time:.6f} wall_time={inst_id:.6f} trigger={trigger}")
+                desc = self._describe_instruction_target(pending_payload)
+                print(f"[Instruction] accepted id={inst_id:.6f} task={display_text} "
+                      f"agent_idx={target_idx} env_time={accepted_env_time:.6f} "
+                      f"wall_time={inst_id:.6f} trigger={trigger} "
+                      f"verb={desc.get('target_verb')} obj={desc.get('target_obj')} "
+                      f"order_uids={desc.get('target_order_uids')} "
+                      f"dishes={desc.get('target_dishes')} "
+                      f"kinds={desc.get('target_dish_kinds')} orders={desc.get('all_orders')}")
 
                 # 時間損失量 L(d) を計算する(別スレッド。進行は止めない)
                 self._start_time_loss_estimation(pending_entry, display_text)
@@ -375,6 +400,54 @@ class GamePlay(Game):
                 self._q_ai.put(('Chat', dict(chat=display_text)))
         finally:
             self._q_env.put(('Continue', {}))
+
+    def _describe_instruction_target(self, payload):
+        """選ばれた指示が「どの注文に属するタスクか」を解析用に書き出す。
+
+        指示の質(良い=スープ / 悪い=ジュース)は、どの注文のタスクを選んだかで
+        決まる。動詞と対象だけでは同じ食材が複数の注文に登場したときに区別
+        できないため、注文の識別子と料理名・系統もあわせて残す。
+        """
+        info = {'target_verb': None, 'target_obj': None, 'target_order_uids': None,
+                'target_dishes': None, 'target_dish_kinds': None, 'all_orders': None}
+        try:
+            if isinstance(payload, dict):
+                info['target_verb'] = payload.get('verb')
+                info['target_obj'] = payload.get('obj')
+                info['target_order_uids'] = list(payload.get('order_uids') or [])
+
+            orders = getattr(self.env.order_scheduler, 'current_orders', []) or []
+            names = [getattr(o[0], 'full_name', '') for o in orders]
+            info['all_orders'] = names
+
+            labels = {}
+            if hasattr(self.ai, 'get_order_display_labels'):
+                labels = self.ai.get_order_display_labels() or {}
+            uids = info['target_order_uids'] or []
+            dishes = [labels.get(u) or labels.get(u + 1) for u in uids]
+            info['target_dishes'] = [d for d in dishes if d] or None
+
+            # 系統(salad/soup/juice)は、注文名の材料状態から判定する。
+            from agent.myagent.CSPAgent import goal_dish_kind
+            info['target_dish_kinds'] = sorted({goal_dish_kind(n) for n in names}) or None
+        except Exception as e:
+            print(f"[GamePlay] 指示対象の解析に失敗: {e}")
+        return info
+
+    def _poll_once_at_start_trigger(self):
+        """once_at_start: セッション開始直後に1回だけ指示画面を出す。
+
+        世界の状態が最初に届いた時点(=ゲームが動き出した直後)で発火させる。
+        以後は二度と出さないので、指示の回数とタイミングが実験条件として固定される。
+        """
+        if self.instruction_request_timing != INSTRUCTION_TIMING_ONCE_AT_START:
+            return
+        if self._once_instruction_done or self._instruction_panel_active:
+            return
+        if self._latest_env_state is None:
+            return
+        self._once_instruction_done = True
+        self._request_instruction(trigger='once_at_start', allow_text_fallback=False)
 
     def _poll_cook_instruction_trigger(self):
         """enable_cook: 調理タスクに今すぐ着手できる状態になった瞬間、指示画面を出す。
@@ -765,6 +838,7 @@ class GamePlay(Game):
             # 指示パネルの描画は pygame の main スレッドから行う必要があるため、
             # 自動呼び出しの監視もこのループに置く。
             self._poll_cook_instruction_trigger()
+            self._poll_once_at_start_trigger()
             if not self._q_control.empty():
                 event, args = self._q_control.get_nowait()
                 if event == 'Quit':

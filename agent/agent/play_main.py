@@ -79,7 +79,8 @@ def parse_arguments():
             "free: anytime via the Space key (default). "
             "enable_cook: automatically prompt the moment a cook task becomes "
             "immediately startable (Space is disabled). "
-            "no_instruction: instructions are disabled."
+            "no_instruction: instructions are disabled. "
+            "once_at_start: prompt once right after the session starts (cannot be skipped)."
         )
     )
     parser.add_argument(
