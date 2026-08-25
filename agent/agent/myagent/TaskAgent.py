@@ -565,10 +565,18 @@ class TaskAgent:
     @classmethod
     def _reach_from(cls, env):
         """自分の現在地から歩いて行ける床マス(幅優先)。1手番ぶんキャッシュする。"""
-        key = (id(env), tuple(env.self_pos))
-        hit = cls._reach_cache.get(key)
-        if hit is not None:
-            return hit
+        # id() は使い回されるので、別の状態に同じ鍵が当たって古い地図を
+        # 返すことがある。状態そのものに持たせれば、その状態と一緒に消える。
+        key = tuple(env.self_pos)
+        cache = getattr(env, '_reach_cache_by_pos', None)
+        if cache is None:
+            cache = {}
+            try:
+                env._reach_cache_by_pos = cache
+            except Exception:
+                cache = None
+        if cache is not None and key in cache:
+            return cache[key]
         w, h = env.world_width, env.world_height
         grid = env.to_grid
         rch = [[False] * h for _ in range(w)]
@@ -582,9 +590,8 @@ class TaskAgent:
                 if 0 <= nx < w and 0 <= ny < h and grid[nx][ny] == 1 and not rch[nx][ny]:
                     rch[nx][ny] = True
                     stack.append((nx, ny))
-        if len(cls._reach_cache) > 64:
-            cls._reach_cache.clear()
-        cls._reach_cache[key] = rch
+        if cache is not None:
+            cache[key] = rch
         return rch
 
     def process_mix_task(self, env, ingredients=None, assigned_blender=None,

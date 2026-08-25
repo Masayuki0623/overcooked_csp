@@ -194,7 +194,14 @@ class HumanModel:
             self.current_id = None
             return (0, 0), None
 
-        options = self.available_tasks(env, tasks) or tasks
+        # 着手できるものが1つも無いことがある。この地図では果物が相手側に
+        # しかないので、相手が刻み終わるまで人間側は手が出せない。そこで
+        # 前提を無視して選ぶと、器具の前で永久に立ち尽くすことになる。
+        # 人なら「まだできないから待つ」ので、そのまま待たせる。
+        options = self.available_tasks(env, tasks)
+        if not options and env.hold is None:
+            self.current_id = None
+            return (0, 0), None
 
         # 何かを手に持っているなら、まずそれを片付ける。持ち物と無関係な
         # タスクを選ぶと、何をしようにも手が塞がっていて動けない。
@@ -225,7 +232,7 @@ class HumanModel:
         if keep is None:
             # 一覧が古いかもしれないので作り直してから確認する。
             tasks = self._tasks(env, refresh=True)
-            options = self.available_tasks(env, tasks) or tasks
+            options = self.available_tasks(env, tasks)
             keep = next((t for t in options if t['id'] == self.current_id), None)
 
         if keep is not None and self.stuck >= STUCK_LIMIT:

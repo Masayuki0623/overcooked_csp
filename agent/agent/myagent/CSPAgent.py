@@ -1580,7 +1580,7 @@ class CSPAgent:
                     return candidate
         return None
 
-    def _find_takeover_task_for_deps(self, missing_deps, agent_idx):
+    def _find_takeover_task_for_deps(self, missing_deps, agent_idx, env=None):
         """待ちの原因になっている前提タスクを、自分で引き受けるために探す。
 
         CSP は常に2エージェント分のスケジュールを作るが、human_counterpart_mode
@@ -1595,10 +1595,20 @@ class CSPAgent:
         if not missing_deps:
             return None
         missing_set = set(missing_deps)
+        partitioned = env is not None and self._map_is_partitioned(env)
+        if partitioned:
+            # 位置が無いままだと「誰でもできる」と判定されてしまう。
+            for tasks in self.schedule_per_agent.values():
+                self._annotate_task_geometry(env, tasks, env.self_pos)
         for search_idx in (agent_idx, 1 - agent_idx):
             for candidate in self.schedule_per_agent.get(search_idx, []):
-                if candidate['id'] in missing_set:
-                    return candidate
+                if candidate['id'] not in missing_set:
+                    continue
+                # 仕切りの向こうのタスクを引き受けても、資材に手が届かない。
+                # 引き受けた側がそこで止まるだけなので、できるものだけにする。
+                if partitioned and agent_idx not in self._task_allowed_agents(env, candidate):
+                    continue
+                return candidate
         return None
 
     def __call__(self, env):
@@ -1947,6 +1957,9 @@ class CSPAgent:
                         # 仕切りのあるマップでは、相手側にしかできないタスクがある。
                         # それを引き受けると資材に到達できず永久に止まるので、
                         # 自分で実行できるものだけを候補にする。
+                        # 位置が入っていないタスクは「誰でもできる」と判定されて
+                        # しまうため、判定の前に必ず位置を入れ直す。
+                        self._annotate_task_geometry(env, other_sc, env.self_pos)
                         takeover = next(
                             (t for t in other_sc
                              if agent_idx in self._task_allowed_agents(env, t)),
@@ -2035,7 +2048,8 @@ class CSPAgent:
                     # 待つ前に自分で引き受けられないか探す。
                     takeover_task = None
                     if self.human_counterpart_mode or self.partner_is_external:
-                        takeover_task = self._find_takeover_task_for_deps(missing_deps, agent_idx)
+                        takeover_task = self._find_takeover_task_for_deps(
+                            missing_deps, agent_idx, env)
 
                     if takeover_task is not None:
                         self._emit_counter_debug(
@@ -2328,9 +2342,18 @@ class CSPAgent:
             return min(candidates, key=lambda p: abs(p[0] - start_pos[0]) + abs(p[1] - start_pos[1]))
 
         for t in tasks:
-            verb = t['verb']
-            obj = t['obj']
-            order_idx = t.get('slot_idx', t['order'])
+            # 持ち物から作った臨時のタスクには verb/obj/order が無い。
+            # id から取れる分だけ取り、取れないものは位置を入れずに飛ばす。
+            tid = t.get('id')
+            verb = t.get('verb') or (tid[0] if tid else None)
+            obj = t.get('obj') if t.get('obj') is not None else (tid[1] if tid else None)
+            if verb is None or obj is None:
+                continue
+            order_idx = t.get('slot_idx')
+            if order_idx is None:
+                order_idx = t.get('order')
+            if order_idx is None:
+                order_idx = (tid[2] if tid and isinstance(tid[2], int) and tid[2] >= 0 else 0)
 
             if verb == 'chop':
                 tile_map = INGREDIENT_TILE
@@ -3819,11 +3842,16 @@ class CSPAgent:
                     c_names = sorted([c.name for c in obj.contents])
                     pot_states.append({'names': c_names, 'obj': obj, 'used': False})
                 elif obj.location in blender_locs:
-                    # 混ぜ終わっていないうちは「集め終わった」とみなさない
-                    # (mix タスクを消してしまうと誰も回さなくなる)。
-                    if getattr(obj, 'is_mixed', lambda: False)():
-                        c_names = sorted([c.name for c in obj.contents])
-                        blender_states.append({'names': c_names, 'obj': obj, 'used': False})
+                    # ミキサーに入っている時点で「材料は集め終わった」。
+                    # ただし混ぜるのは待つだけでは進まないので、混ぜ終わって
+                    # いるかどうかは別に持っておく。両方を一緒くたにすると、
+                    # 入れただけの材料が「まだ刻まれていない」ことになり、
+                    # 誰も回せないまま止まる。
+                    c_names = sorted([c.name for c in obj.contents])
+                    blender_states.append({
+                        'names': c_names, 'obj': obj, 'used': False,
+                        'mixed': bool(getattr(obj, 'is_mixed', lambda: False)()),
+                    })
                 else:
                     if obj.location not in cutboard_locs:
                         plated_names = plated_food_names(obj)
@@ -3894,6 +3922,8 @@ class CSPAgent:
             #   スープ: 鍋にこのレシピが入っていれば集め終わり
             #   サラダ: 皿にこのレシピが乗っていれば集め終わり
             assembly_needed = True
+            # 混ぜ終わっているか。ミキサーに入っていない間は「まだ」なので True。
+            mixing_unfinished = True
             #   ジュース: ミキサーにこのレシピが入っていれば集め終わり
             states = (blender_states if is_juice
                       else plate_states if is_salad else pot_states)
@@ -3901,10 +3931,12 @@ class CSPAgent:
                 if not ps['used'] and ps['names'] == sorted_ings:
                     ps['used'] = True
                     assembly_needed = False
+                    mixing_unfinished = not ps.get('mixed', True)
                     break
 
             cook_needed = assembly_needed and dish_kind == KIND_SOUP
-            mix_needed = assembly_needed and is_juice
+            # 集め終わっていても、混ぜ終わるまで mix タスクは残す。
+            mix_needed = is_juice and (assembly_needed or mixing_unfinished)
 
             merge_point_needed = assembly_needed and not self._agent_holds_complete_set(env, ings_cap)
 
