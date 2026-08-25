@@ -4032,7 +4032,21 @@ class CSPAgent:
                     env, 'handover', dish_name, order_idx, handover_counter)
                 dur_s = self._task_duration_frames(
                     env, 'serve_from_counter', dish_name, order_idx, handover_counter)
-                if dur_h is not None and dur_s is not None:
+                already_handed_over = self._counter_holding_dish(env, dish_name) is not None
+                if already_handed_over and dur_s is not None:
+                    # 受け渡し台にもう置いてある。渡す工程は済んでいるので、
+                    # 作り直させず、受け取る工程だけを残す。
+                    tasks.append({
+                        'id': ('serve_from_counter', dish_name, order_uid),
+                        'verb': 'serve_from_counter', 'obj': dish_name, 'order': order_uid,
+                        'dish_kind': dish_kind,
+                        'slot_idx': order_idx,
+                        'display_order': display_order,
+                        'dur': dur_s,
+                        'res_candidates': [],
+                        'assigned_counter': handover_counter,
+                    })
+                elif dur_h is not None and dur_s is not None:
                     tasks.append({
                         'id': ('handover', dish_name, order_uid),
                         'verb': 'handover', 'obj': dish_name, 'order': order_uid,
@@ -5107,29 +5121,36 @@ class CSPAgent:
         comps = self._task_components(env, task)
         return {a for a in (0, 1) if self._agent_component(env, a) in comps}
 
+    DONE_STATE_BY_KIND = {KIND_SOUP: 'Cooked', KIND_SALAD: 'Chopped', KIND_JUICE: 'Mixed'}
+
     def _counter_holding_dish(self, env, dish_name):
         """完成した料理が既に置かれているカウンターを探す。
 
         受け渡し台の割り当ては計画のたびに選び直されるが、一度置いた料理は
         動かない。置いてある場所を優先しないと、渡した側と受け取る側が別の
-        テーブルを見つめたまま噛み合わなくなる。
+        テーブルを見つめたまま噛み合わなくなる。また、既に置いてあるものを
+        「まだ作っていない」と誤認すると、渡す側が二度手間で止まる。
         """
         needed = set(dish_ingredients(dish_name))
         if not needed:
             return None
+        done_state = self.DONE_STATE_BY_KIND.get(dish_kind_of(dish_name), 'Cooked')
+        container = 'Cup' if dish_kind_of(dish_name) == KIND_JUICE else 'Plate'
         for pos in env.get_pos_by_obj_gs(gs='Counter'):
             obj = env.pos_obj.get(pos)
             name = getattr(obj, 'full_name', '') or ''
-            if not name or not ('Plate' in name or 'Cup' in name):
+            if not name or container not in name:
                 continue
             bases = set()
+            ok = True
             for part in name.split('-'):
                 if part in ('Plate', 'Cup'):
                     continue
-                bases.add(part.replace('Chopped', '').replace('Cooked', '')
-                          .replace('Mixed', '').replace('Cooking', '')
-                          .replace('Mixing', '').lower())
-            if bases == needed:
+                if not part.startswith(done_state):
+                    ok = False
+                    break
+                bases.add(part[len(done_state):].lower())
+            if ok and bases == needed:
                 return pos
         return None
 
