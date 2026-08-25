@@ -2279,6 +2279,121 @@ class CSPAgent:
             'counters': counters,
         }
 
+    def _resources_for_agent(self, env, agent_idx):
+        """そのエージェントが自分の側で使える資材だけに絞った一覧。
+
+        仕切りのある地図では、まな板もレタスも両側にある。それなのに計画が
+        「左のレタスを切る」と資材まで決めてしまうと、右にいる人は同じ作業を
+        したくてもできない。誰がやるかで使う資材は変わるので、側ごとに選ぶ。
+        """
+        base = self._get_resources(env)
+        if not self._map_is_partitioned(env):
+            return base
+        comp = self._agent_component(env, agent_idx)
+        if comp is None:
+            # そのエージェントの居場所が分からない。絞り込む根拠が無いので
+            # 全部返す。ここで空にすると「何もできない人」になってしまう。
+            return base
+
+        def mine(positions):
+            return [p for p in positions
+                    if comp in self._components_touching(env, tuple(p))]
+
+        cutboards = mine(base['cutboards'])
+        pots = mine(base['pots'])
+        plates = mine(base['plates'])
+        cups = mine(base['cups'])
+        blenders = mine(base['blenders'])
+        deliveries = mine(env.get_pos_by_obj_gs(gs='Delivery'))
+        return {
+            # どちら側の資材に絞ったかを、位置を選ぶ処理にも伝える。
+            'component': comp,
+            'deliveries': deliveries,
+            'blenders': blenders,
+            'cups': cups,
+            'cup': cups[0] if cups else base['cup'],
+            'cutboards': cutboards,
+            'pots': pots,
+            'delivery': deliveries[0] if deliveries else base['delivery'],
+            'plate': plates[0] if plates else base['plate'],
+            'plates': plates,
+            # 置き場は受け渡しに使うので、絞れないときは全部残す。
+            'counters': mine(base['counters']) or base['counters'],
+        }
+
+    # 幾何情報のうち、担当者によって変わるもの。
+    GEOMETRY_KEYS = ('start_pos', 'end_pos', 'fixed_res')
+
+    def _has_resources_for(self, env, task, resources):
+        """その資材一覧だけで、このタスクをやり切れるか。
+
+        足りないまま位置だけ埋めると、自分の立ち位置が代わりに入って
+        「できる」と誤判定される(ミキサーが無い側が mix を引き受ける等)。
+        """
+        verb = task.get('verb') or (task['id'][0] if task.get('id') else None)
+        obj = task.get('obj') or (task['id'][1] if task.get('id') else '')
+        kind = dish_kind_of(obj) if obj else None
+
+        need = []
+        if verb == 'chop':
+            need = ['cutboards']
+        elif verb == 'cook':
+            need = ['pots']
+        elif verb == 'mix':
+            need = ['blenders']
+        elif verb == 'serve':
+            need = ['pots', 'plates', 'deliveries']
+        elif verb == 'serve_salad':
+            need = ['plates', 'deliveries']
+        elif verb == 'serve_juice':
+            need = ['blenders', 'cups', 'deliveries']
+        elif verb == 'serve_from_counter':
+            need = ['deliveries']
+        elif verb == 'handover':
+            need = (['pots', 'plates'] if kind == KIND_SOUP
+                    else ['blenders', 'cups'] if kind == KIND_JUICE else ['plates'])
+
+        for key in need:
+            if not resources.get(key):
+                return False
+
+        if verb == 'chop':
+            # その側にその食材があるか(供給口でも、置いてある物でもよい)。
+            comp = resources.get('component')
+            if comp is not None:
+                tiles = env.get_pos_by_obj_gs(gs=INGREDIENT_TILE.get(obj, ""))
+                if not any(comp in self._components_touching(env, tuple(q)) for q in tiles):
+                    return False
+        return True
+
+    def _agent_position(self, env, agent_idx):
+        agents = getattr(env, 'agents', [])
+        if agent_idx < len(agents):
+            return tuple(agents[agent_idx].location)
+        return tuple(env.self_pos)
+
+    def _geometry_by_agent(self, env, tasks):
+        """各タスクの幾何情報を、担当者ごとに計算して持たせる。
+
+        t['geom_by_agent'][i] に、i 番のエージェントが自分の側の資材で
+        やる場合の start_pos / end_pos / fixed_res が入る。
+        """
+        if not tasks:
+            return
+        saved = [{k: t.get(k) for k in self.GEOMETRY_KEYS} for t in tasks]
+        for idx in (0, 1):
+            res = self._resources_for_agent(env, idx)
+            self._annotate_task_geometry(
+                env, tasks, self._agent_position(env, idx), resources=res)
+            for t in tasks:
+                geom = ({k: t.get(k) for k in self.GEOMETRY_KEYS}
+                        if self._has_resources_for(env, t, res) else None)
+                t.setdefault('geom_by_agent', {})[idx] = geom
+        # 呼ぶ前の状態に戻す(既存の経路は単一の幾何情報を前提にしている)。
+        for t, old in zip(tasks, saved):
+            for k, v in old.items():
+                t[k] = v
+
     def _adjacent_walkable_positions(self, env, pos_list):
         width = env.world_width
         height = env.world_height
@@ -2306,8 +2421,11 @@ class CSPAgent:
                 best_dist = dist
         return best
 
-    def _annotate_task_geometry(self, env, tasks, default_start_pos):
-        resources = self._get_resources(env)
+    def _annotate_task_geometry(self, env, tasks, default_start_pos, resources=None):
+        # 資材の一覧は担当者によって変わる(仕切りの向こうの物は使えない)。
+        # 指定が無ければ従来どおり全部の資材から選ぶ。
+        if resources is None:
+            resources = self._get_resources(env)
 
         def raw_base_name(item):
             if item is None:
@@ -2358,6 +2476,11 @@ class CSPAgent:
             if verb == 'chop':
                 tile_map = INGREDIENT_TILE
                 ing_pos_list = env.get_pos_by_obj_gs(gs=tile_map.get(obj, ""))
+                comp = resources.get('component')
+                if comp is not None:
+                    # 同じ食材が両側にある。担当者の側のものを使う。
+                    ing_pos_list = [q for q in ing_pos_list
+                                    if comp in self._components_touching(env, tuple(q))]
                 raw_candidates = []
                 for pos, world_obj in env.pos_obj.items():
                     if world_obj is None:
@@ -4142,6 +4265,11 @@ class CSPAgent:
             orders.append({'order': order_uid, 'display_order': display_order, 'name': dish_name, 'ingredients': ings_lower, 'tasks': tasks})
 
         self.assigned_counters_display_map = assigned_counters_display_map
+
+        # 仕切りのある地図では、同じ作業でも担当者によって使う資材が変わる。
+        # 「誰ならできるか」を正しく出すために、担当者ごとの位置を持たせる。
+        if self._map_is_partitioned(env):
+            self._geometry_by_agent(env, [t for o in orders for t in o['tasks']])
         return orders
 
     def _apply_instruction_deadline_constraints(self, model, tasks, starts_by_idx, env):
@@ -5175,9 +5303,28 @@ class CSPAgent:
         return comps or set()
 
     def _task_allowed_agents(self, env, task):
-        """そのタスクを実行できるエージェント番号の集合。"""
-        comps = self._task_components(env, task)
-        return {a for a in (0, 1) if self._agent_component(env, a) in comps}
+        """そのタスクを実行できるエージェント番号の集合。
+
+        「レタスを切る」は左でも右でもできる作業で、どちらのレタスと
+        まな板を使うかは担当者による。単一の座標で判定すると、計画が
+        たまたま左の資材を選んだだけで右の人には永久にできない作業に
+        なってしまうので、各自の資材で見て判定する。
+        """
+        geoms = task.get('geom_by_agent')
+        if not geoms:
+            comps = self._task_components(env, task)
+            return {a for a in (0, 1) if self._agent_component(env, a) in comps}
+
+        allowed = set()
+        for a in (0, 1):
+            geom = geoms.get(a)
+            if geom is None:
+                continue
+            view = dict(task)
+            view.update(geom)
+            if self._agent_component(env, a) in self._task_components(env, view):
+                allowed.add(a)
+        return allowed
 
     DONE_STATE_BY_KIND = {KIND_SOUP: 'Cooked', KIND_SALAD: 'Chopped', KIND_JUICE: 'Mixed'}
 
