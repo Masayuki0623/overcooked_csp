@@ -20,11 +20,18 @@ MIN_INGREDIENTS = 2
 
 SALAD = 'salad'
 SOUP = 'soup'
+JUICE = 'juice'
 
 # プリセット名 -> ((系統, 品数), ...)
 ORDER_PRESETS = {
     # サラダ2品 + スープ1品。材料の組み合わせはそれぞれランダム。
     'experiment1': ((SALAD, 2), (SOUP, 1)),
+    # サラダ1品 + スープ1品 + ジュース1品。
+    # スープはAI側(鍋)、ジュースの材料はAI側(フルーツ)だがミキサーは人間側、
+    # サラダは人間側で完結する。指示の質を
+    #   良い = スープの下ごしらえ / 悪い = ジュース(フルーツ)の下ごしらえ
+    # で判別する構成。
+    'experiment2': ((SALAD, 1), (SOUP, 1), (JUICE, 1)),
 }
 
 
@@ -34,9 +41,6 @@ def is_order_preset(name):
 
 def preset_names():
     return sorted(ORDER_PRESETS)
-
-
-JUICE = 'juice'
 
 
 def _category_of(recipe):
@@ -82,6 +86,32 @@ def _ingredient_names(recipe_name):
     return {c.name for c in recipe.contents}
 
 
+def _by_category(recipe_names):
+    """系統ごとの材料集合をまとめて返す。"""
+    out = {SALAD: set(), SOUP: set(), JUICE: set()}
+    for name in recipe_names:
+        cat = _category_of(getattr(RECIPE, name)())
+        out[cat] |= _ingredient_names(name)
+    return out
+
+
+def has_exclusive_side_ingredients(recipe_names):
+    """AI側にしかない材料と人間側にしかない材料が、それぞれ存在するか。
+
+    実験マップでは スープの野菜とフルーツがAI側、サラダの野菜が人間側にある。
+    どちらか一方でも「その系統でしか使わない材料」が無いと、指示の質
+    (良い=スープの下ごしらえ / 悪い=ジュースの下ごしらえ)が判別できない
+    シードになってしまうため、生成の時点で保証する。
+    """
+    cat = _by_category(recipe_names)
+    ai_side = cat[SOUP] | cat[JUICE]
+    human_side = cat[SALAD]
+    # スープ専用の野菜(良い指示の対象)と、ジュース専用の材料(悪い指示の対象)。
+    soup_only = cat[SOUP] - cat[SALAD]
+    juice_only = cat[JUICE] - cat[SALAD] - cat[SOUP]
+    return bool(soup_only) and bool(juice_only) and bool(human_side - ai_side)
+
+
 def has_exclusive_salad_ingredient(recipe_names):
     """サラダにしか使わない具材が1つ以上あるか。
 
@@ -123,9 +153,14 @@ def generate_order_recipes(preset_name, rng=None, require_exclusive_salad_ingred
             recipes.extend(rng.choice(pool) for _ in range(count))
         return recipes
 
+    # ジュースを含むプリセットは「AI側専用・人間側専用の材料が両方ある」ことを、
+    # それ以外は従来どおり「サラダ専用の材料がある」ことを条件にする。
+    has_juice = any(cat == JUICE for cat, _ in ORDER_PRESETS[preset_name])
+    check = has_exclusive_side_ingredients if has_juice else has_exclusive_salad_ingredient
+
     for _ in range(max_attempts):
         recipes = draw()
-        if not require_exclusive_salad_ingredient or has_exclusive_salad_ingredient(recipes):
+        if not require_exclusive_salad_ingredient or check(recipes):
             return recipes
     raise ValueError(
         f"サラダ専用の具材を持つ組み合わせを {max_attempts} 回引いても作れませんでした: "

@@ -1247,8 +1247,19 @@ class CSPAgent:
                     cooked_parts.append(part.replace('Cooked', '').lower())
             if cooked_parts:
                 cooked_parts.sort()
+                dish = f"{'-'.join(cooked_parts)}{SOUP_SUFFIX}"
+                if not self._can_reach_delivery(env, agent_idx):
+                    # 提供口が仕切りの向こうにある。自分では配膳できないので、
+                    # 受け渡し台に置いて相手に渡す。
+                    counter = self._find_shared_counter(env, env.self_pos)
+                    if counter is not None:
+                        return {
+                            'id': ('handover', dish, -1),
+                            'res': ('delivery', None),
+                            'assigned_counter': counter,
+                        }
                 return {
-                    'id': ('serve', f"{'-'.join(cooked_parts)}{SOUP_SUFFIX}", -1),
+                    'id': ('serve', dish, -1),
                     'res': ('delivery', None),
                 }
 
@@ -4935,6 +4946,16 @@ class CSPAgent:
         pool = same_side or cups
         return min(pool, key=lambda c: abs(c[0] - near_pos[0]) + abs(c[1] - near_pos[1]))
 
+    def _can_reach_delivery(self, env, agent_idx):
+        """そのエージェントが提供口まで行けるか。"""
+        if not self._map_is_partitioned(env):
+            return True
+        deliveries = env.get_pos_by_obj_gs(gs='Delivery')
+        if not deliveries:
+            return True
+        mine = self._agent_component(env, agent_idx)
+        return any(mine in self._components_touching(env, d) for d in deliveries)
+
     def _find_shared_counter(self, env, near_pos=None):
         """両側から使えるカウンター(受け渡し台)を1つ選ぶ。
 
@@ -4946,9 +4967,17 @@ class CSPAgent:
         shared = [c for c in counters if len(self._components_touching(env, c)) > 1]
         if not shared:
             return None
+
+        # 既に何か載っている台を選ぶと、置こうとしても混ざらず何も起きないまま
+        # 止まる(例: 別の注文の刻んだ材料が置いてある台にスープの皿を置こうと
+        # する)。空いている台を優先する。
+        pos_obj = getattr(env, 'pos_obj', {}) or {}
+        empty = [c for c in shared if pos_obj.get(c) is None]
+        pool = empty or shared
+
         if near_pos is None:
-            return shared[0]
-        return min(shared, key=lambda c: abs(c[0] - near_pos[0]) + abs(c[1] - near_pos[1]))
+            return pool[0]
+        return min(pool, key=lambda c: abs(c[0] - near_pos[0]) + abs(c[1] - near_pos[1]))
 
     def _task_components(self, env, task):
         """そのタスクを単独でこなせる連結成分の集合。

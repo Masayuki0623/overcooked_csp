@@ -529,6 +529,30 @@ class TaskAgent:
             return self.process_serve_task(env, ingredients, assigned_plate=self.assigned_plate, assigned_serve_loc=self.assigned_serve_loc, assigned_pot=self.assigned_pot, dynamic_obstacles=dynamic_obstacles)
         return (0,0), f"不明なタスク: {self.task_name}"
 
+    @staticmethod
+    def reachable_positions(env, positions):
+        """自分が実際に使える位置だけに絞る。
+
+        仕切りのあるマップでは、皿・コップ・調理器具・提供口が両側にある。
+        マンハッタン距離が近い方を選ぶと壁の向こうの資材を選んでしまい、
+        そこへ行けずに動けなくなる。EnvState の到達可能マップ(rch_map)で、
+        隣に立てるものだけを残す。
+        """
+        rch = getattr(env, 'rch_map', None)
+        if rch is None or not positions:
+            return list(positions or [])
+        w, h = env.world_width, env.world_height
+
+        def usable(pos):
+            for dx, dy in ((0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)):
+                nx, ny = pos[0] + dx, pos[1] + dy
+                if 0 <= nx < w and 0 <= ny < h and rch[nx][ny]:
+                    return True
+            return False
+
+        filtered = [p for p in positions if usable(p)]
+        return filtered or list(positions)
+
     def process_mix_task(self, env, ingredients=None, assigned_blender=None,
                          assigned_counter=None, dynamic_obstacles=None):
         """ジュース: 刻んだフルーツをミキサーへ入れ、混ぜ終わるまで回す。
@@ -537,7 +561,7 @@ class TaskAgent:
         process_cook_task に任せる。違うのは投入後で、鍋のように放っておいても
         進まず、手ぶらで向かってインタラクトした回数だけ混ざる。
         """
-        blenders = [assigned_blender] if assigned_blender else env.get_pos_by_obj_gs(gs='Blender')
+        blenders = [assigned_blender] if assigned_blender else self.reachable_positions(env, env.get_pos_by_obj_gs(gs='Blender'))
         holding = env.hold
 
         for b_loc in blenders:
@@ -618,7 +642,7 @@ class TaskAgent:
 
         if is_target(holding_name):
             deliveries = ([assigned_serve_loc] if assigned_serve_loc
-                          else env.get_pos_by_obj_gs(gs='Delivery'))
+                          else self.reachable_positions(env, env.get_pos_by_obj_gs(gs='Delivery')))
             if not deliveries:
                 return (0, 0), "提供口が見つかりません"
             d = min(deliveries, key=lambda p: abs(p[0]-self_pos[0]) + abs(p[1]-self_pos[1]))
@@ -694,7 +718,7 @@ class TaskAgent:
             if assigned_serve_loc:
                 deliveries = [assigned_serve_loc]
             else:
-                deliveries = env.get_pos_by_obj_gs(gs='Delivery')
+                deliveries = self.reachable_positions(env, env.get_pos_by_obj_gs(gs='Delivery'))
             
             if deliveries:
                 target = min(deliveries, key=lambda p: abs(p[0]-self_pos[0]) + abs(p[1]-self_pos[1]))
@@ -728,7 +752,7 @@ class TaskAgent:
 
                 return target_pot, waiting_pot
 
-            all_pots = env.get_pos_by_obj_gs(gs=appliance)
+            all_pots = self.reachable_positions(env, env.get_pos_by_obj_gs(gs=appliance))
             preferred_pots = [assigned_pot] if assigned_pot else all_pots
             target_pot, waiting_pot = find_matching_pots(preferred_pots)
             if (target_pot is None and waiting_pot is None) and assigned_pot:
@@ -755,7 +779,7 @@ class TaskAgent:
             else:
                 plate_locs = self._filter_unheld_positions(env, env.get_pos_by_obj_gs(obj=container))
                 if not plate_locs:
-                    plate_locs = env.get_pos_by_obj_gs(gs=container_tile)
+                    plate_locs = self.reachable_positions(env, env.get_pos_by_obj_gs(gs=container_tile))
             
             if plate_locs:
                 target = min(plate_locs, key=lambda p: abs(p[0]-self_pos[0]) + abs(p[1]-self_pos[1]))
@@ -792,7 +816,7 @@ class TaskAgent:
         target_ing_names = sorted([f"Chopped{i}" for i in ingredients])
         # print(f"[DEBUG] cook:start agent={env.agent_idx} task={self.task_name} pos={self_pos} holding={holding_name} target={target_ing_names} assigned_counter={assigned_counter} assigned_pot={assigned_pot}")
         
-        pots = [assigned_pot] if assigned_pot else env.get_pos_by_obj_gs(gs=appliance)
+        pots = [assigned_pot] if assigned_pot else self.reachable_positions(env, env.get_pos_by_obj_gs(gs=appliance))
         if env.agent_idx == 1:
             pots = list(reversed(pots))
             
@@ -1038,7 +1062,7 @@ class TaskAgent:
             if assigned_serve_loc:
                 deliveries = [assigned_serve_loc]
             else:
-                deliveries = env.get_pos_by_obj_gs(gs='Delivery')
+                deliveries = self.reachable_positions(env, env.get_pos_by_obj_gs(gs='Delivery'))
             if not deliveries:
                 return (0, 0), "受取場所が見つかりません"
             target = min(deliveries, key=lambda p: abs(p[0] - self_pos[0]) + abs(p[1] - self_pos[1]))
@@ -1051,7 +1075,7 @@ class TaskAgent:
         #    カウンター上に置かれた皿と合流させると、マージ結果がカウンター側に
         #    残って手放してしまうため、必ず皿タイル(無限に皿が出る供給口)を使う。
         if not has_plate and not missing_ings:
-            plate_tiles = env.get_pos_by_obj_gs(gs='PlateTile')
+            plate_tiles = self.reachable_positions(env, env.get_pos_by_obj_gs(gs='PlateTile'))
             if not plate_tiles:
                 return (0, 0), "皿タイルが見つかりません"
             target = min(plate_tiles, key=lambda p: abs(p[0] - self_pos[0]) + abs(p[1] - self_pos[1]))
@@ -1137,7 +1161,7 @@ class TaskAgent:
         '''手に持っている不要なアイテムを最寄りの空きカウンターに置く'''
         holding_name = getattr(holding, 'full_name', None)
         if holding_name == 'Plate':
-            plate_tiles = env.get_pos_by_obj_gs(gs='PlateTile')
+            plate_tiles = self.reachable_positions(env, env.get_pos_by_obj_gs(gs='PlateTile'))
             if plate_tiles:
                 target = min(
                     plate_tiles,
@@ -1275,7 +1299,7 @@ class TaskAgent:
                         f"{chopped_ing_name} を取りに行く (切らずに運ぶ)")
 
         # 1. Check Cutboards
-        all_cutboards = env.get_pos_by_obj_gs(gs='Cutboard')
+        all_cutboards = self.reachable_positions(env, env.get_pos_by_obj_gs(gs='Cutboard'))
         for loc in all_cutboards:
             obj = env.pos_obj[loc]
             if obj and chopped_ing_name in obj.full_name:
