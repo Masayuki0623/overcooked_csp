@@ -4,6 +4,7 @@ import time
 from dataclasses import dataclass
 from copy import deepcopy
 from ortools.sat.python import cp_model
+from gym_cooking.utils.config import BLENDING_NUM_STEPS
 from .csp.model import CSPModel
 from .csp.solver import solve as solve_csp
 from .TaskAgent import TaskAgent
@@ -30,7 +31,21 @@ HUMAN_PREDICTION_CONFIRM_FRAMES = 3
 # 提供される不具合の原因)ため、料理の種類を接尾辞で区別する。
 SOUP_SUFFIX = ' soup'
 SALAD_SUFFIX = ' salad'
-DISH_SUFFIXES = (SOUP_SUFFIX, SALAD_SUFFIX)
+JUICE_SUFFIX = ' juice'
+DISH_SUFFIXES = (SOUP_SUFFIX, SALAD_SUFFIX, JUICE_SUFFIX)
+
+# 料理の系統。工程が違うので、どの系統かで作るタスクが変わる。
+#   salad: 刻む -> 皿に盛って提供
+#   soup : 刻む -> 鍋で煮る -> 皿に移して提供
+#   juice: 刻む -> ミキサーで混ぜる -> コップに注いで提供
+KIND_SALAD, KIND_SOUP, KIND_JUICE = 'salad', 'soup', 'juice'
+
+VEGETABLES = ['lettuce', 'onion', 'tomato']
+FRUITS = ['apple', 'orange', 'banana']
+ALL_INGREDIENTS = VEGETABLES + FRUITS
+
+# 材料名 -> 供給台の名前。材料を増やすときはここだけ足せばよい。
+INGREDIENT_TILE = {ing: f'Fresh{ing.capitalize()}Tile' for ing in ALL_INGREDIENTS}
 
 
 def strip_dish_suffix(name):
@@ -46,6 +61,25 @@ def is_salad_dish(name):
     return str(name).endswith(SALAD_SUFFIX)
 
 
+def is_juice_dish(name):
+    return str(name).endswith(JUICE_SUFFIX)
+
+
+def goal_dish_kind(goal_full_name):
+    """注文ゴールの full_name から料理の系統を判定する。
+
+    材料の状態が Chopped / Cooked / Mixed のどれで登録されるかで決まる。
+    'mixed' を先に見ること(ジュースは 'cooked' を含まないため、先に
+    'cooked' で分けるとサラダに紛れる)。
+    """
+    name = str(goal_full_name).lower()
+    if 'mixed' in name:
+        return KIND_JUICE
+    if 'cooked' in name:
+        return KIND_SOUP
+    return KIND_SALAD
+
+
 def dish_ingredients(name):
     """料理名から材料名のリストを取り出す。"""
     return [part.strip() for part in strip_dish_suffix(name).split('-') if part.strip()]
@@ -59,9 +93,11 @@ class CSPAgent:
     # 「提供」系の動詞。
     #   serve       : 鍋の調理済み料理を皿に移して提供する(スープ)
     #   serve_salad : 刻んだ食材をそのまま皿に乗せて提供する(サラダ、鍋を使わない)
-    SERVE_VERBS = ('serve', 'serve_salad')
-    # 同一注文内の実行順序。serve と serve_salad は同じ「最後の工程」。
-    VERB_PRIORITY = {'chop': 0, 'cook': 1, 'serve': 2, 'serve_salad': 2}
+    #   serve_juice : ミキサーで混ぜた中身をコップに注いで提供する(ジュース)
+    SERVE_VERBS = ('serve', 'serve_salad', 'serve_juice', 'serve_from_counter')
+    # 同一注文内の実行順序。提供系はどれも「最後の工程」。
+    VERB_PRIORITY = {'chop': 0, 'cook': 1, 'mix': 1, 'serve': 2, 'serve_salad': 2,
+                     'serve_juice': 2, 'handover': 2, 'serve_from_counter': 3}
 
     def __init__(self, speed=2.5, replay=None, no_reschedule=False, sc_2agent=False, deadline_seconds: float | None = None, skip_budget: int | None = None):
         self.speed = speed
@@ -221,7 +257,7 @@ class CSPAgent:
         for order_idx, order_tuple in enumerate(current_orders):
             goal = order_tuple[0] if order_tuple else None
             name = str(getattr(goal, 'full_name', '')).lower()
-            ings = [ing for ing in ('lettuce', 'onion', 'tomato') if ing in name]
+            ings = [ing for ing in ALL_INGREDIENTS if ing in name]
             if not ings:
                 continue
             is_salad = self._goal_name_is_salad(name)
@@ -792,7 +828,7 @@ class CSPAgent:
         for order_idx, order_tuple in enumerate(current_orders):
             goal = order_tuple[0]
             name = getattr(goal, 'full_name', '').lower()
-            if not any(ing in name for ing in ['lettuce', 'onion', 'tomato']):
+            if not any(ing in name for ing in ALL_INGREDIENTS):
                 continue
 
             rest_time = order_tuple[1] if len(order_tuple) > 1 else None
@@ -870,6 +906,9 @@ class CSPAgent:
         def has_plate(obj):
             return any(getattr(content, 'name', None) == 'Plate' for content in getattr(obj, 'contents', []))
         
+        inv_blender_ings = []
+        blender_locs = env.get_pos_by_obj_gs(gs="Blender")
+
         items = []
         for pos, obj in env.pos_obj.items():
             if obj is not None:
@@ -890,6 +929,8 @@ class CSPAgent:
             obj_loc = getattr(obj, 'location', None)
             if obj_loc in pot_locs:
                 inv_pots_ings.append(obj_foods)
+            elif obj_loc in blender_locs:
+                inv_blender_ings.append(obj_foods)
             elif has_plate(obj):
                 inv_plates_ings.append(obj_foods)
                     
@@ -898,15 +939,30 @@ class CSPAgent:
         for order in current_orders:
             order_uid = order['order']
             order_name = order['name']
+            is_juice = is_juice_dish(order_name)
             is_salad = is_salad_dish(order_name)
-            if not is_salad and SOUP_SUFFIX not in order_name: continue
+            if not (is_salad or is_juice) and SOUP_SUFFIX not in order_name:
+                continue
 
             raw_parts = dish_ingredients(order_name)
             req_set = set(raw_parts)
 
             needs_chop = list(raw_parts)
-            needs_cook = not is_salad
+            needs_cook = not (is_salad or is_juice)
+            # ジュースはミキサーで混ぜる工程。鍋(cook)と同じ位置づけ。
+            needs_mix = is_juice
             needs_serve = True
+
+            if is_juice:
+                for b in list(inv_blender_ings):
+                    if b == req_set or (b.issubset(req_set) and b):
+                        inv_blender_ings.remove(b)
+                        if b == req_set:
+                            needs_mix = False
+                        for ing in b:
+                            if ing in needs_chop:
+                                needs_chop.remove(ing)
+                        break
 
             # 1. 皿にある完成品
             plate_match = None
@@ -951,12 +1007,20 @@ class CSPAgent:
                 raw_ing = ing.replace('Chopped', '').lower()
                 remaining_tids.add(('chop', raw_ing, order_uid))
 
-            base_name = "-".join([i.replace('Chopped', '').lower() for i in raw_parts])
-            dish_name = base_name + (SALAD_SUFFIX if is_salad else SOUP_SUFFIX)
+            base_name = "-".join([
+                i.replace('Chopped', '').replace('Mixed', '').replace('Cooked', '').lower()
+                for i in raw_parts])
+            suffix = (JUICE_SUFFIX if is_juice
+                      else SALAD_SUFFIX if is_salad else SOUP_SUFFIX)
+            dish_name = base_name + suffix
             if needs_cook:
                 remaining_tids.add(('cook', dish_name, order_uid))
+            if needs_mix:
+                remaining_tids.add(('mix', dish_name, order_uid))
             if needs_serve:
-                remaining_tids.add(('serve_salad' if is_salad else 'serve', dish_name, order_uid))
+                serve_verb = ('serve_juice' if is_juice
+                              else 'serve_salad' if is_salad else 'serve')
+                remaining_tids.add((serve_verb, dish_name, order_uid))
 
         return remaining_tids
 
@@ -1948,8 +2012,15 @@ class CSPAgent:
         if not plates:
             plates = env.get_pos_by_obj_gs(gs="PlateTile") 
         counters = env.get_pos_by_obj_gs(gs="Counter")
+        blenders = env.get_pos_by_obj_gs(gs="Blender")
+        cups = env.get_pos_by_obj_gs(gs="Cup")
+        if not cups:
+            cups = env.get_pos_by_obj_gs(gs="CupTile")
 
         return {
+            'blenders': blenders,
+            'cups': cups,
+            'cup': cups[0] if cups else (0, 0),
             'cutboards': cutboards,
             'pots': pots,
             'delivery': deliveries[0] if deliveries else (0,0),
@@ -2028,7 +2099,7 @@ class CSPAgent:
             order_idx = t.get('slot_idx', t['order'])
 
             if verb == 'chop':
-                tile_map = {"lettuce": "FreshLettuceTile", "onion": "FreshOnionTile", "tomato": "FreshTomatoTile"}
+                tile_map = INGREDIENT_TILE
                 ing_pos_list = env.get_pos_by_obj_gs(gs=tile_map.get(obj, ""))
                 raw_candidates = []
                 for pos, world_obj in env.pos_obj.items():
@@ -2112,6 +2183,21 @@ class CSPAgent:
                 t['start_pos'] = plate
                 t['end_pos'] = delivery
                 t['fixed_res'] = ('pot', pot)
+
+            elif verb == 'mix':
+                blenders = resources['blenders']
+                blender = blenders[order_idx % len(blenders)] if blenders else default_start_pos
+                t['start_pos'] = (t.get('assigned_counter')
+                                  or self._find_shared_counter(env, blender) or blender)
+                t['end_pos'] = blender
+                t['fixed_res'] = ('blender', blender)
+
+            elif verb == 'serve_juice':
+                blenders = resources['blenders']
+                blender = blenders[order_idx % len(blenders)] if blenders else default_start_pos
+                t['start_pos'] = self._pick_cup(env, resources, blender)
+                t['end_pos'] = resources['delivery']
+                t['fixed_res'] = ('blender', blender)
 
             elif verb == 'handover':
                 pots = resources['pots']
@@ -2405,7 +2491,7 @@ class CSPAgent:
             return min(candidates, key=lambda p: abs(p[0]-start_pos[0]) + abs(p[1]-start_pos[1]))
 
         if verb == 'chop':
-            tile_map = {"lettuce": "FreshLettuceTile", "onion": "FreshOnionTile", "tomato": "FreshTomatoTile"}
+            tile_map = INGREDIENT_TILE
             ing_pos_list = env.get_pos_by_obj_gs(gs=tile_map.get(obj, ""))
             raw_candidates = []
             for pos, world_obj in env.pos_obj.items():
@@ -2534,6 +2620,31 @@ class CSPAgent:
             d2 = self.astar_distance(env, pot_pos, delivery_pos)
 
             if d1 is None or d2 is None: return None
+            return int(d1 + d2 + 3)
+
+        elif verb == 'mix':
+            # 置き場の刻んだフルーツを取ってミキサーへ入れ、規定回数まわす。
+            # 鍋(cook)と同じ位置づけだが、待ち時間ではなくインタラクト回数で進む。
+            blenders = resources['blenders']
+            if not blenders: return None
+            blender = blenders[order_idx % len(blenders)]
+            start_pos = assigned_counter or self._find_shared_counter(env, blender) or blender
+            d = self.astar_distance(env, start_pos, blender)
+            if d is None: return None
+            # 材料を取る + 入れる + 混ぜる回数
+            return int(d + 2 + BLENDING_NUM_STEPS)
+
+        elif verb == 'serve_juice':
+            # ミキサーの中身をコップに注いで提供口へ。serve(鍋->皿)と同じ形。
+            blenders = resources['blenders']
+            delivery_pos = resources['delivery']
+            if not blenders: return None
+            blender = blenders[order_idx % len(blenders)]
+            cup_pos = self._pick_cup(env, resources, blender)
+            d1 = self.astar_distance(env, cup_pos, blender)
+            d2 = self.astar_distance(env, blender, delivery_pos)
+            if d1 is None or d2 is None: return None
+            # コップを取る + 注ぐ + 提供する の3インタラクト
             return int(d1 + d2 + 3)
 
         elif verb == 'handover':
@@ -3116,7 +3227,7 @@ class CSPAgent:
     def _calculate_dynamic_merge_point(self, env, ings_lower, order_idx, pot_locs, used_counters, reserved_counters=None):
         reserved = set(reserved_counters or [])
         ing = ings_lower[0] if ings_lower else None
-        tile_map = {"lettuce": "FreshLettuceTile", "onion": "FreshOnionTile", "tomato": "FreshTomatoTile"}
+        tile_map = INGREDIENT_TILE
         ing_pos_list = env.get_pos_by_obj_gs(gs=tile_map.get(ing, ""))
         ing_pos = ing_pos_list[0] if ing_pos_list else (0, 0)
 
@@ -3182,6 +3293,8 @@ class CSPAgent:
         available_chopped = {}
         available_chopped_by_pos = {}
         pot_states = []
+        # ミキサーの中身(ジュースの作りかけ/完成品)。鍋と同じ扱い。
+        blender_states = []
         # 皿の上に食材が乗っている状態(サラダの完成品/作りかけ)。
         # サラダは鍋を使わないので、pot_states の代わりにこれで進捗を見る。
         plate_states = []
@@ -3423,6 +3536,7 @@ class CSPAgent:
                 pot_locs.append(o.location)
 
         cutboard_locs = env.get_pos_by_obj_gs(gs="Cutboard")
+        blender_locs = env.get_pos_by_obj_gs(gs="Blender")
 
         for obj in all_objects:
             if id(obj) in held_object_ids:
@@ -3431,6 +3545,9 @@ class CSPAgent:
                 if obj.location in pot_locs:
                     c_names = sorted([c.name for c in obj.contents])
                     pot_states.append({'names': c_names, 'obj': obj, 'used': False})
+                elif obj.location in blender_locs:
+                    c_names = sorted([c.name for c in obj.contents])
+                    blender_states.append({'names': c_names, 'obj': obj, 'used': False})
                 else:
                     if obj.location not in cutboard_locs:
                         plated_names = plated_food_names(obj)
@@ -3458,14 +3575,16 @@ class CSPAgent:
         for order_idx, order_tuple in enumerate(current_orders):
             goal = order_tuple[0]
             name = getattr(goal, 'full_name', '').lower()
-            ings_lower = [ing for ing in ['lettuce', 'onion', 'tomato'] if ing in name]
+            ings_lower = [ing for ing in ALL_INGREDIENTS if ing in name]
             if not ings_lower:
                 continue
 
-            # サラダ(材料は Chopped のまま)かスープ(Cooked)か。
-            # ここを見ずにゴール名の材料だけを拾っていたため、サラダにも
-            # 無条件で cook タスクが作られ、スープとして提供されていた。
-            is_salad = self._goal_name_is_salad(name)
+            # 料理の系統(サラダ/スープ/ジュース)。ここを見ずにゴール名の材料
+            # だけを拾っていたため、サラダにも無条件で cook タスクが作られ、
+            # スープとして提供されていた。
+            dish_kind = goal_dish_kind(name)
+            is_salad = (dish_kind == KIND_SALAD)
+            is_juice = (dish_kind == KIND_JUICE)
 
             order_uid = order_uids[order_idx]
             self._emit_counter_debug(f"[StateCheck] order_slot={order_idx} order_uid={order_uid} recipe={name} is_salad={is_salad} ingredients={ings_lower}")
@@ -3491,20 +3610,25 @@ class CSPAgent:
             #   * 既に鍋に入っている              -> 集める段階が終わっている
             # このときは割り当てを解除し、他の注文がそのテーブルを使えるようにする。
             # その後また誰かがテーブルに置いた場合は、(3) の retarget が拾い直す。
-            dish_name = '-'.join(ings_lower) + (SALAD_SUFFIX if is_salad else SOUP_SUFFIX)
+            suffix = {KIND_SALAD: SALAD_SUFFIX, KIND_SOUP: SOUP_SUFFIX,
+                      KIND_JUICE: JUICE_SUFFIX}[dish_kind]
+            dish_name = '-'.join(ings_lower) + suffix
             sorted_ings = sorted(ings_cap)
             # assembly_needed: まだ「材料を集める」段階が残っているか。
             #   スープ: 鍋にこのレシピが入っていれば集め終わり
             #   サラダ: 皿にこのレシピが乗っていれば集め終わり
             assembly_needed = True
-            states = plate_states if is_salad else pot_states
+            #   ジュース: ミキサーにこのレシピが入っていれば集め終わり
+            states = (blender_states if is_juice
+                      else plate_states if is_salad else pot_states)
             for ps in states:
                 if not ps['used'] and ps['names'] == sorted_ings:
                     ps['used'] = True
                     assembly_needed = False
                     break
 
-            cook_needed = assembly_needed and not is_salad
+            cook_needed = assembly_needed and dish_kind == KIND_SOUP
+            mix_needed = assembly_needed and is_juice
 
             merge_point_needed = assembly_needed and not self._agent_holds_complete_set(env, ings_cap)
 
@@ -3610,6 +3734,22 @@ class CSPAgent:
                     'assigned_counter': assigned_counter
                 })
 
+            if mix_needed:
+                # ジュース: 刻んだフルーツをミキサーへ入れて混ぜる。
+                # 鍋(cook)と同じ位置づけの工程だが、待ち時間ではなく
+                # インタラクト回数で進む。
+                dur = self._task_duration_frames(env, 'mix', dish_name, order_idx, assigned_counter)
+                if dur is not None:
+                    tasks.append({
+                        'id': ('mix', dish_name, order_uid),
+                        'verb': 'mix', 'obj': dish_name, 'order': order_uid,
+                        'slot_idx': order_idx,
+                        'display_order': display_order,
+                        'dur': dur,
+                        'res_candidates': [('blender', r) for r in resources['blenders']],
+                        'assigned_counter': assigned_counter
+                    })
+
             if cook_needed:
                 dur = self._task_duration_frames(env, 'cook', dish_name, order_idx)
                 if dur is not None:
@@ -3624,7 +3764,8 @@ class CSPAgent:
                     })
 
             # サラダは鍋を経由せず、刻んだ食材をそのまま皿に乗せて提供する。
-            serve_verb = 'serve_salad' if is_salad else 'serve'
+            serve_verb = ('serve_juice' if is_juice
+                          else 'serve_salad' if is_salad else 'serve')
             dur = self._task_duration_frames(env, serve_verb, dish_name, order_idx, assigned_counter)
 
             if dur is None and self._map_is_partitioned(env):
@@ -4086,6 +4227,19 @@ class CSPAgent:
                 chops = [v for v in order_vars if v['task']['verb'] == 'chop']
                 for c in chops:
                     model.Add(starts[i] >= c['end'])
+            elif verb == 'mix':
+                # ミキサーに入れられるのは、フルーツを全部刻んでから。cook と同じ形。
+                order_vars = vars_by_order.get(t['order'], [])
+                chops = [v for v in order_vars if v['task']['verb'] == 'chop']
+                for c in chops:
+                    model.Add(starts[i] >= c['end'])
+            elif verb == 'serve_juice':
+                # 混ぜ終わってからでないと注げない。混ぜるのは待ち時間ではなく
+                # インタラクトなので、cook のような待機分の加算は不要。
+                order_vars = vars_by_order.get(t['order'], [])
+                mixes = [v for v in order_vars if v['task']['verb'] == 'mix']
+                for m in mixes:
+                    model.Add(starts[i] >= m['end'])
             elif verb == 'serve_salad':
                 # サラダは調理を挟まないので、chop が全部終われば提供できる。
                 order_vars = vars_by_order.get(t['order'], [])
@@ -4138,6 +4292,29 @@ class CSPAgent:
                     model.Add(p_size == p_end - p_start)
                     p_interval = model.NewIntervalVar(p_start, p_size, p_end, f'pot_usage_{order_idx}')
                     pot_usage_intervals[pot_loc].append(p_interval)
+
+        # ミキサーの占有制約。鍋とまったく同じ形で、
+        # 「入れてから取り出すまで」を1区間として重複を禁じる。
+        blender_usage_intervals = {}
+        for order_idx, tasks_list in vars_by_order.items():
+            mixes = [v for v in tasks_list if v['task']['verb'] == 'mix']
+            takes = [v for v in tasks_list if v['task']['verb'] == 'serve_juice']
+            if mixes and takes:
+                res = mixes[0]['task'].get('fixed_res')
+                if res and res[0] == 'blender':
+                    loc = res[1]
+                    blender_usage_intervals.setdefault(loc, [])
+                    b_start, b_end = mixes[0]['start'], takes[0]['end']
+                    b_size = model.NewIntVar(0, horizon, f'blender_usage_dur_{order_idx}')
+                    model.Add(b_size == b_end - b_start)
+                    blender_usage_intervals[loc].append(
+                        model.NewIntervalVar(b_start, b_size, b_end, f'blender_usage_{order_idx}'))
+
+        for b_loc, intervals_list in blender_usage_intervals.items():
+            if len(intervals_list) > 1:
+                model.AddNoOverlap(intervals_list)
+                self._emit_counter_debug(
+                    f"[CSPAgent] ミキサー {b_loc} の重複禁止制約を追加 ({len(intervals_list)} 注文)")
 
         for pot_loc, intervals_list in pot_usage_intervals.items():
             if len(intervals_list) > 1:
@@ -4586,6 +4763,18 @@ class CSPAgent:
         pool = same_side or plates
         return min(pool, key=lambda p: abs(p[0] - near_pos[0]) + abs(p[1] - near_pos[1]))
 
+    def _pick_cup(self, env, resources, near_pos):
+        """near_pos と同じ側にあるコップ置き場を選ぶ(皿の _pick_plate と同じ)。"""
+        cups = resources.get('cups') or []
+        if not cups:
+            return resources.get('cup')
+        if near_pos is None or not self._map_is_partitioned(env):
+            return cups[0]
+        want = self._components_touching(env, near_pos)
+        same_side = [c for c in cups if self._components_touching(env, c) & want]
+        pool = same_side or cups
+        return min(pool, key=lambda c: abs(c[0] - near_pos[0]) + abs(c[1] - near_pos[1]))
+
     def _find_shared_counter(self, env, near_pos=None):
         """両側から使えるカウンター(受け渡し台)を1つ選ぶ。
 
@@ -4685,7 +4874,7 @@ class CSPAgent:
             goal_obj = order_tuple[0]
             name = getattr(goal_obj, 'full_name', '').lower()
             ingredients = []
-            for ing in ['lettuce', 'onion', 'tomato']:
+            for ing in ALL_INGREDIENTS:
                 if ing in name:
                     ingredients.append(ing)
             soup_name = '-'.join(ingredients) + ' soup' if ingredients else name
