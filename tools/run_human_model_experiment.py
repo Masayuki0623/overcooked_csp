@@ -36,7 +36,8 @@ from copy import deepcopy as dcopy  # noqa: E402
 
 from gym_cooking.envs.overcooked_environment import OvercookedEnvironment, MapSetting  # noqa: E402
 from gym_cooking.play_test import MAP_SETTINGS  # noqa: E402
-from gym_cooking.utils.order_preset import generate_order_recipes  # noqa: E402
+from gym_cooking.utils.order_preset import (  # noqa: E402
+    enumerate_order_recipes, generate_order_recipes)
 from gym_cooking.utils.replay import Replay  # noqa: E402
 from agent.executor.low import EnvState  # noqa: E402
 from agent.myagent.CSPAgent import CSPAgent  # noqa: E402
@@ -48,9 +49,10 @@ SKIP_BUDGETS = (0, 2, 4)
 MAX_STEPS = 1000   # ゲーム内100秒。max_num_timesteps と同じ。
 
 
-def make_env(map_name, seed, preset):
+def make_env(map_name, seed, preset, recipes=None):
     kw = dict(MAP_SETTINGS[map_name])
-    kw['order_recipes'] = generate_order_recipes(preset, random.Random(seed))
+    kw['order_recipes'] = (list(recipes) if recipes is not None
+                           else generate_order_recipes(preset, random.Random(seed)))
     env = OvercookedEnvironment(MapSetting(**kw))
     env.reset()
     return env
@@ -109,8 +111,8 @@ def pick_instruction(ai, state, orders, quality, rng):
     return rng.choice(pool) if pool else None
 
 
-def run_trial(map_name, preset, seed, human_model, quality, skip_budget):
-    env = make_env(map_name, seed, preset)
+def run_trial(map_name, preset, seed, human_model, quality, skip_budget, recipes=None):
+    env = make_env(map_name, seed, preset, recipes)
     ai = make_ai(skip_budget, partner_is_external=(human_model != 'follow_plan'))
     human_idx = 1
     human = HumanModel(human_model, ai, human_idx, Replay(), seed=seed * 31 + 7)
@@ -289,6 +291,10 @@ def main():
     ap.add_argument('--map', default='experiment')
     ap.add_argument('--preset', default='experiment2')
     ap.add_argument('--seeds', type=int, default=30)
+    ap.add_argument('--enumerate-orders', action='store_true',
+                    help='注文を乱数で引かず、作りうる組み合わせを全部使う。'
+                         '決定的に動く人間役では重複シードが同じ結果になるため、'
+                         'こちらのほうが同じ試行数で標本数が多い。')
     ap.add_argument('--models', default=','.join(MODELS))
     ap.add_argument('--shard', default=None,
                     help='"i/n" 形式。試行を n 個に分けて i 番目だけ実行する(並列用)')
@@ -296,8 +302,14 @@ def main():
     args = ap.parse_args()
 
     models = [m.strip() for m in args.models.split(',') if m.strip()]
+    if args.enumerate_orders:
+        order_sets = enumerate_order_recipes(args.preset)
+        print(f'注文の組み合わせを全列挙: {len(order_sets)} 通り')
+    else:
+        order_sets = None
+    num_cases = len(order_sets) if order_sets is not None else args.seeds
     combos = [(s, m, q, d)
-              for s in range(args.seeds)
+              for s in range(num_cases)
               for m in models
               for q in QUALITIES
               for d in SKIP_BUDGETS]
@@ -312,7 +324,8 @@ def main():
     rows = []
     started = time.time()
     for k, (seed, model, quality, budget) in enumerate(combos, 1):
-        rows.append(run_trial(args.map, args.preset, seed, model, quality, budget))
+        recipes = order_sets[seed] if order_sets is not None else None
+        rows.append(run_trial(args.map, args.preset, seed, model, quality, budget, recipes))
         if k % 5 == 0 or k == len(combos):
             el = time.time() - started
             print(f'  {k}/{len(combos)} 件 ({el:.0f}秒経過, '

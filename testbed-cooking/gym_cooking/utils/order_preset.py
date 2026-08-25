@@ -9,6 +9,7 @@ MapSetting.order_recipes に載せる。こうすることで、リプレイに�
 「プリセット名」ではなく「実際に出た注文」が記録され、再実行しても
 別の注文に化けることがない。
 """
+import itertools
 import random
 
 import gym_cooking.recipe_planner.recipe as RECIPE
@@ -126,6 +127,38 @@ def has_exclusive_salad_ingredient(recipe_names):
         if target is not None:
             target |= _ingredient_names(name)
     return bool(salad - soup)
+
+
+def enumerate_order_recipes(preset_name, require_exclusive_salad_ingredient=True):
+    """プリセットで作りうる注文の組み合わせを、重複なく全部返す。
+
+    乱数で引くと同じ組み合わせが何度も出る。決定的に動くエージェントでは
+    それは同じ試行の繰り返しにしかならず、実効的な標本数が減ってしまう。
+    全部並べれば、試行数を増やさずに標本数を最大にできる。
+    """
+    if not is_order_preset(preset_name):
+        raise ValueError(
+            f"Unknown order preset: {preset_name} (available: {', '.join(preset_names())})")
+
+    per_category = []
+    for category, count in ORDER_PRESETS[preset_name]:
+        pool = recipe_pool(category)
+        if not pool:
+            raise ValueError(
+                f"No recipe with {MIN_INGREDIENTS}+ ingredients for category: {category}")
+        # 同じ種類を2つ以上出すプリセットでは、並び順の違いは同じ注文とみなす。
+        per_category.append(list(itertools.combinations_with_replacement(sorted(pool), count)))
+
+    has_juice = any(cat == JUICE for cat, _ in ORDER_PRESETS[preset_name])
+    check = has_exclusive_side_ingredients if has_juice else has_exclusive_salad_ingredient
+
+    order_sets = []
+    for combo in itertools.product(*per_category):
+        recipes = [r for group in combo for r in group]
+        if require_exclusive_salad_ingredient and not check(recipes):
+            continue
+        order_sets.append(recipes)
+    return order_sets
 
 
 def generate_order_recipes(preset_name, rng=None, require_exclusive_salad_ingredient=True,
