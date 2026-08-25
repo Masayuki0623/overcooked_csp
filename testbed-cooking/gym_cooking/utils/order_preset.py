@@ -36,14 +36,23 @@ def preset_names():
     return sorted(ORDER_PRESETS)
 
 
-def _is_salad_recipe(recipe):
-    """サラダかスープかを判定する。
+JUICE = 'juice'
 
-    レシピ定義上サラダは材料が Chopped(state_index=2)、スープは
-    Cooked(state_index=4) で登録されるため、完成品名に 'cooked' を
-    含むかどうかで確実に区別できる。
+
+def _category_of(recipe):
+    """レシピの系統(サラダ/スープ/ジュース)を判定する。
+
+    材料の登録状態で確実に区別できる。サラダは Chopped、スープは Cooked、
+    ジュースは Mixed。名前に 'cooked' を含むかだけで見ると、ジュース
+    (MixedApple-MixedOrange)がサラダに分類されてしまうため、
+    'mixed' を先に判定する。
     """
-    return 'cooked' not in recipe.full_name.lower()
+    name = recipe.full_name.lower()
+    if 'mixed' in name:
+        return JUICE
+    if 'cooked' in name:
+        return SOUP
+    return SALAD
 
 
 def recipe_pool(category, min_ingredients=MIN_INGREDIENTS):
@@ -52,7 +61,6 @@ def recipe_pool(category, min_ingredients=MIN_INGREDIENTS):
     レシピ一覧をそのまま走査するので、recipe.py にレシピを足せば
     プリセット側を触らなくても候補に入る。
     """
-    want_salad = (category == SALAD)
     pool = []
     for name in sorted(dir(RECIPE)):
         cls = getattr(RECIPE, name)
@@ -63,7 +71,7 @@ def recipe_pool(category, min_ingredients=MIN_INGREDIENTS):
         recipe = cls()
         if len(recipe.contents) < min_ingredients:
             continue
-        if _is_salad_recipe(recipe) == want_salad:
+        if _category_of(recipe) == category:
             pool.append(name)
     return pool
 
