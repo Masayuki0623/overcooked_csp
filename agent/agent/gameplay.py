@@ -420,16 +420,21 @@ class GamePlay(Game):
             names = [getattr(o[0], 'full_name', '') for o in orders]
             info['all_orders'] = names
 
-            labels = {}
-            if hasattr(self.ai, 'get_order_display_labels'):
-                labels = self.ai.get_order_display_labels() or {}
-            uids = info['target_order_uids'] or []
-            dishes = [labels.get(u) or labels.get(u + 1) for u in uids]
-            info['target_dishes'] = [d for d in dishes if d] or None
+            # order_uid は CSP 側の内部IDなので、注文の並び順とは一致しない。
+            # タスク一覧を組み立て直して uid -> 料理名 の対応を取る。
+            from agent.myagent.CSPAgent import dish_kind_of
+            uid_to_name = {}
+            env_state = self._latest_env_state
+            if env_state is not None and hasattr(self.ai, '_build_order_tasks'):
+                for o in self.ai._build_order_tasks(dcopy(env_state)):
+                    if o.get('name'):
+                        uid_to_name[o['order']] = o['name']
 
-            # 系統(salad/soup/juice)は、注文名の材料状態から判定する。
-            from agent.myagent.CSPAgent import goal_dish_kind
-            info['target_dish_kinds'] = sorted({goal_dish_kind(n) for n in names}) or None
+            uids = info['target_order_uids'] or []
+            dishes = [uid_to_name.get(u) for u in uids]
+            info['target_dishes'] = [d for d in dishes if d] or None
+            info['target_dish_kinds'] = sorted(
+                {dish_kind_of(d) for d in dishes if d}) or None
         except Exception as e:
             print(f"[GamePlay] 指示対象の解析に失敗: {e}")
         return info

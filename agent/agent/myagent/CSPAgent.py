@@ -65,6 +65,22 @@ def is_juice_dish(name):
     return str(name).endswith(JUICE_SUFFIX)
 
 
+def dish_kind_of(name):
+    """内部の料理名('apple-orange juice' 等)から系統を判定する。
+
+    goal_dish_kind は注文ゴールの名前(材料の状態が入ったもの)用。
+    内部の料理名は接尾辞で系統が決まるので、そちらを見る。
+    """
+    text = str(name)
+    if text.endswith(JUICE_SUFFIX):
+        return KIND_JUICE
+    if text.endswith(SOUP_SUFFIX):
+        return KIND_SOUP
+    if text.endswith(SALAD_SUFFIX):
+        return KIND_SALAD
+    return goal_dish_kind(text)
+
+
 def goal_dish_kind(goal_full_name):
     """注文ゴールの full_name から料理の系統を判定する。
 
@@ -4724,8 +4740,22 @@ class CSPAgent:
             # replay は巨大で複製する意味がないため一時的に外す。
             saved_replay = self.replay
             self.replay = None
+            probe = None
             try:
-                probe = _dcopy(self)
+                # AI スレッドが同時に内部の辞書を書き換えていると
+                # deepcopy が "dictionary changed size during iteration" で
+                # 失敗する。複製は一瞬なので、数回やり直せばまず通る。
+                import time as _time
+                last_err = None
+                for _ in range(5):
+                    try:
+                        probe = _dcopy(self)
+                        break
+                    except RuntimeError as err:
+                        last_err = err
+                        _time.sleep(0.02)
+                if probe is None:
+                    raise last_err
             finally:
                 self.replay = saved_replay
             probe.replay = None
