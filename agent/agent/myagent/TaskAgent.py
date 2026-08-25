@@ -698,7 +698,11 @@ class TaskAgent:
                 dynamic_obstacles=dynamic_obstacles, allow_strict_override=True)
 
         # 受け渡し台に完成品が置かれるのを待って、置かれたら取りに行く。
-        candidates = [assigned_counter] if assigned_counter else env.get_pos_by_obj_gs(gs='Counter')
+        # 指定の台を先に見るが、別の台に置かれていたらそちらへ取りに行く。
+        # 完成品はどの台にあっても同じものなので、待ち続ける理由はない。
+        candidates = [assigned_counter] if assigned_counter else []
+        candidates += [c for c in self.reachable_positions(env, env.get_pos_by_obj_gs(gs='Counter'))
+                       if c not in candidates]
         for c in candidates:
             if c is None:
                 continue

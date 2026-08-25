@@ -4024,8 +4024,10 @@ class CSPAgent:
                 #   handover           : 鍋から盛って受け渡し台に置く(こちら側)
                 #   serve_from_counter : 受け渡し台から取って提供する(向こう側)
                 dish_kind = dish_kind_of(dish_name)
-                handover_counter = self._find_shared_counter(
-                    env, resources['pots'][0] if resources['pots'] else None)
+                handover_counter = (
+                    self._counter_holding_dish(env, dish_name)
+                    or self._find_shared_counter(
+                        env, resources['pots'][0] if resources['pots'] else None))
                 dur_h = self._task_duration_frames(
                     env, 'handover', dish_name, order_idx, handover_counter)
                 dur_s = self._task_duration_frames(
@@ -5104,6 +5106,32 @@ class CSPAgent:
         """そのタスクを実行できるエージェント番号の集合。"""
         comps = self._task_components(env, task)
         return {a for a in (0, 1) if self._agent_component(env, a) in comps}
+
+    def _counter_holding_dish(self, env, dish_name):
+        """完成した料理が既に置かれているカウンターを探す。
+
+        受け渡し台の割り当ては計画のたびに選び直されるが、一度置いた料理は
+        動かない。置いてある場所を優先しないと、渡した側と受け取る側が別の
+        テーブルを見つめたまま噛み合わなくなる。
+        """
+        needed = set(dish_ingredients(dish_name))
+        if not needed:
+            return None
+        for pos in env.get_pos_by_obj_gs(gs='Counter'):
+            obj = env.pos_obj.get(pos)
+            name = getattr(obj, 'full_name', '') or ''
+            if not name or not ('Plate' in name or 'Cup' in name):
+                continue
+            bases = set()
+            for part in name.split('-'):
+                if part in ('Plate', 'Cup'):
+                    continue
+                bases.add(part.replace('Chopped', '').replace('Cooked', '')
+                          .replace('Mixed', '').replace('Cooking', '')
+                          .replace('Mixing', '').lower())
+            if bases == needed:
+                return pos
+        return None
 
     def _agents_reaching(self, env, pos):
         """その位置を使える(隣に立てる)エージェント番号の集合。"""
