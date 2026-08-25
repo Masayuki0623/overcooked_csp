@@ -1,271 +1,271 @@
 map,seed,quality,skip_budget,status,orders,num_tasks,num_candidates,target,target_verb,target_obj,target_serves_soup,natural_rank,natural_rank_agent,excess,makespan_baseline_s,makespan_constrained_s,loss_s,constrained_rank,inserted_count,inserted_total_s,inserted_durations_s,baseline_status,constrained_status,baseline_solve_s,constrained_solve_s
-ring,1,good,0,ok,OnionLettuceSalad|FullSalad|OnionTomatoSoup,11,7,chop_tomato,chop,tomato,1,1,0,1,20.6,21.8,1.2,0,0,0,,OPTIMAL,OPTIMAL,0.0286,0.0291
-ring,1,good,1,ok,OnionLettuceSalad|FullSalad|OnionTomatoSoup,11,7,chop_tomato,chop,tomato,1,1,0,0,20.6,20.6,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0187,0.0276
-ring,1,good,2,ok,OnionLettuceSalad|FullSalad|OnionTomatoSoup,11,7,chop_tomato,chop,tomato,1,1,0,0,20.6,20.6,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.019,0.0455
-ring,1,bad,0,ok,OnionLettuceSalad|FullSalad|OnionTomatoSoup,11,7,chop_lettuce,chop,lettuce,0,4,0,4,20.6,22.8,2.2,0,0,0,,OPTIMAL,OPTIMAL,0.0305,0.0361
-ring,1,bad,1,ok,OnionLettuceSalad|FullSalad|OnionTomatoSoup,11,7,chop_lettuce,chop,lettuce,0,4,0,3,20.6,22.8,2.2,0,0,0,,OPTIMAL,OPTIMAL,0.0197,0.0282
-ring,1,bad,2,ok,OnionLettuceSalad|FullSalad|OnionTomatoSoup,11,7,chop_lettuce,chop,lettuce,0,4,0,2,20.6,22.8,2.2,0,0,0,,OPTIMAL,OPTIMAL,0.0214,0.0265
-ring,1,random,0,ok,OnionLettuceSalad|FullSalad|OnionTomatoSoup,11,7,serve_onion_tomatosoup,serve,onion-tomato soup,1,9,0,9,20.6,31.2,10.6,3,3,4.1,1.7|2.0|0.4,OPTIMAL,OPTIMAL,0.0214,0.0131
-ring,1,random,1,ok,OnionLettuceSalad|FullSalad|OnionTomatoSoup,11,7,serve_onion_tomatosoup,serve,onion-tomato soup,1,9,0,8,20.6,29.2,8.6,4,4,5.9,1.7|2.0|0.4|1.8,OPTIMAL,OPTIMAL,0.0201,0.0216
-ring,1,random,2,ok,OnionLettuceSalad|FullSalad|OnionTomatoSoup,11,7,serve_onion_tomatosoup,serve,onion-tomato soup,1,9,0,7,20.6,27.4,6.8,5,5,7.3,1.7|2.0|0.4|1.8|1.4,OPTIMAL,OPTIMAL,0.0227,0.0309
-ring,3,good,0,ok,OnionLettuceSalad|OnionLettuceSalad|OnionTomatoSoup,10,6,chop_tomato,chop,tomato,1,1,0,1,20.6,21.8,1.2,0,0,0,,OPTIMAL,OPTIMAL,0.0157,0.0135
-ring,3,good,1,ok,OnionLettuceSalad|OnionLettuceSalad|OnionTomatoSoup,10,6,chop_tomato,chop,tomato,1,1,0,0,20.6,20.6,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.019,0.0233
-ring,3,good,2,ok,OnionLettuceSalad|OnionLettuceSalad|OnionTomatoSoup,10,6,chop_tomato,chop,tomato,1,1,0,0,20.6,20.6,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0197,0.0234
-ring,3,bad,0,ok,OnionLettuceSalad|OnionLettuceSalad|OnionTomatoSoup,10,6,chop_lettuce,chop,lettuce,0,3,0,3,20.6,22.8,2.2,0,0,0,,OPTIMAL,OPTIMAL,0.0161,0.0198
-ring,3,bad,1,ok,OnionLettuceSalad|OnionLettuceSalad|OnionTomatoSoup,10,6,chop_lettuce,chop,lettuce,0,3,0,2,20.6,22.8,2.2,0,0,0,,OPTIMAL,OPTIMAL,0.0172,0.0188
-ring,3,bad,2,ok,OnionLettuceSalad|OnionLettuceSalad|OnionTomatoSoup,10,6,chop_lettuce,chop,lettuce,0,3,0,1,20.6,22.8,2.2,0,0,0,,OPTIMAL,OPTIMAL,0.0164,0.0212
-ring,3,random,0,ok,OnionLettuceSalad|OnionLettuceSalad|OnionTomatoSoup,10,6,chop_tomato,chop,tomato,1,1,0,1,20.6,21.8,1.2,0,0,0,,OPTIMAL,OPTIMAL,0.017,0.0131
-ring,3,random,1,ok,OnionLettuceSalad|OnionLettuceSalad|OnionTomatoSoup,10,6,chop_tomato,chop,tomato,1,1,0,0,20.6,20.6,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0173,0.0187
-ring,3,random,2,ok,OnionLettuceSalad|OnionLettuceSalad|OnionTomatoSoup,10,6,chop_tomato,chop,tomato,1,1,0,0,20.6,20.6,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0189,0.0241
-ring,6,good,0,ok,FullSalad|TomatoLettuceSalad|OnionTomatoSoup,11,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.023,0.0257
-ring,6,good,1,ok,FullSalad|TomatoLettuceSalad|OnionTomatoSoup,11,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0198,0.0228
-ring,6,good,2,ok,FullSalad|TomatoLettuceSalad|OnionTomatoSoup,11,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0197,0.0257
-ring,6,bad,0,ok,FullSalad|TomatoLettuceSalad|OnionTomatoSoup,11,7,chop_lettuce,chop,lettuce,0,4,0,4,20.6,22.8,2.2,0,0,0,,OPTIMAL,OPTIMAL,0.0198,0.0271
-ring,6,bad,1,ok,FullSalad|TomatoLettuceSalad|OnionTomatoSoup,11,7,chop_lettuce,chop,lettuce,0,4,0,3,20.6,22.8,2.2,0,0,0,,OPTIMAL,OPTIMAL,0.019,0.0318
-ring,6,bad,2,ok,FullSalad|TomatoLettuceSalad|OnionTomatoSoup,11,7,chop_lettuce,chop,lettuce,0,4,0,2,20.6,22.8,2.2,0,0,0,,OPTIMAL,OPTIMAL,0.0256,0.0339
-ring,6,random,0,ok,FullSalad|TomatoLettuceSalad|OnionTomatoSoup,11,7,serve_salad_lettuce_tomatosalad,serve_salad,lettuce-tomato salad,0,5,0,5,20.6,27.2,6.6,2,2,3.5,1.8|1.7,OPTIMAL,OPTIMAL,0.021,0.0134
-ring,6,random,1,ok,FullSalad|TomatoLettuceSalad|OnionTomatoSoup,11,7,serve_salad_lettuce_tomatosalad,serve_salad,lettuce-tomato salad,0,5,0,4,20.6,26.0,5.4,3,3,5.2,1.7|1.8|1.7,OPTIMAL,OPTIMAL,0.028,0.0276
-ring,6,random,2,ok,FullSalad|TomatoLettuceSalad|OnionTomatoSoup,11,7,serve_salad_lettuce_tomatosalad,serve_salad,lettuce-tomato salad,0,5,0,3,20.6,26.0,5.4,3,3,5.2,1.7|1.8|1.7,OPTIMAL,OPTIMAL,0.0193,0.0217
-ring,7,good,0,ok,OnionTomatoSalad|OnionLettuceSalad|TomatoLettuceSoup,10,7,chop_lettuce,chop,lettuce,1,0,0,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0162,0.0265
-ring,7,good,1,ok,OnionTomatoSalad|OnionLettuceSalad|TomatoLettuceSoup,10,7,chop_lettuce,chop,lettuce,1,0,0,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0123,0.0216
-ring,7,good,2,ok,OnionTomatoSalad|OnionLettuceSalad|TomatoLettuceSoup,10,7,chop_lettuce,chop,lettuce,1,0,0,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0129,0.0177
-ring,7,bad,0,ok,OnionTomatoSalad|OnionLettuceSalad|TomatoLettuceSoup,10,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0179,0.0284
-ring,7,bad,1,ok,OnionTomatoSalad|OnionLettuceSalad|TomatoLettuceSoup,10,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0153,0.0206
-ring,7,bad,2,ok,OnionTomatoSalad|OnionLettuceSalad|TomatoLettuceSoup,10,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0134,0.0229
-ring,7,random,0,ok,OnionTomatoSalad|OnionLettuceSalad|TomatoLettuceSoup,10,7,chop_tomato,chop,tomato,1,1,0,1,21.2,22.0,0.8,0,0,0,,OPTIMAL,OPTIMAL,0.0146,0.0189
-ring,7,random,1,ok,OnionTomatoSalad|OnionLettuceSalad|TomatoLettuceSoup,10,7,chop_tomato,chop,tomato,1,1,0,0,21.2,21.2,0.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.013,0.0212
-ring,7,random,2,ok,OnionTomatoSalad|OnionLettuceSalad|TomatoLettuceSoup,10,7,chop_tomato,chop,tomato,1,1,0,0,21.2,21.2,0.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0132,0.0243
-ring,8,good,0,ok,OnionLettuceSalad|OnionTomatoSalad|TomatoLettuceSoup,10,7,chop_tomato,chop,tomato,1,1,0,1,21.2,22.0,0.8,0,0,0,,OPTIMAL,OPTIMAL,0.0166,0.0205
-ring,8,good,1,ok,OnionLettuceSalad|OnionTomatoSalad|TomatoLettuceSoup,10,7,chop_tomato,chop,tomato,1,1,0,0,21.2,21.2,0.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0147,0.0212
-ring,8,good,2,ok,OnionLettuceSalad|OnionTomatoSalad|TomatoLettuceSoup,10,7,chop_tomato,chop,tomato,1,1,0,0,21.2,21.2,0.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0149,0.0219
-ring,8,bad,0,ok,OnionLettuceSalad|OnionTomatoSalad|TomatoLettuceSoup,10,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0145,0.0234
-ring,8,bad,1,ok,OnionLettuceSalad|OnionTomatoSalad|TomatoLettuceSoup,10,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0254,0.0269
-ring,8,bad,2,ok,OnionLettuceSalad|OnionTomatoSalad|TomatoLettuceSoup,10,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0169,0.0261
-ring,8,random,0,ok,OnionLettuceSalad|OnionTomatoSalad|TomatoLettuceSoup,10,7,cook_lettuce_tomatosoup,cook,lettuce-tomato soup,1,2,0,2,21.2,21.2,0.0,2,2,4.1,2.1|2.0,OPTIMAL,OPTIMAL,0.0142,0.0123
-ring,8,random,1,ok,OnionLettuceSalad|OnionTomatoSalad|TomatoLettuceSoup,10,7,cook_lettuce_tomatosoup,cook,lettuce-tomato soup,1,2,0,1,21.2,21.2,0.0,2,2,4.1,2.1|2.0,OPTIMAL,OPTIMAL,0.0159,0.0154
-ring,8,random,2,ok,OnionLettuceSalad|OnionTomatoSalad|TomatoLettuceSoup,10,7,cook_lettuce_tomatosoup,cook,lettuce-tomato soup,1,2,0,0,21.2,21.2,0.0,2,2,4.1,2.1|2.0,OPTIMAL,OPTIMAL,0.0164,0.0194
-ring,9,good,0,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0158,0.021
-ring,9,good,1,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0181,0.0201
-ring,9,good,2,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0157,0.0181
-ring,9,bad,0,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_lettuce,chop,lettuce,0,5,0,5,20.6,23.0,2.4,0,0,0,,OPTIMAL,OPTIMAL,0.0173,0.0128
-ring,9,bad,1,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_lettuce,chop,lettuce,0,5,0,4,20.6,23.0,2.4,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0163,0.0171
-ring,9,bad,2,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_lettuce,chop,lettuce,0,5,0,3,20.6,23.0,2.4,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0174,0.0187
-ring,9,random,0,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0165,0.02
-ring,9,random,1,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0145,0.0167
-ring,9,random,2,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0179,0.0198
-ring,10,good,0,ok,FullSalad|TomatoLettuceSalad|TomatoLettuceSoup,11,7,chop_tomato,chop,tomato,1,1,0,1,21.2,22.0,0.8,0,0,0,,OPTIMAL,OPTIMAL,0.0199,0.029
-ring,10,good,1,ok,FullSalad|TomatoLettuceSalad|TomatoLettuceSoup,11,7,chop_tomato,chop,tomato,1,1,0,0,21.2,21.2,0.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0181,0.0332
-ring,10,good,2,ok,FullSalad|TomatoLettuceSalad|TomatoLettuceSoup,11,7,chop_tomato,chop,tomato,1,1,0,0,21.2,21.2,0.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0225,0.0345
-ring,10,bad,0,ok,FullSalad|TomatoLettuceSalad|TomatoLettuceSoup,11,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0197,0.0227
-ring,10,bad,1,ok,FullSalad|TomatoLettuceSalad|TomatoLettuceSoup,11,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.022,0.0251
-ring,10,bad,2,ok,FullSalad|TomatoLettuceSalad|TomatoLettuceSoup,11,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0268,0.0305
-ring,10,random,0,ok,FullSalad|TomatoLettuceSalad|TomatoLettuceSoup,11,7,chop_tomato,chop,tomato,1,1,0,1,21.2,22.0,0.8,0,0,0,,OPTIMAL,OPTIMAL,0.0209,0.031
-ring,10,random,1,ok,FullSalad|TomatoLettuceSalad|TomatoLettuceSoup,11,7,chop_tomato,chop,tomato,1,1,0,0,21.2,21.2,0.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0236,0.0327
-ring,10,random,2,ok,FullSalad|TomatoLettuceSalad|TomatoLettuceSoup,11,7,chop_tomato,chop,tomato,1,1,0,0,21.2,21.2,0.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0236,0.0271
-ring,12,good,0,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0174,0.0219
-ring,12,good,1,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0164,0.0203
-ring,12,good,2,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0159,0.0211
-ring,12,bad,0,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_lettuce,chop,lettuce,0,5,0,5,20.6,23.0,2.4,0,0,0,,OPTIMAL,OPTIMAL,0.0192,0.0125
-ring,12,bad,1,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_lettuce,chop,lettuce,0,5,0,4,20.6,23.0,2.4,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0169,0.0171
-ring,12,bad,2,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_lettuce,chop,lettuce,0,5,0,3,20.6,23.0,2.4,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0153,0.02
-ring,12,random,0,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,serve_salad_lettuce_tomatosalad,serve_salad,lettuce-tomato salad,0,7,0,7,20.6,27.0,6.4,2,2,3.5,1.8|1.7,OPTIMAL,OPTIMAL,0.017,0.0119
-ring,12,random,1,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,serve_salad_lettuce_tomatosalad,serve_salad,lettuce-tomato salad,0,7,0,6,20.6,26.6,6.0,3,3,5.2,1.7|1.8|1.7,OPTIMAL,OPTIMAL,0.0217,0.0222
-ring,12,random,2,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,serve_salad_lettuce_tomatosalad,serve_salad,lettuce-tomato salad,0,7,0,5,20.6,26.6,6.0,4,4,7.2,1.7|1.7|2.0|1.8,OPTIMAL,OPTIMAL,0.0247,0.0295
-ring,13,good,0,ok,OnionTomatoSalad|OnionTomatoSalad|OnionLettuceSoup,10,6,chop_onion,chop,onion,1,0,0,0,21.0,21.0,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0139,0.0233
-ring,13,good,1,ok,OnionTomatoSalad|OnionTomatoSalad|OnionLettuceSoup,10,6,chop_onion,chop,onion,1,0,0,0,21.0,21.0,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0166,0.0335
-ring,13,good,2,ok,OnionTomatoSalad|OnionTomatoSalad|OnionLettuceSoup,10,6,chop_onion,chop,onion,1,0,0,0,21.0,21.0,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0145,0.0251
-ring,13,bad,0,ok,OnionTomatoSalad|OnionTomatoSalad|OnionLettuceSoup,10,6,chop_tomato,chop,tomato,0,3,0,3,21.0,23.8,2.8,0,0,0,,OPTIMAL,OPTIMAL,0.0127,0.0206
-ring,13,bad,1,ok,OnionTomatoSalad|OnionTomatoSalad|OnionLettuceSoup,10,6,chop_tomato,chop,tomato,0,3,0,2,21.0,22.8,1.8,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0147,0.0259
-ring,13,bad,2,ok,OnionTomatoSalad|OnionTomatoSalad|OnionLettuceSoup,10,6,chop_tomato,chop,tomato,0,3,0,1,21.0,22.8,1.8,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0141,0.0212
-ring,13,random,0,ok,OnionTomatoSalad|OnionTomatoSalad|OnionLettuceSoup,10,6,serve_salad_onion_tomatosalad,serve_salad,onion-tomato salad,0,4,0,4,21.0,25.2,4.2,1,1,1.8,1.8,OPTIMAL,OPTIMAL,0.014,0.0216
-ring,13,random,1,ok,OnionTomatoSalad|OnionTomatoSalad|OnionLettuceSoup,10,6,serve_salad_onion_tomatosalad,serve_salad,onion-tomato salad,0,4,0,3,21.0,24.0,3.0,2,2,3.5,1.7|1.8,OPTIMAL,OPTIMAL,0.0193,0.0272
-ring,13,random,2,ok,OnionTomatoSalad|OnionTomatoSalad|OnionLettuceSoup,10,6,serve_salad_onion_tomatosalad,serve_salad,onion-tomato salad,0,4,0,2,21.0,24.0,3.0,2,2,3.5,1.7|1.8,OPTIMAL,OPTIMAL,0.0147,0.024
-ring,14,good,0,ok,FullSalad|OnionLettuceSalad|OnionTomatoSoup,11,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0319,0.0464
-ring,14,good,1,ok,FullSalad|OnionLettuceSalad|OnionTomatoSoup,11,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0251,0.044
-ring,14,good,2,ok,FullSalad|OnionLettuceSalad|OnionTomatoSoup,11,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0395,0.0617
-ring,14,bad,0,ok,FullSalad|OnionLettuceSalad|OnionTomatoSoup,11,7,chop_lettuce,chop,lettuce,0,3,0,3,20.6,22.8,2.2,0,0,0,,OPTIMAL,OPTIMAL,0.066,0.0616
-ring,14,bad,1,ok,FullSalad|OnionLettuceSalad|OnionTomatoSoup,11,7,chop_lettuce,chop,lettuce,0,3,0,2,20.6,22.8,2.2,0,0,0,,OPTIMAL,OPTIMAL,0.0375,0.0493
-ring,14,bad,2,ok,FullSalad|OnionLettuceSalad|OnionTomatoSoup,11,7,chop_lettuce,chop,lettuce,0,3,0,1,20.6,22.8,2.2,0,0,0,,OPTIMAL,OPTIMAL,0.0398,0.0471
-ring,14,random,0,ok,FullSalad|OnionLettuceSalad|OnionTomatoSoup,11,7,serve_onion_tomatosoup,serve,onion-tomato soup,1,9,0,9,20.6,31.2,10.6,3,3,4.1,1.7|2.0|0.4,OPTIMAL,OPTIMAL,0.0432,0.0292
-ring,14,random,1,ok,FullSalad|OnionLettuceSalad|OnionTomatoSoup,11,7,serve_onion_tomatosoup,serve,onion-tomato soup,1,9,0,8,20.6,29.2,8.6,4,4,5.8,1.7|2.0|0.4|1.7,OPTIMAL,OPTIMAL,0.0379,0.044
-ring,14,random,2,ok,FullSalad|OnionLettuceSalad|OnionTomatoSoup,11,7,serve_onion_tomatosoup,serve,onion-tomato soup,1,9,0,7,20.6,27.4,6.8,5,5,7.2,1.7|2.0|0.4|1.7|1.4,OPTIMAL,OPTIMAL,0.0373,0.0303
-ring,16,good,0,ok,OnionTomatoSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_tomato,chop,tomato,1,1,0,1,21.2,22.0,0.8,0,0,0,,OPTIMAL,OPTIMAL,0.0205,0.0239
-ring,16,good,1,ok,OnionTomatoSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_tomato,chop,tomato,1,1,0,0,21.2,21.2,0.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0178,0.0262
-ring,16,good,2,ok,OnionTomatoSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_tomato,chop,tomato,1,1,0,0,21.2,21.2,0.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0148,0.024
-ring,16,bad,0,ok,OnionTomatoSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0168,0.0226
-ring,16,bad,1,ok,OnionTomatoSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0197,0.0217
-ring,16,bad,2,ok,OnionTomatoSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0215,0.0245
-ring,16,random,0,ok,OnionTomatoSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_tomato,chop,tomato,1,1,0,1,21.2,22.0,0.8,0,0,0,,OPTIMAL,OPTIMAL,0.0237,0.0239
-ring,16,random,1,ok,OnionTomatoSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_tomato,chop,tomato,1,1,0,0,21.2,21.2,0.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0147,0.0271
-ring,16,random,2,ok,OnionTomatoSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_tomato,chop,tomato,1,1,0,0,21.2,21.2,0.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0184,0.0257
-ring,17,good,0,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_tomato,chop,tomato,1,1,0,1,20.6,21.8,1.2,0,0,0,,OPTIMAL,OPTIMAL,0.0162,0.0284
-ring,17,good,1,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_tomato,chop,tomato,1,1,0,0,20.6,20.6,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0171,0.0292
-ring,17,good,2,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_tomato,chop,tomato,1,1,0,0,20.6,20.6,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0209,0.0248
-ring,17,bad,0,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_lettuce,chop,lettuce,0,5,0,5,20.6,23.0,2.4,0,0,0,,OPTIMAL,OPTIMAL,0.016,0.0133
-ring,17,bad,1,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_lettuce,chop,lettuce,0,5,0,4,20.6,23.0,2.4,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0217,0.0228
-ring,17,bad,2,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_lettuce,chop,lettuce,0,5,0,3,20.6,23.0,2.4,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0197,0.0202
-ring,17,random,0,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,serve_onion_tomatosoup,serve,onion-tomato soup,1,8,0,8,20.6,29.6,9.0,3,3,4.1,1.7|2.0|0.4,OPTIMAL,OPTIMAL,0.0151,0.0109
-ring,17,random,1,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,serve_onion_tomatosoup,serve,onion-tomato soup,1,8,0,7,20.6,27.6,7.0,4,4,5.8,1.7|2.0|0.4|1.7,OPTIMAL,OPTIMAL,0.0166,0.0201
-ring,17,random,2,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,serve_onion_tomatosoup,serve,onion-tomato soup,1,8,0,6,20.6,26.0,5.4,5,5,7.6,1.7|2.0|0.4|1.7|1.8,OPTIMAL,OPTIMAL,0.0164,0.016
-ring,18,good,0,ok,OnionLettuceSalad|FullSalad|TomatoLettuceSoup,11,7,chop_lettuce,chop,lettuce,1,0,0,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0249,0.039
-ring,18,good,1,ok,OnionLettuceSalad|FullSalad|TomatoLettuceSoup,11,7,chop_lettuce,chop,lettuce,1,0,0,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0226,0.032
-ring,18,good,2,ok,OnionLettuceSalad|FullSalad|TomatoLettuceSoup,11,7,chop_lettuce,chop,lettuce,1,0,0,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0328,0.0447
-ring,18,bad,0,ok,OnionLettuceSalad|FullSalad|TomatoLettuceSoup,11,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.025,0.036
-ring,18,bad,1,ok,OnionLettuceSalad|FullSalad|TomatoLettuceSoup,11,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0223,0.0308
-ring,18,bad,2,ok,OnionLettuceSalad|FullSalad|TomatoLettuceSoup,11,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0236,0.0308
-ring,18,random,0,ok,OnionLettuceSalad|FullSalad|TomatoLettuceSoup,11,7,chop_tomato,chop,tomato,1,1,0,1,21.2,22.0,0.8,0,0,0,,OPTIMAL,OPTIMAL,0.0225,0.0303
-ring,18,random,1,ok,OnionLettuceSalad|FullSalad|TomatoLettuceSoup,11,7,chop_tomato,chop,tomato,1,1,0,0,21.2,21.2,0.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0222,0.0335
-ring,18,random,2,ok,OnionLettuceSalad|FullSalad|TomatoLettuceSoup,11,7,chop_tomato,chop,tomato,1,1,0,0,21.2,21.2,0.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0179,0.0257
-ring,19,good,0,ok,FullSalad|FullSalad|OnionLettuceSoup,12,6,chop_onion,chop,onion,1,0,0,0,21.0,21.0,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0318,0.0672
-ring,19,good,1,ok,FullSalad|FullSalad|OnionLettuceSoup,12,6,chop_onion,chop,onion,1,0,0,0,21.0,21.0,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0386,0.0691
-ring,19,good,2,ok,FullSalad|FullSalad|OnionLettuceSoup,12,6,chop_onion,chop,onion,1,0,0,0,21.0,21.0,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0343,0.0676
-ring,19,bad,0,ok,FullSalad|FullSalad|OnionLettuceSoup,12,6,chop_tomato,chop,tomato,0,3,0,3,21.0,23.8,2.8,0,0,0,,OPTIMAL,OPTIMAL,0.0328,0.0413
-ring,19,bad,1,ok,FullSalad|FullSalad|OnionLettuceSoup,12,6,chop_tomato,chop,tomato,0,3,0,2,21.0,22.8,1.8,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.034,0.0405
-ring,19,bad,2,ok,FullSalad|FullSalad|OnionLettuceSoup,12,6,chop_tomato,chop,tomato,0,3,0,1,21.0,22.8,1.8,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0334,0.0357
-ring,19,random,0,ok,FullSalad|FullSalad|OnionLettuceSoup,12,6,chop_lettuce,chop,lettuce,1,1,0,1,21.0,21.4,0.4,0,0,0,,OPTIMAL,OPTIMAL,0.0394,0.0709
-ring,19,random,1,ok,FullSalad|FullSalad|OnionLettuceSoup,12,6,chop_lettuce,chop,lettuce,1,1,0,0,21.0,21.0,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0425,0.078
-ring,19,random,2,ok,FullSalad|FullSalad|OnionLettuceSoup,12,6,chop_lettuce,chop,lettuce,1,1,0,0,21.0,21.0,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0328,0.0508
-ring,21,good,0,ok,OnionLettuceSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_lettuce,chop,lettuce,1,0,0,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0165,0.0224
-ring,21,good,1,ok,OnionLettuceSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_lettuce,chop,lettuce,1,0,0,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0147,0.0221
-ring,21,good,2,ok,OnionLettuceSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_lettuce,chop,lettuce,1,0,0,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0146,0.0236
-ring,21,bad,0,ok,OnionLettuceSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0146,0.0173
-ring,21,bad,1,ok,OnionLettuceSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.015,0.0184
-ring,21,bad,2,ok,OnionLettuceSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0174,0.0181
-ring,21,random,0,ok,OnionLettuceSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_lettuce,chop,lettuce,1,0,0,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.02,0.0326
-ring,21,random,1,ok,OnionLettuceSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_lettuce,chop,lettuce,1,0,0,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0185,0.0255
-ring,21,random,2,ok,OnionLettuceSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_lettuce,chop,lettuce,1,0,0,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0179,0.0302
-ring,24,good,0,ok,TomatoLettuceSalad|OnionLettuceSalad|OnionLettuceSoup,10,7,chop_lettuce,chop,lettuce,1,1,0,1,21.0,21.4,0.4,0,0,0,,OPTIMAL,OPTIMAL,0.0143,0.0294
-ring,24,good,1,ok,TomatoLettuceSalad|OnionLettuceSalad|OnionLettuceSoup,10,7,chop_lettuce,chop,lettuce,1,1,0,0,21.0,21.0,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0147,0.0279
-ring,24,good,2,ok,TomatoLettuceSalad|OnionLettuceSalad|OnionLettuceSoup,10,7,chop_lettuce,chop,lettuce,1,1,0,0,21.0,21.0,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0175,0.0314
-ring,24,bad,0,ok,TomatoLettuceSalad|OnionLettuceSalad|OnionLettuceSoup,10,7,chop_tomato,chop,tomato,0,6,0,6,21.0,23.8,2.8,0,0,0,,OPTIMAL,OPTIMAL,0.0171,0.0143
-ring,24,bad,1,ok,TomatoLettuceSalad|OnionLettuceSalad|OnionLettuceSoup,10,7,chop_tomato,chop,tomato,0,6,0,5,21.0,23.0,2.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0142,0.0163
-ring,24,bad,2,ok,TomatoLettuceSalad|OnionLettuceSalad|OnionLettuceSoup,10,7,chop_tomato,chop,tomato,0,6,0,4,21.0,23.0,2.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0141,0.0231
-ring,24,random,0,ok,TomatoLettuceSalad|OnionLettuceSalad|OnionLettuceSoup,10,7,serve_lettuce_onionsoup,serve,lettuce-onion soup,1,8,0,8,21.0,29.8,8.8,3,3,4.2,1.7|2.1|0.4,OPTIMAL,OPTIMAL,0.0159,0.0098
-ring,24,random,1,ok,TomatoLettuceSalad|OnionLettuceSalad|OnionLettuceSoup,10,7,serve_lettuce_onionsoup,serve,lettuce-onion soup,1,8,0,7,21.0,27.8,6.8,4,4,5.9,1.7|2.1|0.4|1.7,OPTIMAL,OPTIMAL,0.0155,0.015
-ring,24,random,2,ok,TomatoLettuceSalad|OnionLettuceSalad|OnionLettuceSoup,10,7,serve_lettuce_onionsoup,serve,lettuce-onion soup,1,8,0,6,21.0,26.4,5.4,5,5,7.7,1.7|2.1|0.4|1.7|1.8,OPTIMAL,OPTIMAL,0.0152,0.019
-ring,25,good,0,ok,TomatoLettuceSalad|FullSalad|OnionLettuceSoup,11,7,chop_lettuce,chop,lettuce,1,1,0,1,21.0,21.4,0.4,0,0,0,,OPTIMAL,OPTIMAL,0.0278,0.0377
-ring,25,good,1,ok,TomatoLettuceSalad|FullSalad|OnionLettuceSoup,11,7,chop_lettuce,chop,lettuce,1,1,0,0,21.0,21.0,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0286,0.0408
-ring,25,good,2,ok,TomatoLettuceSalad|FullSalad|OnionLettuceSoup,11,7,chop_lettuce,chop,lettuce,1,1,0,0,21.0,21.0,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0278,0.0354
-ring,25,bad,0,ok,TomatoLettuceSalad|FullSalad|OnionLettuceSoup,11,7,chop_tomato,chop,tomato,0,3,0,3,21.0,23.8,2.8,0,0,0,,OPTIMAL,OPTIMAL,0.0249,0.0268
-ring,25,bad,1,ok,TomatoLettuceSalad|FullSalad|OnionLettuceSoup,11,7,chop_tomato,chop,tomato,0,3,0,2,21.0,22.8,1.8,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0272,0.0323
-ring,25,bad,2,ok,TomatoLettuceSalad|FullSalad|OnionLettuceSoup,11,7,chop_tomato,chop,tomato,0,3,0,1,21.0,22.8,1.8,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0274,0.0284
-ring,25,random,0,ok,TomatoLettuceSalad|FullSalad|OnionLettuceSoup,11,7,cook_lettuce_onionsoup,cook,lettuce-onion soup,1,2,0,2,21.0,21.0,0.0,2,2,3.8,1.7|2.1,OPTIMAL,OPTIMAL,0.0256,0.0197
-ring,25,random,1,ok,TomatoLettuceSalad|FullSalad|OnionLettuceSoup,11,7,cook_lettuce_onionsoup,cook,lettuce-onion soup,1,2,0,1,21.0,21.0,0.0,2,2,3.8,1.7|2.1,OPTIMAL,OPTIMAL,0.0316,0.0279
-ring,25,random,2,ok,TomatoLettuceSalad|FullSalad|OnionLettuceSoup,11,7,cook_lettuce_onionsoup,cook,lettuce-onion soup,1,2,0,0,21.0,21.0,0.0,2,2,3.8,1.7|2.1,OPTIMAL,OPTIMAL,0.0337,0.0356
-ring,26,good,0,ok,OnionLettuceSalad|OnionLettuceSalad|TomatoLettuceSoup,10,6,chop_lettuce,chop,lettuce,1,0,0,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0179,0.0318
-ring,26,good,1,ok,OnionLettuceSalad|OnionLettuceSalad|TomatoLettuceSoup,10,6,chop_lettuce,chop,lettuce,1,0,0,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0218,0.0262
-ring,26,good,2,ok,OnionLettuceSalad|OnionLettuceSalad|TomatoLettuceSoup,10,6,chop_lettuce,chop,lettuce,1,0,0,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0225,0.0232
-ring,26,bad,0,ok,OnionLettuceSalad|OnionLettuceSalad|TomatoLettuceSoup,10,6,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0183,0.0258
-ring,26,bad,1,ok,OnionLettuceSalad|OnionLettuceSalad|TomatoLettuceSoup,10,6,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0178,0.0223
-ring,26,bad,2,ok,OnionLettuceSalad|OnionLettuceSalad|TomatoLettuceSoup,10,6,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0173,0.0221
-ring,26,random,0,ok,OnionLettuceSalad|OnionLettuceSalad|TomatoLettuceSoup,10,6,chop_tomato,chop,tomato,1,1,0,1,21.2,22.0,0.8,0,0,0,,OPTIMAL,OPTIMAL,0.0172,0.0166
-ring,26,random,1,ok,OnionLettuceSalad|OnionLettuceSalad|TomatoLettuceSoup,10,6,chop_tomato,chop,tomato,1,1,0,0,21.2,21.2,0.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0159,0.0167
-ring,26,random,2,ok,OnionLettuceSalad|OnionLettuceSalad|TomatoLettuceSoup,10,6,chop_tomato,chop,tomato,1,1,0,0,21.2,21.2,0.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0178,0.0188
-ring,27,good,0,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_tomato,chop,tomato,1,1,0,1,20.6,21.8,1.2,0,0,0,,OPTIMAL,OPTIMAL,0.0167,0.0237
-ring,27,good,1,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_tomato,chop,tomato,1,1,0,0,20.6,20.6,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0156,0.0225
-ring,27,good,2,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_tomato,chop,tomato,1,1,0,0,20.6,20.6,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0156,0.0204
-ring,27,bad,0,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_lettuce,chop,lettuce,0,5,0,5,20.6,23.0,2.4,0,0,0,,OPTIMAL,OPTIMAL,0.0179,0.0127
-ring,27,bad,1,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_lettuce,chop,lettuce,0,5,0,4,20.6,23.0,2.4,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.024,0.0253
-ring,27,bad,2,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_lettuce,chop,lettuce,0,5,0,3,20.6,23.0,2.4,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0162,0.0196
-ring,27,random,0,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0174,0.0189
-ring,27,random,1,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0175,0.0183
-ring,27,random,2,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0145,0.0195
-ring,28,good,0,ok,FullSalad|OnionLettuceSalad|OnionLettuceSoup,11,7,chop_onion,chop,onion,1,0,0,0,21.0,21.0,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0362,0.0593
-ring,28,good,1,ok,FullSalad|OnionLettuceSalad|OnionLettuceSoup,11,7,chop_onion,chop,onion,1,0,0,0,21.0,21.0,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0316,0.0471
-ring,28,good,2,ok,FullSalad|OnionLettuceSalad|OnionLettuceSoup,11,7,chop_onion,chop,onion,1,0,0,0,21.0,21.0,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0304,0.0493
-ring,28,bad,0,ok,FullSalad|OnionLettuceSalad|OnionLettuceSoup,11,7,chop_tomato,chop,tomato,0,7,0,7,21.0,23.8,2.8,0,0,0,,OPTIMAL,OPTIMAL,0.0384,0.0216
-ring,28,bad,1,ok,FullSalad|OnionLettuceSalad|OnionLettuceSoup,11,7,chop_tomato,chop,tomato,0,7,0,6,21.0,23.0,2.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0326,0.0225
-ring,28,bad,2,ok,FullSalad|OnionLettuceSalad|OnionLettuceSoup,11,7,chop_tomato,chop,tomato,0,7,0,5,21.0,23.0,2.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0329,0.0317
-ring,28,random,0,ok,FullSalad|OnionLettuceSalad|OnionLettuceSoup,11,7,cook_lettuce_onionsoup,cook,lettuce-onion soup,1,2,0,2,21.0,21.0,0.0,2,2,3.8,1.7|2.1,OPTIMAL,OPTIMAL,0.033,0.0241
-ring,28,random,1,ok,FullSalad|OnionLettuceSalad|OnionLettuceSoup,11,7,cook_lettuce_onionsoup,cook,lettuce-onion soup,1,2,0,1,21.0,21.0,0.0,2,2,3.8,1.7|2.1,OPTIMAL,OPTIMAL,0.0283,0.0274
-ring,28,random,2,ok,FullSalad|OnionLettuceSalad|OnionLettuceSoup,11,7,cook_lettuce_onionsoup,cook,lettuce-onion soup,1,2,0,0,21.0,21.0,0.0,2,2,3.8,1.7|2.1,OPTIMAL,OPTIMAL,0.0333,0.0308
-ring,29,good,0,ok,FullSalad|OnionTomatoSalad|OnionTomatoSoup,11,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0229,0.0517
-ring,29,good,1,ok,FullSalad|OnionTomatoSalad|OnionTomatoSoup,11,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0199,0.0451
-ring,29,good,2,ok,FullSalad|OnionTomatoSalad|OnionTomatoSoup,11,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0182,0.0441
-ring,29,bad,0,ok,FullSalad|OnionTomatoSalad|OnionTomatoSoup,11,7,chop_lettuce,chop,lettuce,0,5,0,5,20.6,23.0,2.4,0,0,0,,OPTIMAL,OPTIMAL,0.0214,0.0151
-ring,29,bad,1,ok,FullSalad|OnionTomatoSalad|OnionTomatoSoup,11,7,chop_lettuce,chop,lettuce,0,5,0,4,20.6,23.0,2.4,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0222,0.0273
-ring,29,bad,2,ok,FullSalad|OnionTomatoSalad|OnionTomatoSoup,11,7,chop_lettuce,chop,lettuce,0,5,0,3,20.6,23.0,2.4,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0193,0.0246
-ring,29,random,0,ok,FullSalad|OnionTomatoSalad|OnionTomatoSoup,11,7,serve_salad_lettuce_onion_tomatosalad,serve_salad,lettuce-onion-tomato salad,0,8,0,8,20.6,28.8,8.2,3,3,4.9,1.8|1.7|1.4,OPTIMAL,OPTIMAL,0.0212,0.0145
-ring,29,random,1,ok,FullSalad|OnionTomatoSalad|OnionTomatoSoup,11,7,serve_salad_lettuce_onion_tomatosalad,serve_salad,lettuce-onion-tomato salad,0,8,0,7,20.6,28.4,7.8,4,4,6.6,1.4|1.7|1.7|1.8,OPTIMAL,OPTIMAL,0.0222,0.023
-ring,29,random,2,ok,FullSalad|OnionTomatoSalad|OnionTomatoSoup,11,7,serve_salad_lettuce_onion_tomatosalad,serve_salad,lettuce-onion-tomato salad,0,8,0,6,20.6,28.4,7.8,4,4,6.6,1.4|1.7|1.7|1.8,OPTIMAL,OPTIMAL,0.0203,0.0298
-ring,30,good,0,ok,OnionTomatoSalad|FullSalad|OnionLettuceSoup,11,7,chop_lettuce,chop,lettuce,1,1,0,1,21.0,21.4,0.4,0,0,0,,OPTIMAL,OPTIMAL,0.0231,0.0307
-ring,30,good,1,ok,OnionTomatoSalad|FullSalad|OnionLettuceSoup,11,7,chop_lettuce,chop,lettuce,1,1,0,0,21.0,21.0,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0218,0.0323
-ring,30,good,2,ok,OnionTomatoSalad|FullSalad|OnionLettuceSoup,11,7,chop_lettuce,chop,lettuce,1,1,0,0,21.0,21.0,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0202,0.0357
-ring,30,bad,0,ok,OnionTomatoSalad|FullSalad|OnionLettuceSoup,11,7,chop_tomato,chop,tomato,0,3,0,3,21.0,23.8,2.8,0,0,0,,OPTIMAL,OPTIMAL,0.0262,0.0319
-ring,30,bad,1,ok,OnionTomatoSalad|FullSalad|OnionLettuceSoup,11,7,chop_tomato,chop,tomato,0,3,0,2,21.0,22.8,1.8,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0186,0.0257
-ring,30,bad,2,ok,OnionTomatoSalad|FullSalad|OnionLettuceSoup,11,7,chop_tomato,chop,tomato,0,3,0,1,21.0,22.8,1.8,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0224,0.0299
-ring,30,random,0,ok,OnionTomatoSalad|FullSalad|OnionLettuceSoup,11,7,chop_lettuce,chop,lettuce,1,1,0,1,21.0,21.4,0.4,0,0,0,,OPTIMAL,OPTIMAL,0.0221,0.0313
-ring,30,random,1,ok,OnionTomatoSalad|FullSalad|OnionLettuceSoup,11,7,chop_lettuce,chop,lettuce,1,1,0,0,21.0,21.0,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0226,0.0327
-ring,30,random,2,ok,OnionTomatoSalad|FullSalad|OnionLettuceSoup,11,7,chop_lettuce,chop,lettuce,1,1,0,0,21.0,21.0,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0239,0.0326
-ring,32,good,0,ok,FullSalad|OnionLettuceSalad|OnionLettuceSoup,11,7,chop_onion,chop,onion,1,0,0,0,21.0,21.0,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0306,0.0439
-ring,32,good,1,ok,FullSalad|OnionLettuceSalad|OnionLettuceSoup,11,7,chop_onion,chop,onion,1,0,0,0,21.0,21.0,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0303,0.0454
-ring,32,good,2,ok,FullSalad|OnionLettuceSalad|OnionLettuceSoup,11,7,chop_onion,chop,onion,1,0,0,0,21.0,21.0,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0291,0.0482
-ring,32,bad,0,ok,FullSalad|OnionLettuceSalad|OnionLettuceSoup,11,7,chop_tomato,chop,tomato,0,7,0,7,21.0,23.8,2.8,0,0,0,,OPTIMAL,OPTIMAL,0.0329,0.0166
-ring,32,bad,1,ok,FullSalad|OnionLettuceSalad|OnionLettuceSoup,11,7,chop_tomato,chop,tomato,0,7,0,6,21.0,23.0,2.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0362,0.0221
-ring,32,bad,2,ok,FullSalad|OnionLettuceSalad|OnionLettuceSoup,11,7,chop_tomato,chop,tomato,0,7,0,5,21.0,23.0,2.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0366,0.027
-ring,32,random,0,ok,FullSalad|OnionLettuceSalad|OnionLettuceSoup,11,7,serve_lettuce_onionsoup,serve,lettuce-onion soup,1,9,0,9,21.0,31.6,10.6,3,3,4.2,1.7|2.1|0.4,OPTIMAL,OPTIMAL,0.0337,0.0151
-ring,32,random,1,ok,FullSalad|OnionLettuceSalad|OnionLettuceSoup,11,7,serve_lettuce_onionsoup,serve,lettuce-onion soup,1,9,0,8,21.0,29.6,8.6,4,4,5.9,1.7|2.1|0.4|1.7,OPTIMAL,OPTIMAL,0.0302,0.0196
-ring,32,random,2,ok,FullSalad|OnionLettuceSalad|OnionLettuceSoup,11,7,serve_lettuce_onionsoup,serve,lettuce-onion soup,1,9,0,7,21.0,27.8,6.8,5,5,7.3,1.7|2.1|0.4|1.7|1.4,OPTIMAL,OPTIMAL,0.0344,0.021
-ring,33,good,0,ok,OnionLettuceSalad|OnionLettuceSalad|OnionTomatoSoup,10,6,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0164,0.033
-ring,33,good,1,ok,OnionLettuceSalad|OnionLettuceSalad|OnionTomatoSoup,10,6,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0179,0.044
-ring,33,good,2,ok,OnionLettuceSalad|OnionLettuceSalad|OnionTomatoSoup,10,6,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0225,0.046
-ring,33,bad,0,ok,OnionLettuceSalad|OnionLettuceSalad|OnionTomatoSoup,10,6,chop_lettuce,chop,lettuce,0,3,0,3,20.6,22.8,2.2,0,0,0,,OPTIMAL,OPTIMAL,0.0156,0.0219
-ring,33,bad,1,ok,OnionLettuceSalad|OnionLettuceSalad|OnionTomatoSoup,10,6,chop_lettuce,chop,lettuce,0,3,0,2,20.6,22.8,2.2,0,0,0,,OPTIMAL,OPTIMAL,0.0164,0.0227
-ring,33,bad,2,ok,OnionLettuceSalad|OnionLettuceSalad|OnionTomatoSoup,10,6,chop_lettuce,chop,lettuce,0,3,0,1,20.6,22.8,2.2,0,0,0,,OPTIMAL,OPTIMAL,0.0177,0.0214
-ring,33,random,0,ok,OnionLettuceSalad|OnionLettuceSalad|OnionTomatoSoup,10,6,serve_salad_lettuce_onionsalad,serve_salad,lettuce-onion salad,0,4,0,4,20.6,25.7,5.1,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0176,0.0249
-ring,33,random,1,ok,OnionLettuceSalad|OnionLettuceSalad|OnionTomatoSoup,10,6,serve_salad_lettuce_onionsalad,serve_salad,lettuce-onion salad,0,4,0,3,20.6,25.0,4.4,2,2,3.4,1.7|1.7,OPTIMAL,OPTIMAL,0.0179,0.0204
-ring,33,random,2,ok,OnionLettuceSalad|OnionLettuceSalad|OnionTomatoSoup,10,6,serve_salad_lettuce_onionsalad,serve_salad,lettuce-onion salad,0,4,0,2,20.6,24.2,3.6,3,3,5.4,1.7|2.0|1.7,OPTIMAL,OPTIMAL,0.0218,0.0227
-ring,34,good,0,ok,OnionTomatoSalad|FullSalad|OnionLettuceSoup,11,7,chop_lettuce,chop,lettuce,1,1,0,1,21.0,21.4,0.4,0,0,0,,OPTIMAL,OPTIMAL,0.0198,0.0265
-ring,34,good,1,ok,OnionTomatoSalad|FullSalad|OnionLettuceSoup,11,7,chop_lettuce,chop,lettuce,1,1,0,0,21.0,21.0,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0201,0.035
-ring,34,good,2,ok,OnionTomatoSalad|FullSalad|OnionLettuceSoup,11,7,chop_lettuce,chop,lettuce,1,1,0,0,21.0,21.0,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0222,0.0361
-ring,34,bad,0,ok,OnionTomatoSalad|FullSalad|OnionLettuceSoup,11,7,chop_tomato,chop,tomato,0,3,0,3,21.0,23.8,2.8,0,0,0,,OPTIMAL,OPTIMAL,0.0206,0.0252
-ring,34,bad,1,ok,OnionTomatoSalad|FullSalad|OnionLettuceSoup,11,7,chop_tomato,chop,tomato,0,3,0,2,21.0,22.8,1.8,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0195,0.0246
-ring,34,bad,2,ok,OnionTomatoSalad|FullSalad|OnionLettuceSoup,11,7,chop_tomato,chop,tomato,0,3,0,1,21.0,22.8,1.8,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0219,0.0249
-ring,34,random,0,ok,OnionTomatoSalad|FullSalad|OnionLettuceSoup,11,7,serve_salad_lettuce_onion_tomatosalad,serve_salad,lettuce-onion-tomato salad,0,5,0,5,21.0,27.2,6.2,2,2,3.5,1.8|1.7,OPTIMAL,OPTIMAL,0.0205,0.0128
-ring,34,random,1,ok,OnionTomatoSalad|FullSalad|OnionLettuceSoup,11,7,serve_salad_lettuce_onion_tomatosalad,serve_salad,lettuce-onion-tomato salad,0,5,0,4,21.0,26.0,5.0,3,3,5.2,1.7|1.8|1.7,OPTIMAL,OPTIMAL,0.0316,0.0273
-ring,34,random,2,ok,OnionTomatoSalad|FullSalad|OnionLettuceSoup,11,7,serve_salad_lettuce_onion_tomatosalad,serve_salad,lettuce-onion-tomato salad,0,5,0,3,21.0,26.0,5.0,3,3,5.2,1.7|1.8|1.7,OPTIMAL,OPTIMAL,0.0259,0.0215
-ring,35,good,0,ok,OnionTomatoSalad|OnionLettuceSalad|OnionTomatoSoup,10,7,chop_tomato,chop,tomato,1,1,0,1,20.6,21.8,1.2,0,0,0,,OPTIMAL,OPTIMAL,0.0128,0.0201
-ring,35,good,1,ok,OnionTomatoSalad|OnionLettuceSalad|OnionTomatoSoup,10,7,chop_tomato,chop,tomato,1,1,0,0,20.6,20.6,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0125,0.023
-ring,35,good,2,ok,OnionTomatoSalad|OnionLettuceSalad|OnionTomatoSoup,10,7,chop_tomato,chop,tomato,1,1,0,0,20.6,20.6,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0134,0.0213
-ring,35,bad,0,ok,OnionTomatoSalad|OnionLettuceSalad|OnionTomatoSoup,10,7,chop_lettuce,chop,lettuce,0,3,0,3,20.6,22.8,2.2,0,0,0,,OPTIMAL,OPTIMAL,0.0148,0.013
-ring,35,bad,1,ok,OnionTomatoSalad|OnionLettuceSalad|OnionTomatoSoup,10,7,chop_lettuce,chop,lettuce,0,3,0,2,20.6,22.8,2.2,0,0,0,,OPTIMAL,OPTIMAL,0.0131,0.0165
-ring,35,bad,2,ok,OnionTomatoSalad|OnionLettuceSalad|OnionTomatoSoup,10,7,chop_lettuce,chop,lettuce,0,3,0,1,20.6,22.8,2.2,0,0,0,,OPTIMAL,OPTIMAL,0.0136,0.0179
-ring,35,random,0,ok,OnionTomatoSalad|OnionLettuceSalad|OnionTomatoSoup,10,7,chop_tomato,chop,tomato,1,1,0,1,20.6,21.8,1.2,0,0,0,,OPTIMAL,OPTIMAL,0.0151,0.025
-ring,35,random,1,ok,OnionTomatoSalad|OnionLettuceSalad|OnionTomatoSoup,10,7,chop_tomato,chop,tomato,1,1,0,0,20.6,20.6,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.014,0.0247
-ring,35,random,2,ok,OnionTomatoSalad|OnionLettuceSalad|OnionTomatoSoup,10,7,chop_tomato,chop,tomato,1,1,0,0,20.6,20.6,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0146,0.024
-ring,37,good,0,ok,FullSalad|FullSalad|OnionTomatoSoup,12,6,chop_tomato,chop,tomato,1,1,0,1,20.6,21.8,1.2,0,0,0,,OPTIMAL,OPTIMAL,0.0605,0.0567
-ring,37,good,1,ok,FullSalad|FullSalad|OnionTomatoSoup,12,6,chop_tomato,chop,tomato,1,1,0,0,20.6,20.6,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0692,0.1058
-ring,37,good,2,ok,FullSalad|FullSalad|OnionTomatoSoup,12,6,chop_tomato,chop,tomato,1,1,0,0,20.6,20.6,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0646,0.0748
-ring,37,bad,0,ok,FullSalad|FullSalad|OnionTomatoSoup,12,6,chop_lettuce,chop,lettuce,0,4,0,4,20.6,22.8,2.2,0,0,0,,OPTIMAL,OPTIMAL,0.0734,0.0463
-ring,37,bad,1,ok,FullSalad|FullSalad|OnionTomatoSoup,12,6,chop_lettuce,chop,lettuce,0,4,0,3,20.6,22.8,2.2,0,0,0,,OPTIMAL,OPTIMAL,0.0467,0.0386
-ring,37,bad,2,ok,FullSalad|FullSalad|OnionTomatoSoup,12,6,chop_lettuce,chop,lettuce,0,4,0,2,20.6,22.8,2.2,0,0,0,,OPTIMAL,OPTIMAL,0.0696,0.0492
-ring,37,random,0,ok,FullSalad|FullSalad|OnionTomatoSoup,12,6,chop_tomato,chop,tomato,1,1,0,1,20.6,21.8,1.2,0,0,0,,OPTIMAL,OPTIMAL,0.0497,0.0489
-ring,37,random,1,ok,FullSalad|FullSalad|OnionTomatoSoup,12,6,chop_tomato,chop,tomato,1,1,0,0,20.6,20.6,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0464,0.0831
-ring,37,random,2,ok,FullSalad|FullSalad|OnionTomatoSoup,12,6,chop_tomato,chop,tomato,1,1,0,0,20.6,20.6,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0542,0.0642
-ring,39,good,0,ok,OnionLettuceSalad|OnionTomatoSalad|TomatoLettuceSoup,10,7,chop_lettuce,chop,lettuce,1,0,0,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0153,0.0211
-ring,39,good,1,ok,OnionLettuceSalad|OnionTomatoSalad|TomatoLettuceSoup,10,7,chop_lettuce,chop,lettuce,1,0,0,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0155,0.0285
-ring,39,good,2,ok,OnionLettuceSalad|OnionTomatoSalad|TomatoLettuceSoup,10,7,chop_lettuce,chop,lettuce,1,0,0,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0152,0.022
-ring,39,bad,0,ok,OnionLettuceSalad|OnionTomatoSalad|TomatoLettuceSoup,10,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.015,0.0228
-ring,39,bad,1,ok,OnionLettuceSalad|OnionTomatoSalad|TomatoLettuceSoup,10,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0165,0.036
-ring,39,bad,2,ok,OnionLettuceSalad|OnionTomatoSalad|TomatoLettuceSoup,10,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0151,0.0303
-ring,39,random,0,ok,OnionLettuceSalad|OnionTomatoSalad|TomatoLettuceSoup,10,7,serve_lettuce_tomatosoup,serve,lettuce-tomato soup,1,8,0,8,21.2,30.0,8.8,3,3,4.5,2.1|2.0|0.4,OPTIMAL,OPTIMAL,0.024,0.0171
-ring,39,random,1,ok,OnionLettuceSalad|OnionTomatoSalad|TomatoLettuceSoup,10,7,serve_lettuce_tomatosoup,serve,lettuce-tomato soup,1,8,0,7,21.2,28.2,7.0,4,4,5.9,2.1|2.0|0.4|1.4,OPTIMAL,OPTIMAL,0.0221,0.0204
-ring,39,random,2,ok,OnionLettuceSalad|OnionTomatoSalad|TomatoLettuceSoup,10,7,serve_lettuce_tomatosoup,serve,lettuce-tomato soup,1,8,0,6,21.2,26.6,5.4,5,5,7.3,2.1|2.0|0.4|1.8|1.0,OPTIMAL,OPTIMAL,0.016,0.016
-ring,40,good,0,ok,TomatoLettuceSalad|FullSalad|OnionLettuceSoup,11,7,chop_lettuce,chop,lettuce,1,1,0,1,21.0,21.4,0.4,0,0,0,,OPTIMAL,OPTIMAL,0.025,0.0349
-ring,40,good,1,ok,TomatoLettuceSalad|FullSalad|OnionLettuceSoup,11,7,chop_lettuce,chop,lettuce,1,1,0,0,21.0,21.0,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0254,0.0367
-ring,40,good,2,ok,TomatoLettuceSalad|FullSalad|OnionLettuceSoup,11,7,chop_lettuce,chop,lettuce,1,1,0,0,21.0,21.0,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0246,0.046
-ring,40,bad,0,ok,TomatoLettuceSalad|FullSalad|OnionLettuceSoup,11,7,chop_tomato,chop,tomato,0,3,0,3,21.0,23.8,2.8,0,0,0,,OPTIMAL,OPTIMAL,0.0283,0.0259
-ring,40,bad,1,ok,TomatoLettuceSalad|FullSalad|OnionLettuceSoup,11,7,chop_tomato,chop,tomato,0,3,0,2,21.0,22.8,1.8,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0267,0.0252
-ring,40,bad,2,ok,TomatoLettuceSalad|FullSalad|OnionLettuceSoup,11,7,chop_tomato,chop,tomato,0,3,0,1,21.0,22.8,1.8,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0322,0.0265
-ring,40,random,0,ok,TomatoLettuceSalad|FullSalad|OnionLettuceSoup,11,7,chop_onion,chop,onion,1,0,0,0,21.0,21.0,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0286,0.0305
-ring,40,random,1,ok,TomatoLettuceSalad|FullSalad|OnionLettuceSoup,11,7,chop_onion,chop,onion,1,0,0,0,21.0,21.0,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0399,0.0373
-ring,40,random,2,ok,TomatoLettuceSalad|FullSalad|OnionLettuceSoup,11,7,chop_onion,chop,onion,1,0,0,0,21.0,21.0,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0262,0.0316
-ring,41,good,0,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionLettuceSoup,10,7,chop_lettuce,chop,lettuce,1,1,0,1,21.0,21.4,0.4,0,0,0,,OPTIMAL,OPTIMAL,0.0149,0.0225
-ring,41,good,1,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionLettuceSoup,10,7,chop_lettuce,chop,lettuce,1,1,0,0,21.0,21.0,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0227,0.0303
-ring,41,good,2,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionLettuceSoup,10,7,chop_lettuce,chop,lettuce,1,1,0,0,21.0,21.0,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.06,0.046
-ring,41,bad,0,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionLettuceSoup,10,7,chop_tomato,chop,tomato,0,3,0,3,21.0,23.8,2.8,0,0,0,,OPTIMAL,OPTIMAL,0.0237,0.0234
-ring,41,bad,1,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionLettuceSoup,10,7,chop_tomato,chop,tomato,0,3,0,2,21.0,22.8,1.8,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0162,0.0237
-ring,41,bad,2,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionLettuceSoup,10,7,chop_tomato,chop,tomato,0,3,0,1,21.0,22.8,1.8,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0172,0.0187
-ring,41,random,0,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionLettuceSoup,10,7,serve_lettuce_onionsoup,serve,lettuce-onion soup,1,8,0,8,21.0,30.0,9.0,3,3,4.2,1.7|2.1|0.4,OPTIMAL,OPTIMAL,0.0164,0.0111
-ring,41,random,1,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionLettuceSoup,10,7,serve_lettuce_onionsoup,serve,lettuce-onion soup,1,8,0,7,21.0,28.0,7.0,4,4,5.9,1.7|2.1|0.4|1.7,OPTIMAL,OPTIMAL,0.0152,0.0158
-ring,41,random,2,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionLettuceSoup,10,7,serve_lettuce_onionsoup,serve,lettuce-onion soup,1,8,0,6,21.0,26.4,5.4,5,5,7.7,1.7|2.1|0.4|1.7|1.8,OPTIMAL,OPTIMAL,0.0154,0.0194
+ring,0,good,0,ok,OnionTomatoSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_tomato,chop,tomato,1,1,0,1,21.2,22.0,0.8,0,0,0,,OPTIMAL,OPTIMAL,0.1197,0.0291
+ring,0,good,2,ok,OnionTomatoSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_tomato,chop,tomato,1,1,0,0,21.2,21.2,0.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0184,0.028
+ring,0,good,4,ok,OnionTomatoSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_tomato,chop,tomato,1,1,0,0,21.2,21.2,0.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0173,0.0297
+ring,0,bad,0,ok,OnionTomatoSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0198,0.0176
+ring,0,bad,2,ok,OnionTomatoSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0172,0.0179
+ring,0,bad,4,ok,OnionTomatoSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0164,0.017
+ring,0,random,0,ok,OnionTomatoSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_tomato,chop,tomato,1,1,0,1,21.2,22.0,0.8,0,0,0,,OPTIMAL,OPTIMAL,0.0174,0.0258
+ring,0,random,2,ok,OnionTomatoSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_tomato,chop,tomato,1,1,0,0,21.2,21.2,0.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0186,0.0286
+ring,0,random,4,ok,OnionTomatoSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_tomato,chop,tomato,1,1,0,0,21.2,21.2,0.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0207,0.0297
+ring,1,good,0,ok,OnionLettuceSalad|FullSalad|OnionTomatoSoup,11,7,chop_tomato,chop,tomato,1,1,0,1,20.6,21.8,1.2,0,0,0,,OPTIMAL,OPTIMAL,0.0291,0.0343
+ring,1,good,2,ok,OnionLettuceSalad|FullSalad|OnionTomatoSoup,11,7,chop_tomato,chop,tomato,1,1,0,0,20.6,20.6,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0258,0.0416
+ring,1,good,4,ok,OnionLettuceSalad|FullSalad|OnionTomatoSoup,11,7,chop_tomato,chop,tomato,1,1,0,0,20.6,20.6,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0243,0.0353
+ring,1,bad,0,ok,OnionLettuceSalad|FullSalad|OnionTomatoSoup,11,7,chop_lettuce,chop,lettuce,0,4,0,4,20.6,22.8,2.2,0,0,0,,OPTIMAL,OPTIMAL,0.0246,0.0307
+ring,1,bad,2,ok,OnionLettuceSalad|FullSalad|OnionTomatoSoup,11,7,chop_lettuce,chop,lettuce,0,4,0,2,20.6,22.8,2.2,0,0,0,,OPTIMAL,OPTIMAL,0.0258,0.0306
+ring,1,bad,4,ok,OnionLettuceSalad|FullSalad|OnionTomatoSoup,11,7,chop_lettuce,chop,lettuce,0,4,0,0,20.6,20.6,0.0,4,4,5.9,1.7|2.0|0.4|1.8,OPTIMAL,OPTIMAL,0.0231,0.0308
+ring,1,random,0,ok,OnionLettuceSalad|FullSalad|OnionTomatoSoup,11,7,serve_onion_tomatosoup,serve,onion-tomato soup,1,9,0,9,20.6,31.2,10.6,3,3,4.1,1.7|2.0|0.4,OPTIMAL,OPTIMAL,0.0223,0.0137
+ring,1,random,2,ok,OnionLettuceSalad|FullSalad|OnionTomatoSoup,11,7,serve_onion_tomatosoup,serve,onion-tomato soup,1,9,0,7,20.6,27.4,6.8,5,5,7.3,1.7|2.0|0.4|1.8|1.4,OPTIMAL,OPTIMAL,0.0246,0.0274
+ring,1,random,4,ok,OnionLettuceSalad|FullSalad|OnionTomatoSoup,11,7,serve_onion_tomatosoup,serve,onion-tomato soup,1,9,0,5,20.6,23.8,3.2,7,7,10.4,1.7|2.0|0.4|1.8|1.4|1.3|1.8,OPTIMAL,OPTIMAL,0.0208,0.0312
+ring,2,good,0,ok,OnionTomatoSalad|OnionLettuceSalad|OnionTomatoSoup,10,7,chop_tomato,chop,tomato,1,1,0,1,20.6,21.8,1.2,0,0,0,,OPTIMAL,OPTIMAL,0.0161,0.0216
+ring,2,good,2,ok,OnionTomatoSalad|OnionLettuceSalad|OnionTomatoSoup,10,7,chop_tomato,chop,tomato,1,1,0,0,20.6,20.6,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0146,0.0298
+ring,2,good,4,ok,OnionTomatoSalad|OnionLettuceSalad|OnionTomatoSoup,10,7,chop_tomato,chop,tomato,1,1,0,0,20.6,20.6,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0184,0.0243
+ring,2,bad,0,ok,OnionTomatoSalad|OnionLettuceSalad|OnionTomatoSoup,10,7,chop_lettuce,chop,lettuce,0,3,0,3,20.6,22.8,2.2,0,0,0,,OPTIMAL,OPTIMAL,0.016,0.0161
+ring,2,bad,2,ok,OnionTomatoSalad|OnionLettuceSalad|OnionTomatoSoup,10,7,chop_lettuce,chop,lettuce,0,3,0,1,20.6,22.8,2.2,0,0,0,,OPTIMAL,OPTIMAL,0.0154,0.0195
+ring,2,bad,4,ok,OnionTomatoSalad|OnionLettuceSalad|OnionTomatoSoup,10,7,chop_lettuce,chop,lettuce,0,3,0,0,20.6,20.6,0.0,3,3,4.1,1.7|2.0|0.4,OPTIMAL,OPTIMAL,0.0151,0.0225
+ring,2,random,0,ok,OnionTomatoSalad|OnionLettuceSalad|OnionTomatoSoup,10,7,chop_lettuce,chop,lettuce,0,3,0,3,20.6,22.8,2.2,0,0,0,,OPTIMAL,OPTIMAL,0.0144,0.0128
+ring,2,random,2,ok,OnionTomatoSalad|OnionLettuceSalad|OnionTomatoSoup,10,7,chop_lettuce,chop,lettuce,0,3,0,1,20.6,22.8,2.2,0,0,0,,OPTIMAL,OPTIMAL,0.0162,0.0205
+ring,2,random,4,ok,OnionTomatoSalad|OnionLettuceSalad|OnionTomatoSoup,10,7,chop_lettuce,chop,lettuce,0,3,0,0,20.6,20.6,0.0,3,3,4.1,1.7|2.0|0.4,OPTIMAL,OPTIMAL,0.0182,0.0194
+ring,3,good,0,ok,OnionLettuceSalad|OnionLettuceSalad|OnionTomatoSoup,10,6,chop_tomato,chop,tomato,1,1,0,1,20.6,21.8,1.2,0,0,0,,OPTIMAL,OPTIMAL,0.0202,0.0171
+ring,3,good,2,ok,OnionLettuceSalad|OnionLettuceSalad|OnionTomatoSoup,10,6,chop_tomato,chop,tomato,1,1,0,0,20.6,20.6,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0191,0.0252
+ring,3,good,4,ok,OnionLettuceSalad|OnionLettuceSalad|OnionTomatoSoup,10,6,chop_tomato,chop,tomato,1,1,0,0,20.6,20.6,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0172,0.0221
+ring,3,bad,0,ok,OnionLettuceSalad|OnionLettuceSalad|OnionTomatoSoup,10,6,chop_lettuce,chop,lettuce,0,3,0,3,20.6,22.8,2.2,0,0,0,,OPTIMAL,OPTIMAL,0.0131,0.0266
+ring,3,bad,2,ok,OnionLettuceSalad|OnionLettuceSalad|OnionTomatoSoup,10,6,chop_lettuce,chop,lettuce,0,3,0,1,20.6,22.8,2.2,0,0,0,,OPTIMAL,OPTIMAL,0.0188,0.0221
+ring,3,bad,4,ok,OnionLettuceSalad|OnionLettuceSalad|OnionTomatoSoup,10,6,chop_lettuce,chop,lettuce,0,3,0,0,20.6,20.6,0.0,3,3,4.1,1.7|2.0|0.4,OPTIMAL,OPTIMAL,0.0227,0.0353
+ring,3,random,0,ok,OnionLettuceSalad|OnionLettuceSalad|OnionTomatoSoup,10,6,chop_tomato,chop,tomato,1,1,0,1,20.6,21.8,1.2,0,0,0,,OPTIMAL,OPTIMAL,0.018,0.0138
+ring,3,random,2,ok,OnionLettuceSalad|OnionLettuceSalad|OnionTomatoSoup,10,6,chop_tomato,chop,tomato,1,1,0,0,20.6,20.6,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0198,0.0259
+ring,3,random,4,ok,OnionLettuceSalad|OnionLettuceSalad|OnionTomatoSoup,10,6,chop_tomato,chop,tomato,1,1,0,0,20.6,20.6,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0178,0.0198
+ring,4,good,0,ok,TomatoLettuceSalad|TomatoLettuceSalad|OnionLettuceSoup,10,6,chop_lettuce,chop,lettuce,1,0,0,0,20.5,20.5,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0224,0.0347
+ring,4,good,2,ok,TomatoLettuceSalad|TomatoLettuceSalad|OnionLettuceSoup,10,6,chop_lettuce,chop,lettuce,1,0,0,0,20.5,20.5,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0266,0.0399
+ring,4,good,4,ok,TomatoLettuceSalad|TomatoLettuceSalad|OnionLettuceSoup,10,6,chop_lettuce,chop,lettuce,1,0,0,0,20.5,20.5,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0187,0.0371
+ring,4,bad,0,ok,TomatoLettuceSalad|TomatoLettuceSalad|OnionLettuceSoup,10,6,chop_tomato,chop,tomato,0,2,0,2,20.5,21.6,1.1,0,0,0,,OPTIMAL,OPTIMAL,0.0191,0.0214
+ring,4,bad,2,ok,TomatoLettuceSalad|TomatoLettuceSalad|OnionLettuceSoup,10,6,chop_tomato,chop,tomato,0,2,0,0,20.5,20.5,0.0,2,2,2.5,2.1|0.4,OPTIMAL,OPTIMAL,0.0195,0.0307
+ring,4,bad,4,ok,TomatoLettuceSalad|TomatoLettuceSalad|OnionLettuceSoup,10,6,chop_tomato,chop,tomato,0,2,0,0,20.5,20.5,0.0,2,2,2.5,2.1|0.4,OPTIMAL,OPTIMAL,0.0185,0.0256
+ring,4,random,0,ok,TomatoLettuceSalad|TomatoLettuceSalad|OnionLettuceSoup,10,6,cook_lettuce_onionsoup,cook,lettuce-onion soup,1,1,0,1,20.5,20.5,0.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0205,0.0206
+ring,4,random,2,ok,TomatoLettuceSalad|TomatoLettuceSalad|OnionLettuceSoup,10,6,cook_lettuce_onionsoup,cook,lettuce-onion soup,1,1,0,0,20.5,20.5,0.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0161,0.0199
+ring,4,random,4,ok,TomatoLettuceSalad|TomatoLettuceSalad|OnionLettuceSoup,10,6,cook_lettuce_onionsoup,cook,lettuce-onion soup,1,1,0,0,20.5,20.5,0.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0189,0.023
+ring,5,good,0,ok,OnionLettuceSalad|FullSalad|OnionTomatoSoup,11,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0252,0.0494
+ring,5,good,2,ok,OnionLettuceSalad|FullSalad|OnionTomatoSoup,11,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0239,0.0496
+ring,5,good,4,ok,OnionLettuceSalad|FullSalad|OnionTomatoSoup,11,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0211,0.0534
+ring,5,bad,0,ok,OnionLettuceSalad|FullSalad|OnionTomatoSoup,11,7,chop_lettuce,chop,lettuce,0,4,0,4,20.6,22.8,2.2,0,0,0,,OPTIMAL,OPTIMAL,0.0224,0.0245
+ring,5,bad,2,ok,OnionLettuceSalad|FullSalad|OnionTomatoSoup,11,7,chop_lettuce,chop,lettuce,0,4,0,2,20.6,22.8,2.2,0,0,0,,OPTIMAL,OPTIMAL,0.0207,0.0299
+ring,5,bad,4,ok,OnionLettuceSalad|FullSalad|OnionTomatoSoup,11,7,chop_lettuce,chop,lettuce,0,4,0,0,20.6,20.6,0.0,4,4,5.9,1.7|2.0|0.4|1.8,OPTIMAL,OPTIMAL,0.0206,0.0279
+ring,5,random,0,ok,OnionLettuceSalad|FullSalad|OnionTomatoSoup,11,7,serve_salad_lettuce_onionsalad,serve_salad,lettuce-onion salad,0,8,0,8,20.6,26.8,6.2,2,2,3.2,1.8|1.4,OPTIMAL,OPTIMAL,0.0265,0.017
+ring,5,random,2,ok,OnionLettuceSalad|FullSalad|OnionTomatoSoup,11,7,serve_salad_lettuce_onionsalad,serve_salad,lettuce-onion salad,0,8,0,6,20.6,26.4,5.8,4,4,6.9,1.7|2.0|1.8|1.4,OPTIMAL,OPTIMAL,0.0278,0.0278
+ring,5,random,4,ok,OnionLettuceSalad|FullSalad|OnionTomatoSoup,11,7,serve_salad_lettuce_onionsalad,serve_salad,lettuce-onion salad,0,8,0,4,20.6,20.6,0.0,6,6,9.1,1.7|2.0|0.4|1.8|1.8|1.4,OPTIMAL,OPTIMAL,0.0294,0.0316
+ring,6,good,0,ok,FullSalad|TomatoLettuceSalad|OnionTomatoSoup,11,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0212,0.03
+ring,6,good,2,ok,FullSalad|TomatoLettuceSalad|OnionTomatoSoup,11,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0155,0.021
+ring,6,good,4,ok,FullSalad|TomatoLettuceSalad|OnionTomatoSoup,11,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0247,0.025
+ring,6,bad,0,ok,FullSalad|TomatoLettuceSalad|OnionTomatoSoup,11,7,chop_lettuce,chop,lettuce,0,4,0,4,20.6,22.8,2.2,0,0,0,,OPTIMAL,OPTIMAL,0.0227,0.0274
+ring,6,bad,2,ok,FullSalad|TomatoLettuceSalad|OnionTomatoSoup,11,7,chop_lettuce,chop,lettuce,0,4,0,2,20.6,22.8,2.2,0,0,0,,OPTIMAL,OPTIMAL,0.0205,0.0312
+ring,6,bad,4,ok,FullSalad|TomatoLettuceSalad|OnionTomatoSoup,11,7,chop_lettuce,chop,lettuce,0,4,0,0,20.6,20.6,0.0,4,4,5.9,1.7|2.0|0.4|1.8,OPTIMAL,OPTIMAL,0.0228,0.0329
+ring,6,random,0,ok,FullSalad|TomatoLettuceSalad|OnionTomatoSoup,11,7,serve_salad_lettuce_tomatosalad,serve_salad,lettuce-tomato salad,0,5,0,5,20.6,27.2,6.6,2,2,3.5,1.8|1.7,OPTIMAL,OPTIMAL,0.018,0.0108
+ring,6,random,2,ok,FullSalad|TomatoLettuceSalad|OnionTomatoSoup,11,7,serve_salad_lettuce_tomatosalad,serve_salad,lettuce-tomato salad,0,5,0,3,20.6,26.0,5.4,3,3,5.2,1.7|1.8|1.7,OPTIMAL,OPTIMAL,0.0235,0.024
+ring,6,random,4,ok,FullSalad|TomatoLettuceSalad|OnionTomatoSoup,11,7,serve_salad_lettuce_tomatosalad,serve_salad,lettuce-tomato salad,0,5,0,1,20.6,20.6,0.0,5,5,7.6,1.7|2.0|0.4|1.8|1.7,OPTIMAL,OPTIMAL,0.0238,0.0277
+ring,7,good,0,ok,OnionTomatoSalad|OnionLettuceSalad|TomatoLettuceSoup,10,7,chop_lettuce,chop,lettuce,1,0,0,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.016,0.0238
+ring,7,good,2,ok,OnionTomatoSalad|OnionLettuceSalad|TomatoLettuceSoup,10,7,chop_lettuce,chop,lettuce,1,0,0,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.014,0.0238
+ring,7,good,4,ok,OnionTomatoSalad|OnionLettuceSalad|TomatoLettuceSoup,10,7,chop_lettuce,chop,lettuce,1,0,0,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0161,0.0265
+ring,7,bad,0,ok,OnionTomatoSalad|OnionLettuceSalad|TomatoLettuceSoup,10,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0145,0.0212
+ring,7,bad,2,ok,OnionTomatoSalad|OnionLettuceSalad|TomatoLettuceSoup,10,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0179,0.0256
+ring,7,bad,4,ok,OnionTomatoSalad|OnionLettuceSalad|TomatoLettuceSoup,10,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0125,0.0187
+ring,7,random,0,ok,OnionTomatoSalad|OnionLettuceSalad|TomatoLettuceSoup,10,7,chop_tomato,chop,tomato,1,1,0,1,21.2,22.0,0.8,0,0,0,,OPTIMAL,OPTIMAL,0.0149,0.0186
+ring,7,random,2,ok,OnionTomatoSalad|OnionLettuceSalad|TomatoLettuceSoup,10,7,chop_tomato,chop,tomato,1,1,0,0,21.2,21.2,0.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0149,0.0255
+ring,7,random,4,ok,OnionTomatoSalad|OnionLettuceSalad|TomatoLettuceSoup,10,7,chop_tomato,chop,tomato,1,1,0,0,21.2,21.2,0.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0135,0.0238
+ring,8,good,0,ok,OnionLettuceSalad|OnionTomatoSalad|TomatoLettuceSoup,10,7,chop_tomato,chop,tomato,1,1,0,1,21.2,22.0,0.8,0,0,0,,OPTIMAL,OPTIMAL,0.0175,0.0202
+ring,8,good,2,ok,OnionLettuceSalad|OnionTomatoSalad|TomatoLettuceSoup,10,7,chop_tomato,chop,tomato,1,1,0,0,21.2,21.2,0.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0166,0.0233
+ring,8,good,4,ok,OnionLettuceSalad|OnionTomatoSalad|TomatoLettuceSoup,10,7,chop_tomato,chop,tomato,1,1,0,0,21.2,21.2,0.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0205,0.029
+ring,8,bad,0,ok,OnionLettuceSalad|OnionTomatoSalad|TomatoLettuceSoup,10,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0244,0.0354
+ring,8,bad,2,ok,OnionLettuceSalad|OnionTomatoSalad|TomatoLettuceSoup,10,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0166,0.0302
+ring,8,bad,4,ok,OnionLettuceSalad|OnionTomatoSalad|TomatoLettuceSoup,10,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0248,0.0317
+ring,8,random,0,ok,OnionLettuceSalad|OnionTomatoSalad|TomatoLettuceSoup,10,7,cook_lettuce_tomatosoup,cook,lettuce-tomato soup,1,2,0,2,21.2,21.2,0.0,2,2,4.1,2.1|2.0,OPTIMAL,OPTIMAL,0.0199,0.0156
+ring,8,random,2,ok,OnionLettuceSalad|OnionTomatoSalad|TomatoLettuceSoup,10,7,cook_lettuce_tomatosoup,cook,lettuce-tomato soup,1,2,0,0,21.2,21.2,0.0,2,2,4.1,2.1|2.0,OPTIMAL,OPTIMAL,0.0307,0.0374
+ring,8,random,4,ok,OnionLettuceSalad|OnionTomatoSalad|TomatoLettuceSoup,10,7,cook_lettuce_tomatosoup,cook,lettuce-tomato soup,1,2,0,0,21.2,21.2,0.0,2,2,4.1,2.1|2.0,OPTIMAL,OPTIMAL,0.0159,0.0252
+ring,9,good,0,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0176,0.0223
+ring,9,good,2,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0164,0.0247
+ring,9,good,4,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0162,0.0203
+ring,9,bad,0,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_lettuce,chop,lettuce,0,5,0,5,20.6,23.0,2.4,0,0,0,,OPTIMAL,OPTIMAL,0.0207,0.0157
+ring,9,bad,2,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_lettuce,chop,lettuce,0,5,0,3,20.6,23.0,2.4,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0176,0.0212
+ring,9,bad,4,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_lettuce,chop,lettuce,0,5,0,1,20.6,20.6,0.0,3,3,4.1,1.7|2.0|0.4,OPTIMAL,OPTIMAL,0.0179,0.024
+ring,9,random,0,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0176,0.02
+ring,9,random,2,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0194,0.022
+ring,9,random,4,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0182,0.0293
+ring,10,good,0,ok,FullSalad|TomatoLettuceSalad|TomatoLettuceSoup,11,7,chop_tomato,chop,tomato,1,1,0,1,21.2,22.0,0.8,0,0,0,,OPTIMAL,OPTIMAL,0.0202,0.033
+ring,10,good,2,ok,FullSalad|TomatoLettuceSalad|TomatoLettuceSoup,11,7,chop_tomato,chop,tomato,1,1,0,0,21.2,21.2,0.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0215,0.0354
+ring,10,good,4,ok,FullSalad|TomatoLettuceSalad|TomatoLettuceSoup,11,7,chop_tomato,chop,tomato,1,1,0,0,21.2,21.2,0.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0267,0.0387
+ring,10,bad,0,ok,FullSalad|TomatoLettuceSalad|TomatoLettuceSoup,11,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0288,0.0332
+ring,10,bad,2,ok,FullSalad|TomatoLettuceSalad|TomatoLettuceSoup,11,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.026,0.0287
+ring,10,bad,4,ok,FullSalad|TomatoLettuceSalad|TomatoLettuceSoup,11,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0215,0.0262
+ring,10,random,0,ok,FullSalad|TomatoLettuceSalad|TomatoLettuceSoup,11,7,chop_tomato,chop,tomato,1,1,0,1,21.2,22.0,0.8,0,0,0,,OPTIMAL,OPTIMAL,0.0213,0.0336
+ring,10,random,2,ok,FullSalad|TomatoLettuceSalad|TomatoLettuceSoup,11,7,chop_tomato,chop,tomato,1,1,0,0,21.2,21.2,0.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0214,0.0329
+ring,10,random,4,ok,FullSalad|TomatoLettuceSalad|TomatoLettuceSoup,11,7,chop_tomato,chop,tomato,1,1,0,0,21.2,21.2,0.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0226,0.033
+ring,11,good,0,ok,OnionLettuceSalad|OnionLettuceSalad|TomatoLettuceSoup,10,6,chop_lettuce,chop,lettuce,1,0,0,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0203,0.0306
+ring,11,good,2,ok,OnionLettuceSalad|OnionLettuceSalad|TomatoLettuceSoup,10,6,chop_lettuce,chop,lettuce,1,0,0,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0241,0.0279
+ring,11,good,4,ok,OnionLettuceSalad|OnionLettuceSalad|TomatoLettuceSoup,10,6,chop_lettuce,chop,lettuce,1,0,0,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0165,0.0256
+ring,11,bad,0,ok,OnionLettuceSalad|OnionLettuceSalad|TomatoLettuceSoup,10,6,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0159,0.0232
+ring,11,bad,2,ok,OnionLettuceSalad|OnionLettuceSalad|TomatoLettuceSoup,10,6,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0175,0.0241
+ring,11,bad,4,ok,OnionLettuceSalad|OnionLettuceSalad|TomatoLettuceSoup,10,6,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0209,0.0289
+ring,11,random,0,ok,OnionLettuceSalad|OnionLettuceSalad|TomatoLettuceSoup,10,6,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0186,0.0273
+ring,11,random,2,ok,OnionLettuceSalad|OnionLettuceSalad|TomatoLettuceSoup,10,6,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0229,0.0363
+ring,11,random,4,ok,OnionLettuceSalad|OnionLettuceSalad|TomatoLettuceSoup,10,6,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0225,0.0258
+ring,12,good,0,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0159,0.0217
+ring,12,good,2,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0201,0.0187
+ring,12,good,4,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.017,0.0218
+ring,12,bad,0,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_lettuce,chop,lettuce,0,5,0,5,20.6,23.0,2.4,0,0,0,,OPTIMAL,OPTIMAL,0.0186,0.0131
+ring,12,bad,2,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_lettuce,chop,lettuce,0,5,0,3,20.6,23.0,2.4,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0158,0.0176
+ring,12,bad,4,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_lettuce,chop,lettuce,0,5,0,1,20.6,20.6,0.0,3,3,4.1,1.7|2.0|0.4,OPTIMAL,OPTIMAL,0.0162,0.0219
+ring,12,random,0,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,serve_salad_lettuce_tomatosalad,serve_salad,lettuce-tomato salad,0,7,0,7,20.6,27.0,6.4,2,2,3.5,1.8|1.7,OPTIMAL,OPTIMAL,0.017,0.0107
+ring,12,random,2,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,serve_salad_lettuce_tomatosalad,serve_salad,lettuce-tomato salad,0,7,0,5,20.6,26.6,6.0,4,4,7.2,1.7|1.7|2.0|1.8,OPTIMAL,OPTIMAL,0.0181,0.0205
+ring,12,random,4,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,serve_salad_lettuce_tomatosalad,serve_salad,lettuce-tomato salad,0,7,0,3,20.6,20.6,0.0,5,5,7.6,1.7|2.0|0.4|1.8|1.7,OPTIMAL,OPTIMAL,0.0181,0.0194
+ring,13,good,0,ok,OnionTomatoSalad|OnionTomatoSalad|OnionLettuceSoup,10,6,chop_onion,chop,onion,1,0,0,0,21.0,21.0,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0139,0.0285
+ring,13,good,2,ok,OnionTomatoSalad|OnionTomatoSalad|OnionLettuceSoup,10,6,chop_onion,chop,onion,1,0,0,0,21.0,21.0,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0142,0.0221
+ring,13,good,4,ok,OnionTomatoSalad|OnionTomatoSalad|OnionLettuceSoup,10,6,chop_onion,chop,onion,1,0,0,0,21.0,21.0,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.014,0.025
+ring,13,bad,0,ok,OnionTomatoSalad|OnionTomatoSalad|OnionLettuceSoup,10,6,chop_tomato,chop,tomato,0,3,0,3,21.0,23.8,2.8,0,0,0,,OPTIMAL,OPTIMAL,0.016,0.0253
+ring,13,bad,2,ok,OnionTomatoSalad|OnionTomatoSalad|OnionLettuceSoup,10,6,chop_tomato,chop,tomato,0,3,0,1,21.0,22.8,1.8,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.02,0.0309
+ring,13,bad,4,ok,OnionTomatoSalad|OnionTomatoSalad|OnionLettuceSoup,10,6,chop_tomato,chop,tomato,0,3,0,0,21.0,21.0,0.0,3,3,4.2,1.7|2.1|0.4,OPTIMAL,OPTIMAL,0.0129,0.0275
+ring,13,random,0,ok,OnionTomatoSalad|OnionTomatoSalad|OnionLettuceSoup,10,6,serve_salad_onion_tomatosalad,serve_salad,onion-tomato salad,0,4,0,4,21.0,25.2,4.2,1,1,1.8,1.8,OPTIMAL,OPTIMAL,0.0129,0.0189
+ring,13,random,2,ok,OnionTomatoSalad|OnionTomatoSalad|OnionLettuceSoup,10,6,serve_salad_onion_tomatosalad,serve_salad,onion-tomato salad,0,4,0,2,21.0,24.0,3.0,2,2,3.5,1.7|1.8,OPTIMAL,OPTIMAL,0.017,0.017
+ring,13,random,4,ok,OnionTomatoSalad|OnionTomatoSalad|OnionLettuceSoup,10,6,serve_salad_onion_tomatosalad,serve_salad,onion-tomato salad,0,4,0,0,21.0,21.0,0.0,4,4,6.0,1.7|2.1|0.4|1.8,OPTIMAL,OPTIMAL,0.0174,0.0247
+ring,14,good,0,ok,FullSalad|OnionLettuceSalad|OnionTomatoSoup,11,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0284,0.0469
+ring,14,good,2,ok,FullSalad|OnionLettuceSalad|OnionTomatoSoup,11,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0281,0.0422
+ring,14,good,4,ok,FullSalad|OnionLettuceSalad|OnionTomatoSoup,11,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0267,0.0417
+ring,14,bad,0,ok,FullSalad|OnionLettuceSalad|OnionTomatoSoup,11,7,chop_lettuce,chop,lettuce,0,3,0,3,20.6,22.8,2.2,0,0,0,,OPTIMAL,OPTIMAL,0.0269,0.0293
+ring,14,bad,2,ok,FullSalad|OnionLettuceSalad|OnionTomatoSoup,11,7,chop_lettuce,chop,lettuce,0,3,0,1,20.6,22.8,2.2,0,0,0,,OPTIMAL,OPTIMAL,0.0299,0.036
+ring,14,bad,4,ok,FullSalad|OnionLettuceSalad|OnionTomatoSoup,11,7,chop_lettuce,chop,lettuce,0,3,0,0,20.6,20.6,0.0,3,3,4.1,1.7|2.0|0.4,OPTIMAL,OPTIMAL,0.0254,0.0344
+ring,14,random,0,ok,FullSalad|OnionLettuceSalad|OnionTomatoSoup,11,7,serve_onion_tomatosoup,serve,onion-tomato soup,1,9,0,9,20.6,31.2,10.6,3,3,4.1,1.7|2.0|0.4,OPTIMAL,OPTIMAL,0.0254,0.0167
+ring,14,random,2,ok,FullSalad|OnionLettuceSalad|OnionTomatoSoup,11,7,serve_onion_tomatosoup,serve,onion-tomato soup,1,9,0,7,20.6,27.4,6.8,5,5,7.2,1.7|2.0|0.4|1.7|1.4,OPTIMAL,OPTIMAL,0.0268,0.0249
+ring,14,random,4,ok,FullSalad|OnionLettuceSalad|OnionTomatoSoup,11,7,serve_onion_tomatosoup,serve,onion-tomato soup,1,9,0,5,20.6,23.8,3.2,7,7,10.3,1.7|2.0|0.4|1.8|1.4|1.7|1.3,OPTIMAL,OPTIMAL,0.0291,0.0278
+ring,15,good,0,ok,FullSalad|OnionLettuceSalad|OnionTomatoSoup,11,7,chop_tomato,chop,tomato,1,1,0,1,20.6,21.8,1.2,0,0,0,,OPTIMAL,OPTIMAL,0.0384,0.0386
+ring,15,good,2,ok,FullSalad|OnionLettuceSalad|OnionTomatoSoup,11,7,chop_tomato,chop,tomato,1,1,0,0,20.6,20.6,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0297,0.04
+ring,15,good,4,ok,FullSalad|OnionLettuceSalad|OnionTomatoSoup,11,7,chop_tomato,chop,tomato,1,1,0,0,20.6,20.6,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0334,0.0427
+ring,15,bad,0,ok,FullSalad|OnionLettuceSalad|OnionTomatoSoup,11,7,chop_lettuce,chop,lettuce,0,3,0,3,20.6,22.8,2.2,0,0,0,,OPTIMAL,OPTIMAL,0.0253,0.0299
+ring,15,bad,2,ok,FullSalad|OnionLettuceSalad|OnionTomatoSoup,11,7,chop_lettuce,chop,lettuce,0,3,0,1,20.6,22.8,2.2,0,0,0,,OPTIMAL,OPTIMAL,0.0301,0.032
+ring,15,bad,4,ok,FullSalad|OnionLettuceSalad|OnionTomatoSoup,11,7,chop_lettuce,chop,lettuce,0,3,0,0,20.6,20.6,0.0,3,3,4.1,1.7|2.0|0.4,OPTIMAL,OPTIMAL,0.0282,0.0353
+ring,15,random,0,ok,FullSalad|OnionLettuceSalad|OnionTomatoSoup,11,7,chop_lettuce,chop,lettuce,0,3,0,3,20.6,22.8,2.2,0,0,0,,OPTIMAL,OPTIMAL,0.0241,0.0301
+ring,15,random,2,ok,FullSalad|OnionLettuceSalad|OnionTomatoSoup,11,7,chop_lettuce,chop,lettuce,0,3,0,1,20.6,22.8,2.2,0,0,0,,OPTIMAL,OPTIMAL,0.0325,0.0322
+ring,15,random,4,ok,FullSalad|OnionLettuceSalad|OnionTomatoSoup,11,7,chop_lettuce,chop,lettuce,0,3,0,0,20.6,20.6,0.0,3,3,4.1,1.7|2.0|0.4,OPTIMAL,OPTIMAL,0.0262,0.0283
+ring,16,good,0,ok,OnionTomatoSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_tomato,chop,tomato,1,1,0,1,21.2,22.0,0.8,0,0,0,,OPTIMAL,OPTIMAL,0.0153,0.0236
+ring,16,good,2,ok,OnionTomatoSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_tomato,chop,tomato,1,1,0,0,21.2,21.2,0.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0167,0.0231
+ring,16,good,4,ok,OnionTomatoSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_tomato,chop,tomato,1,1,0,0,21.2,21.2,0.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0142,0.0271
+ring,16,bad,0,ok,OnionTomatoSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0183,0.0209
+ring,16,bad,2,ok,OnionTomatoSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0158,0.0205
+ring,16,bad,4,ok,OnionTomatoSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0192,0.0194
+ring,16,random,0,ok,OnionTomatoSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_tomato,chop,tomato,1,1,0,1,21.2,22.0,0.8,0,0,0,,OPTIMAL,OPTIMAL,0.0167,0.023
+ring,16,random,2,ok,OnionTomatoSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_tomato,chop,tomato,1,1,0,0,21.2,21.2,0.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0182,0.022
+ring,16,random,4,ok,OnionTomatoSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_tomato,chop,tomato,1,1,0,0,21.2,21.2,0.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0172,0.0327
+ring,17,good,0,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_tomato,chop,tomato,1,1,0,1,20.6,21.8,1.2,0,0,0,,OPTIMAL,OPTIMAL,0.0238,0.0283
+ring,17,good,2,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_tomato,chop,tomato,1,1,0,0,20.6,20.6,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0185,0.0233
+ring,17,good,4,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_tomato,chop,tomato,1,1,0,0,20.6,20.6,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0175,0.0223
+ring,17,bad,0,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_lettuce,chop,lettuce,0,5,0,5,20.6,23.0,2.4,0,0,0,,OPTIMAL,OPTIMAL,0.0192,0.0119
+ring,17,bad,2,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_lettuce,chop,lettuce,0,5,0,3,20.6,23.0,2.4,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0184,0.0264
+ring,17,bad,4,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_lettuce,chop,lettuce,0,5,0,1,20.6,20.6,0.0,3,3,4.1,1.7|2.0|0.4,OPTIMAL,OPTIMAL,0.0178,0.0241
+ring,17,random,0,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,serve_onion_tomatosoup,serve,onion-tomato soup,1,8,0,8,20.6,29.6,9.0,3,3,4.1,1.7|2.0|0.4,OPTIMAL,OPTIMAL,0.0162,0.0087
+ring,17,random,2,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,serve_onion_tomatosoup,serve,onion-tomato soup,1,8,0,6,20.6,26.0,5.4,5,5,7.6,1.7|2.0|0.4|1.7|1.8,OPTIMAL,OPTIMAL,0.0206,0.0151
+ring,17,random,4,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,serve_onion_tomatosoup,serve,onion-tomato soup,1,8,0,4,20.6,22.4,1.8,7,7,10.7,1.7|2.0|0.4|1.8|1.7|1.3|1.8,OPTIMAL,OPTIMAL,0.0163,0.0145
+ring,18,good,0,ok,OnionLettuceSalad|FullSalad|TomatoLettuceSoup,11,7,chop_lettuce,chop,lettuce,1,0,0,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0219,0.0274
+ring,18,good,2,ok,OnionLettuceSalad|FullSalad|TomatoLettuceSoup,11,7,chop_lettuce,chop,lettuce,1,0,0,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.026,0.0461
+ring,18,good,4,ok,OnionLettuceSalad|FullSalad|TomatoLettuceSoup,11,7,chop_lettuce,chop,lettuce,1,0,0,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0204,0.0266
+ring,18,bad,0,ok,OnionLettuceSalad|FullSalad|TomatoLettuceSoup,11,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0261,0.0332
+ring,18,bad,2,ok,OnionLettuceSalad|FullSalad|TomatoLettuceSoup,11,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0204,0.0305
+ring,18,bad,4,ok,OnionLettuceSalad|FullSalad|TomatoLettuceSoup,11,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.026,0.0478
+ring,18,random,0,ok,OnionLettuceSalad|FullSalad|TomatoLettuceSoup,11,7,chop_tomato,chop,tomato,1,1,0,1,21.2,22.0,0.8,0,0,0,,OPTIMAL,OPTIMAL,0.0282,0.0374
+ring,18,random,2,ok,OnionLettuceSalad|FullSalad|TomatoLettuceSoup,11,7,chop_tomato,chop,tomato,1,1,0,0,21.2,21.2,0.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.021,0.0263
+ring,18,random,4,ok,OnionLettuceSalad|FullSalad|TomatoLettuceSoup,11,7,chop_tomato,chop,tomato,1,1,0,0,21.2,21.2,0.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0256,0.0368
+ring,19,good,0,ok,FullSalad|FullSalad|OnionLettuceSoup,12,6,chop_onion,chop,onion,1,0,0,0,21.0,21.0,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0466,0.0895
+ring,19,good,2,ok,FullSalad|FullSalad|OnionLettuceSoup,12,6,chop_onion,chop,onion,1,0,0,0,21.0,21.0,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0427,0.0751
+ring,19,good,4,ok,FullSalad|FullSalad|OnionLettuceSoup,12,6,chop_onion,chop,onion,1,0,0,0,21.0,21.0,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0507,0.091
+ring,19,bad,0,ok,FullSalad|FullSalad|OnionLettuceSoup,12,6,chop_tomato,chop,tomato,0,3,0,3,21.0,23.8,2.8,0,0,0,,OPTIMAL,OPTIMAL,0.0382,0.0408
+ring,19,bad,2,ok,FullSalad|FullSalad|OnionLettuceSoup,12,6,chop_tomato,chop,tomato,0,3,0,1,21.0,22.8,1.8,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0497,0.0563
+ring,19,bad,4,ok,FullSalad|FullSalad|OnionLettuceSoup,12,6,chop_tomato,chop,tomato,0,3,0,0,21.0,21.0,0.0,3,3,4.2,1.7|2.1|0.4,OPTIMAL,OPTIMAL,0.0412,0.0654
+ring,19,random,0,ok,FullSalad|FullSalad|OnionLettuceSoup,12,6,chop_lettuce,chop,lettuce,1,1,0,1,21.0,21.4,0.4,0,0,0,,OPTIMAL,OPTIMAL,0.0532,0.1111
+ring,19,random,2,ok,FullSalad|FullSalad|OnionLettuceSoup,12,6,chop_lettuce,chop,lettuce,1,1,0,0,21.0,21.0,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0388,0.0545
+ring,19,random,4,ok,FullSalad|FullSalad|OnionLettuceSoup,12,6,chop_lettuce,chop,lettuce,1,1,0,0,21.0,21.0,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0469,0.0807
+ring,20,good,0,ok,FullSalad|OnionLettuceSalad|OnionTomatoSoup,11,7,chop_tomato,chop,tomato,1,1,0,1,20.6,21.8,1.2,0,0,0,,OPTIMAL,OPTIMAL,0.0309,0.0326
+ring,20,good,2,ok,FullSalad|OnionLettuceSalad|OnionTomatoSoup,11,7,chop_tomato,chop,tomato,1,1,0,0,20.6,20.6,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0289,0.0476
+ring,20,good,4,ok,FullSalad|OnionLettuceSalad|OnionTomatoSoup,11,7,chop_tomato,chop,tomato,1,1,0,0,20.6,20.6,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0269,0.0362
+ring,20,bad,0,ok,FullSalad|OnionLettuceSalad|OnionTomatoSoup,11,7,chop_lettuce,chop,lettuce,0,3,0,3,20.6,22.8,2.2,0,0,0,,OPTIMAL,OPTIMAL,0.0278,0.0311
+ring,20,bad,2,ok,FullSalad|OnionLettuceSalad|OnionTomatoSoup,11,7,chop_lettuce,chop,lettuce,0,3,0,1,20.6,22.8,2.2,0,0,0,,OPTIMAL,OPTIMAL,0.0267,0.0305
+ring,20,bad,4,ok,FullSalad|OnionLettuceSalad|OnionTomatoSoup,11,7,chop_lettuce,chop,lettuce,0,3,0,0,20.6,20.6,0.0,3,3,4.1,1.7|2.0|0.4,OPTIMAL,OPTIMAL,0.0296,0.0279
+ring,20,random,0,ok,FullSalad|OnionLettuceSalad|OnionTomatoSoup,11,7,chop_tomato,chop,tomato,1,1,0,1,20.6,21.8,1.2,0,0,0,,OPTIMAL,OPTIMAL,0.0429,0.0344
+ring,20,random,2,ok,FullSalad|OnionLettuceSalad|OnionTomatoSoup,11,7,chop_tomato,chop,tomato,1,1,0,0,20.6,20.6,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0333,0.0504
+ring,20,random,4,ok,FullSalad|OnionLettuceSalad|OnionTomatoSoup,11,7,chop_tomato,chop,tomato,1,1,0,0,20.6,20.6,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0347,0.0443
+ring,21,good,0,ok,OnionLettuceSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_lettuce,chop,lettuce,1,0,0,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.016,0.0257
+ring,21,good,2,ok,OnionLettuceSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_lettuce,chop,lettuce,1,0,0,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0165,0.0251
+ring,21,good,4,ok,OnionLettuceSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_lettuce,chop,lettuce,1,0,0,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0175,0.0252
+ring,21,bad,0,ok,OnionLettuceSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0165,0.0216
+ring,21,bad,2,ok,OnionLettuceSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0163,0.0233
+ring,21,bad,4,ok,OnionLettuceSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0156,0.0202
+ring,21,random,0,ok,OnionLettuceSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_lettuce,chop,lettuce,1,0,0,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0169,0.0244
+ring,21,random,2,ok,OnionLettuceSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_lettuce,chop,lettuce,1,0,0,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0192,0.0289
+ring,21,random,4,ok,OnionLettuceSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_lettuce,chop,lettuce,1,0,0,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0191,0.0315
+ring,22,good,0,ok,OnionTomatoSalad|FullSalad|OnionLettuceSoup,11,7,chop_onion,chop,onion,1,0,0,0,21.0,21.0,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0229,0.034
+ring,22,good,2,ok,OnionTomatoSalad|FullSalad|OnionLettuceSoup,11,7,chop_onion,chop,onion,1,0,0,0,21.0,21.0,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0266,0.039
+ring,22,good,4,ok,OnionTomatoSalad|FullSalad|OnionLettuceSoup,11,7,chop_onion,chop,onion,1,0,0,0,21.0,21.0,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.025,0.0413
+ring,22,bad,0,ok,OnionTomatoSalad|FullSalad|OnionLettuceSoup,11,7,chop_tomato,chop,tomato,0,3,0,3,21.0,23.8,2.8,0,0,0,,OPTIMAL,OPTIMAL,0.0251,0.03
+ring,22,bad,2,ok,OnionTomatoSalad|FullSalad|OnionLettuceSoup,11,7,chop_tomato,chop,tomato,0,3,0,1,21.0,22.8,1.8,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0241,0.0244
+ring,22,bad,4,ok,OnionTomatoSalad|FullSalad|OnionLettuceSoup,11,7,chop_tomato,chop,tomato,0,3,0,0,21.0,21.0,0.0,3,3,4.2,1.7|2.1|0.4,OPTIMAL,OPTIMAL,0.0277,0.033
+ring,22,random,0,ok,OnionTomatoSalad|FullSalad|OnionLettuceSoup,11,7,serve_lettuce_onionsoup,serve,lettuce-onion soup,1,9,0,9,21.0,31.6,10.6,3,3,4.2,1.7|2.1|0.4,OPTIMAL,OPTIMAL,0.0326,0.0148
+ring,22,random,2,ok,OnionTomatoSalad|FullSalad|OnionLettuceSoup,11,7,serve_lettuce_onionsoup,serve,lettuce-onion soup,1,9,0,7,21.0,27.8,6.8,5,5,7.4,1.7|2.1|0.4|1.8|1.4,OPTIMAL,OPTIMAL,0.0204,0.0206
+ring,22,random,4,ok,OnionTomatoSalad|FullSalad|OnionLettuceSoup,11,7,serve_lettuce_onionsoup,serve,lettuce-onion soup,1,9,0,5,21.0,24.2,3.2,7,7,10.4,1.7|2.1|0.4|1.7|1.4|1.3|1.8,OPTIMAL,OPTIMAL,0.0203,0.0245
+ring,23,good,0,ok,OnionTomatoSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_lettuce,chop,lettuce,1,0,0,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0184,0.0195
+ring,23,good,2,ok,OnionTomatoSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_lettuce,chop,lettuce,1,0,0,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.019,0.024
+ring,23,good,4,ok,OnionTomatoSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_lettuce,chop,lettuce,1,0,0,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0162,0.0203
+ring,23,bad,0,ok,OnionTomatoSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0141,0.0163
+ring,23,bad,2,ok,OnionTomatoSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0165,0.0168
+ring,23,bad,4,ok,OnionTomatoSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.015,0.0173
+ring,23,random,0,ok,OnionTomatoSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,serve_salad_lettuce_tomatosalad,serve_salad,lettuce-tomato salad,0,5,0,5,21.2,27.0,5.8,2,2,3.5,1.8|1.7,OPTIMAL,OPTIMAL,0.0179,0.0099
+ring,23,random,2,ok,OnionTomatoSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,serve_salad_lettuce_tomatosalad,serve_salad,lettuce-tomato salad,0,5,0,3,21.2,26.6,5.4,3,3,5.6,2.1|1.8|1.7,OPTIMAL,OPTIMAL,0.016,0.0187
+ring,23,random,4,ok,OnionTomatoSalad|TomatoLettuceSalad|TomatoLettuceSoup,10,7,serve_salad_lettuce_tomatosalad,serve_salad,lettuce-tomato salad,0,5,0,1,21.2,21.2,0.0,5,5,8.0,2.1|2.0|0.4|1.8|1.7,OPTIMAL,OPTIMAL,0.0231,0.0211
+ring,24,good,0,ok,TomatoLettuceSalad|OnionLettuceSalad|OnionLettuceSoup,10,7,chop_lettuce,chop,lettuce,1,1,0,1,21.0,21.4,0.4,0,0,0,,OPTIMAL,OPTIMAL,0.0149,0.025
+ring,24,good,2,ok,TomatoLettuceSalad|OnionLettuceSalad|OnionLettuceSoup,10,7,chop_lettuce,chop,lettuce,1,1,0,0,21.0,21.0,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0136,0.032
+ring,24,good,4,ok,TomatoLettuceSalad|OnionLettuceSalad|OnionLettuceSoup,10,7,chop_lettuce,chop,lettuce,1,1,0,0,21.0,21.0,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.015,0.023
+ring,24,bad,0,ok,TomatoLettuceSalad|OnionLettuceSalad|OnionLettuceSoup,10,7,chop_tomato,chop,tomato,0,6,0,6,21.0,23.8,2.8,0,0,0,,OPTIMAL,OPTIMAL,0.0147,0.0115
+ring,24,bad,2,ok,TomatoLettuceSalad|OnionLettuceSalad|OnionLettuceSoup,10,7,chop_tomato,chop,tomato,0,6,0,4,21.0,23.0,2.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0246,0.0197
+ring,24,bad,4,ok,TomatoLettuceSalad|OnionLettuceSalad|OnionLettuceSoup,10,7,chop_tomato,chop,tomato,0,6,0,2,21.0,21.0,0.0,3,3,4.2,1.7|2.1|0.4,OPTIMAL,OPTIMAL,0.0172,0.0227
+ring,24,random,0,ok,TomatoLettuceSalad|OnionLettuceSalad|OnionLettuceSoup,10,7,serve_lettuce_onionsoup,serve,lettuce-onion soup,1,8,0,8,21.0,29.8,8.8,3,3,4.2,1.7|2.1|0.4,OPTIMAL,OPTIMAL,0.0171,0.0174
+ring,24,random,2,ok,TomatoLettuceSalad|OnionLettuceSalad|OnionLettuceSoup,10,7,serve_lettuce_onionsoup,serve,lettuce-onion soup,1,8,0,6,21.0,26.4,5.4,5,5,7.7,1.7|2.1|0.4|1.7|1.8,OPTIMAL,OPTIMAL,0.0149,0.0184
+ring,24,random,4,ok,TomatoLettuceSalad|OnionLettuceSalad|OnionLettuceSoup,10,7,serve_lettuce_onionsoup,serve,lettuce-onion soup,1,8,0,4,21.0,22.8,1.8,7,7,10.7,1.7|2.1|0.4|1.7|1.8|1.3|1.7,OPTIMAL,OPTIMAL,0.0142,0.0156
+ring,25,good,0,ok,TomatoLettuceSalad|FullSalad|OnionLettuceSoup,11,7,chop_lettuce,chop,lettuce,1,1,0,1,21.0,21.4,0.4,0,0,0,,OPTIMAL,OPTIMAL,0.0289,0.0363
+ring,25,good,2,ok,TomatoLettuceSalad|FullSalad|OnionLettuceSoup,11,7,chop_lettuce,chop,lettuce,1,1,0,0,21.0,21.0,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0367,0.0345
+ring,25,good,4,ok,TomatoLettuceSalad|FullSalad|OnionLettuceSoup,11,7,chop_lettuce,chop,lettuce,1,1,0,0,21.0,21.0,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0346,0.0344
+ring,25,bad,0,ok,TomatoLettuceSalad|FullSalad|OnionLettuceSoup,11,7,chop_tomato,chop,tomato,0,3,0,3,21.0,23.8,2.8,0,0,0,,OPTIMAL,OPTIMAL,0.0481,0.0306
+ring,25,bad,2,ok,TomatoLettuceSalad|FullSalad|OnionLettuceSoup,11,7,chop_tomato,chop,tomato,0,3,0,1,21.0,22.8,1.8,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0294,0.0336
+ring,25,bad,4,ok,TomatoLettuceSalad|FullSalad|OnionLettuceSoup,11,7,chop_tomato,chop,tomato,0,3,0,0,21.0,21.0,0.0,3,3,4.2,1.7|2.1|0.4,OPTIMAL,OPTIMAL,0.0338,0.0347
+ring,25,random,0,ok,TomatoLettuceSalad|FullSalad|OnionLettuceSoup,11,7,cook_lettuce_onionsoup,cook,lettuce-onion soup,1,2,0,2,21.0,21.0,0.0,2,2,3.8,1.7|2.1,OPTIMAL,OPTIMAL,0.0262,0.0178
+ring,25,random,2,ok,TomatoLettuceSalad|FullSalad|OnionLettuceSoup,11,7,cook_lettuce_onionsoup,cook,lettuce-onion soup,1,2,0,0,21.0,21.0,0.0,2,2,3.8,1.7|2.1,OPTIMAL,OPTIMAL,0.0273,0.0283
+ring,25,random,4,ok,TomatoLettuceSalad|FullSalad|OnionLettuceSoup,11,7,cook_lettuce_onionsoup,cook,lettuce-onion soup,1,2,0,0,21.0,21.0,0.0,2,2,3.8,1.7|2.1,OPTIMAL,OPTIMAL,0.0234,0.0281
+ring,26,good,0,ok,OnionLettuceSalad|OnionLettuceSalad|TomatoLettuceSoup,10,6,chop_lettuce,chop,lettuce,1,0,0,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.019,0.0253
+ring,26,good,2,ok,OnionLettuceSalad|OnionLettuceSalad|TomatoLettuceSoup,10,6,chop_lettuce,chop,lettuce,1,0,0,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0182,0.024
+ring,26,good,4,ok,OnionLettuceSalad|OnionLettuceSalad|TomatoLettuceSoup,10,6,chop_lettuce,chop,lettuce,1,0,0,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0175,0.0241
+ring,26,bad,0,ok,OnionLettuceSalad|OnionLettuceSalad|TomatoLettuceSoup,10,6,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0175,0.0285
+ring,26,bad,2,ok,OnionLettuceSalad|OnionLettuceSalad|TomatoLettuceSoup,10,6,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0221,0.0274
+ring,26,bad,4,ok,OnionLettuceSalad|OnionLettuceSalad|TomatoLettuceSoup,10,6,chop_onion,chop,onion,0,0,1,0,21.2,21.2,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0192,0.0282
+ring,26,random,0,ok,OnionLettuceSalad|OnionLettuceSalad|TomatoLettuceSoup,10,6,chop_tomato,chop,tomato,1,1,0,1,21.2,22.0,0.8,0,0,0,,OPTIMAL,OPTIMAL,0.0195,0.0189
+ring,26,random,2,ok,OnionLettuceSalad|OnionLettuceSalad|TomatoLettuceSoup,10,6,chop_tomato,chop,tomato,1,1,0,0,21.2,21.2,0.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0222,0.0238
+ring,26,random,4,ok,OnionLettuceSalad|OnionLettuceSalad|TomatoLettuceSoup,10,6,chop_tomato,chop,tomato,1,1,0,0,21.2,21.2,0.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0266,0.0344
+ring,27,good,0,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_tomato,chop,tomato,1,1,0,1,20.6,21.8,1.2,0,0,0,,OPTIMAL,OPTIMAL,0.0234,0.0292
+ring,27,good,2,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_tomato,chop,tomato,1,1,0,0,20.6,20.6,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.02,0.0258
+ring,27,good,4,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_tomato,chop,tomato,1,1,0,0,20.6,20.6,0.0,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0183,0.0227
+ring,27,bad,0,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_lettuce,chop,lettuce,0,5,0,5,20.6,23.0,2.4,0,0,0,,OPTIMAL,OPTIMAL,0.0206,0.013
+ring,27,bad,2,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_lettuce,chop,lettuce,0,5,0,3,20.6,23.0,2.4,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0206,0.0243
+ring,27,bad,4,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_lettuce,chop,lettuce,0,5,0,1,20.6,20.6,0.0,3,3,4.1,1.7|2.0|0.4,OPTIMAL,OPTIMAL,0.0148,0.022
+ring,27,random,0,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0168,0.0329
+ring,27,random,2,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0197,0.0203
+ring,27,random,4,ok,TomatoLettuceSalad|OnionTomatoSalad|OnionTomatoSoup,10,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0161,0.0229
+ring,28,good,0,ok,FullSalad|OnionLettuceSalad|OnionLettuceSoup,11,7,chop_onion,chop,onion,1,0,0,0,21.0,21.0,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0312,0.054
+ring,28,good,2,ok,FullSalad|OnionLettuceSalad|OnionLettuceSoup,11,7,chop_onion,chop,onion,1,0,0,0,21.0,21.0,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0325,0.0511
+ring,28,good,4,ok,FullSalad|OnionLettuceSalad|OnionLettuceSoup,11,7,chop_onion,chop,onion,1,0,0,0,21.0,21.0,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0319,0.0566
+ring,28,bad,0,ok,FullSalad|OnionLettuceSalad|OnionLettuceSoup,11,7,chop_tomato,chop,tomato,0,7,0,7,21.0,23.8,2.8,0,0,0,,OPTIMAL,OPTIMAL,0.0407,0.0295
+ring,28,bad,2,ok,FullSalad|OnionLettuceSalad|OnionLettuceSoup,11,7,chop_tomato,chop,tomato,0,7,0,5,21.0,23.0,2.0,1,1,2.1,2.1,OPTIMAL,OPTIMAL,0.0355,0.029
+ring,28,bad,4,ok,FullSalad|OnionLettuceSalad|OnionLettuceSoup,11,7,chop_tomato,chop,tomato,0,7,0,3,21.0,21.0,0.0,3,3,4.2,1.7|2.1|0.4,OPTIMAL,OPTIMAL,0.0318,0.031
+ring,28,random,0,ok,FullSalad|OnionLettuceSalad|OnionLettuceSoup,11,7,cook_lettuce_onionsoup,cook,lettuce-onion soup,1,2,0,2,21.0,21.0,0.0,2,2,3.8,1.7|2.1,OPTIMAL,OPTIMAL,0.0322,0.026
+ring,28,random,2,ok,FullSalad|OnionLettuceSalad|OnionLettuceSoup,11,7,cook_lettuce_onionsoup,cook,lettuce-onion soup,1,2,0,0,21.0,21.0,0.0,2,2,3.8,1.7|2.1,OPTIMAL,OPTIMAL,0.0384,0.0357
+ring,28,random,4,ok,FullSalad|OnionLettuceSalad|OnionLettuceSoup,11,7,cook_lettuce_onionsoup,cook,lettuce-onion soup,1,2,0,0,21.0,21.0,0.0,2,2,3.8,1.7|2.1,OPTIMAL,OPTIMAL,0.0312,0.0347
+ring,29,good,0,ok,FullSalad|OnionTomatoSalad|OnionTomatoSoup,11,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0214,0.0575
+ring,29,good,2,ok,FullSalad|OnionTomatoSalad|OnionTomatoSoup,11,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0221,0.0467
+ring,29,good,4,ok,FullSalad|OnionTomatoSalad|OnionTomatoSoup,11,7,chop_onion,chop,onion,1,0,0,0,20.6,20.6,0.0,0,0,0,,OPTIMAL,OPTIMAL,0.0216,0.0497
+ring,29,bad,0,ok,FullSalad|OnionTomatoSalad|OnionTomatoSoup,11,7,chop_lettuce,chop,lettuce,0,5,0,5,20.6,23.0,2.4,0,0,0,,OPTIMAL,OPTIMAL,0.0224,0.0141
+ring,29,bad,2,ok,FullSalad|OnionTomatoSalad|OnionTomatoSoup,11,7,chop_lettuce,chop,lettuce,0,5,0,3,20.6,23.0,2.4,1,1,1.7,1.7,OPTIMAL,OPTIMAL,0.0195,0.03
+ring,29,bad,4,ok,FullSalad|OnionTomatoSalad|OnionTomatoSoup,11,7,chop_lettuce,chop,lettuce,0,5,0,1,20.6,20.6,0.0,3,3,4.1,1.7|2.0|0.4,OPTIMAL,OPTIMAL,0.0189,0.0277
+ring,29,random,0,ok,FullSalad|OnionTomatoSalad|OnionTomatoSoup,11,7,serve_salad_lettuce_onion_tomatosalad,serve_salad,lettuce-onion-tomato salad,0,8,0,8,20.6,28.8,8.2,3,3,4.9,1.8|1.7|1.4,OPTIMAL,OPTIMAL,0.0208,0.0127
+ring,29,random,2,ok,FullSalad|OnionTomatoSalad|OnionTomatoSoup,11,7,serve_salad_lettuce_onion_tomatosalad,serve_salad,lettuce-onion-tomato salad,0,8,0,6,20.6,28.4,7.8,4,4,6.6,1.4|1.7|1.7|1.8,OPTIMAL,OPTIMAL,0.0214,0.0406
+ring,29,random,4,ok,FullSalad|OnionTomatoSalad|OnionTomatoSoup,11,7,serve_salad_lettuce_onion_tomatosalad,serve_salad,lettuce-onion-tomato salad,0,8,0,4,20.6,20.6,0.0,6,6,9.0,1.7|2.0|0.4|1.8|1.4|1.7,OPTIMAL,OPTIMAL,0.0345,0.0273

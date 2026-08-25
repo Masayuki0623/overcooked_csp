@@ -46,7 +46,10 @@ from agent.executor.low import EnvState  # noqa: E402
 from agent.myagent.CSPAgent import CSPAgent  # noqa: E402
 
 QUALITIES = ('good', 'bad', 'random')
-SKIP_BUDGETS = (0, 1, 2)
+# 実測(段階A・第1回)で d=1 と d=2 はLが変わる試行が9%しかなく、
+# 水準として機能していなかった。自然順位の中央値が
+# 良い=0.5 / ランダム=2.0 / 悪い=3.0 なので、その分布を跨ぐ 0/2/4 にする。
+SKIP_BUDGETS = (0, 2, 4)
 
 # ソルバーの解を再現可能にする。既定は複数ワーカーで走るため、同点の最適解の
 # うちどれが返るかが実行ごとに変わりうる。makespan は変わらないが「自然順位」は

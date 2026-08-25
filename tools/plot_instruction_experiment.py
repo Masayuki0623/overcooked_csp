@@ -25,7 +25,7 @@ plt.rcParams['axes.unicode_minus'] = False
 QUALITIES = ('good', 'bad', 'random')
 QUALITY_JA = {'good': '良い指示', 'bad': '悪い指示', 'random': 'ランダム'}
 COLORS = {'good': '#2f7fd4', 'bad': '#d4552f', 'random': '#8a8f98'}
-SKIP_BUDGETS = (0, 1, 2)
+SKIP_BUDGETS = (0, 2, 4)
 
 
 def load(path):

@@ -76,19 +76,57 @@ def recipe_pool(category, min_ingredients=MIN_INGREDIENTS):
     return pool
 
 
-def generate_order_recipes(preset_name, rng=None):
-    """プリセット名から、実際に出す注文のレシピ名リストを生成する。"""
+def _ingredient_names(recipe_name):
+    """レシピ名から材料名の集合を返す(例: TomatoLettuceSalad -> {Tomato, Lettuce})。"""
+    recipe = getattr(RECIPE, recipe_name)()
+    return {c.name for c in recipe.contents}
+
+
+def has_exclusive_salad_ingredient(recipe_names):
+    """サラダにしか使わない具材が1つ以上あるか。
+
+    スープが具材を全種類使ってしまうと、どの下ごしらえもスープに寄与する
+    ことになり、「サラダ専用の下ごしらえ」が存在しなくなる。指示の質を
+    good/bad で分ける実験では、この状態だと bad が定義できない。
+    """
+    salad, soup = set(), set()
+    for name in recipe_names:
+        cat = _category_of(getattr(RECIPE, name)())
+        target = soup if cat == SOUP else salad if cat == SALAD else None
+        if target is not None:
+            target |= _ingredient_names(name)
+    return bool(salad - soup)
+
+
+def generate_order_recipes(preset_name, rng=None, require_exclusive_salad_ingredient=True,
+                           max_attempts=200):
+    """プリセット名から、実際に出す注文のレシピ名リストを生成する。
+
+    require_exclusive_salad_ingredient=True のとき、サラダにしか使わない
+    具材が必ず1つ以上ある組み合わせになるまで引き直す。実験で「悪い指示
+    (サラダ専用の下ごしらえを優先させる)」が必ず成立するようにするため。
+    """
     if not is_order_preset(preset_name):
         raise ValueError(
             f"Unknown order preset: {preset_name} (available: {', '.join(preset_names())})")
 
     rng = rng or random
-    recipes = []
-    for category, count in ORDER_PRESETS[preset_name]:
-        pool = recipe_pool(category)
-        if not pool:
-            raise ValueError(
-                f"No recipe with {MIN_INGREDIENTS}+ ingredients for category: {category}")
-        # 材料の組み合わせは注文ごとに独立に選ぶ(同じ組み合わせが並ぶこともある)
-        recipes.extend(rng.choice(pool) for _ in range(count))
-    return recipes
+
+    def draw():
+        recipes = []
+        for category, count in ORDER_PRESETS[preset_name]:
+            pool = recipe_pool(category)
+            if not pool:
+                raise ValueError(
+                    f"No recipe with {MIN_INGREDIENTS}+ ingredients for category: {category}")
+            # 材料の組み合わせは注文ごとに独立に選ぶ(同じ組み合わせが並ぶこともある)
+            recipes.extend(rng.choice(pool) for _ in range(count))
+        return recipes
+
+    for _ in range(max_attempts):
+        recipes = draw()
+        if not require_exclusive_salad_ingredient or has_exclusive_salad_ingredient(recipes):
+            return recipes
+    raise ValueError(
+        f"サラダ専用の具材を持つ組み合わせを {max_attempts} 回引いても作れませんでした: "
+        f"{preset_name}")
