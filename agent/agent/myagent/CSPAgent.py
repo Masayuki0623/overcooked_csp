@@ -1909,7 +1909,13 @@ class CSPAgent:
                         # 自分でやってしまう方が常に良い(人間が先にやれば、その結果が
                         # 世界に現れて次の再スケジューリングでタスクから消える)。
                         other_sc = self.schedule_per_agent.get(1 - agent_idx, [])
-                        takeover = other_sc[0] if other_sc else None
+                        # 仕切りのあるマップでは、相手側にしかできないタスクがある。
+                        # それを引き受けると資材に到達できず永久に止まるので、
+                        # 自分で実行できるものだけを候補にする。
+                        takeover = next(
+                            (t for t in other_sc
+                             if agent_idx in self._task_allowed_agents(env, t)),
+                            None)
                         if takeover is not None:
                             self._emit_counter_debug(
                                 f"[DEBUG] AI{agent_idx} 手待ちのため人間スロットのタスクを引き受け: {takeover['id']}")
