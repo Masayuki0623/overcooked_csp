@@ -2418,14 +2418,32 @@ class CSPAgent:
                 t['fixed_res'] = ('delivery', delivery)
 
     def _task_is_available_in_virtual_state(self, task, remaining_task_ids):
+        """前提となる工程が済んでいて、いま着手できるタスクか。
+
+        知らない動詞に False を返すと「永久に着手できない」扱いになるので、
+        工程を増やしたらここにも足すこと。
+        """
         verb, obj, order_uid = task['id']
         if verb == 'chop':
             return True
-        if verb in ('cook', 'serve_salad'):
+        if verb in ('cook', 'mix', 'serve_salad'):
+            # 材料を全部刻み終えていること。mix(ミキサー)は cook と同じ位置づけ。
             needed_ings = dish_ingredients(obj)
             return all(('chop', ing, order_uid) not in remaining_task_ids for ing in needed_ings)
         if verb == 'serve':
             return ('cook', obj, order_uid) not in remaining_task_ids
+        if verb == 'serve_juice':
+            # 混ぜ終わってからでないとコップに注げない。
+            return ('mix', obj, order_uid) not in remaining_task_ids
+        if verb == 'handover':
+            # 鍋を使う料理なら煮上がってから、使わないなら刻み終わってから渡せる。
+            if ('cook', obj, order_uid) in remaining_task_ids:
+                return False
+            needed_ings = dish_ingredients(obj)
+            return all(('chop', ing, order_uid) not in remaining_task_ids for ing in needed_ings)
+        if verb == 'serve_from_counter':
+            # 受け渡し台に置かれてからでないと取れない。
+            return ('handover', obj, order_uid) not in remaining_task_ids
         return False
 
     def _estimate_virtual_task_finish(self, env, task, from_pos):

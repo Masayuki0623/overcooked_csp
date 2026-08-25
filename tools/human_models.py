@@ -7,16 +7,21 @@ AI 自身の分だけで、人間側のキャラクターはここで定義し�
 こうすると「AIは相手が賢いと信じて計画を立てるが、実際の相手はそう動かない」
 という、現実の人間-AI協調に近い状況になる。AI 側のコードには一切触れない。
 
-方策は3つ。
-  follow_plan : AIが人間スロットに置いた計画どおりに動く。ズレが起きない上限条件
-  greedy      : いま着手できるタスクのうち、自分から一番近いものを選ぶ
-  random      : いま着手できるタスクからランダムに1つ選ぶ
+方策は3つ。いずれも「選択できるタスクの中から1つ選び、TaskAgent に実行
+させる」形で、選び方だけが違う。
+  follow_plan : AIが人間スロットに置いた計画どおりに選ぶ。ズレが起きない上限条件
+  greedy      : 完了までが最短のタスクを選ぶ(移動 + 作業時間)
+  random      : 選択できるタスクから一様にランダムで選ぶ
 
-greedy / random は「愚かだが仕事は回る」水準に留めてある。具体的には
-  * 前提(依存タスク)が揃っているタスクだけを選ぶ
-  * 一度選んだら、そのタスクが消えるか手詰まりになるまで続ける
-だけで、「AIの計画を先読みして待つ」「全体のバランスを見る」といった賢さは
-持たせない。賢くすると optimal に近づいてしまい、見たいズレが消える。
+選び直すのは次の2つの場合だけ。
+  * 実行中のタスクが終わったとき
+  * 他のエージェントがやってしまい、もうやらなくてよくなったとき
+どちらも「そのタスクが残タスク一覧から消える」という同じ形で判定できる。
+
+greedy / random は「愚かだが仕事は回る」水準に留めてある。前提が揃った
+タスクだけを選び、手が塞がっていれば片付ける、それだけ。「AIの計画を
+先読みして待つ」「全体のバランスを見る」といった賢さは持たせない。
+賢くすると optimal に近づいてしまい、見たいズレが消える。
 """
 import random
 
@@ -25,10 +30,11 @@ from agent.myagent.TaskAgent import TaskAgent
 
 MODELS = ('follow_plan', 'greedy', 'random')
 
-# 同じタスクを続けても状況が変わらないまま何フレーム我慢するか。
-# これを超えたら「手詰まり」とみなして選び直す。短すぎると迷い続け、
-# 長すぎると詰まったまま固まる。
-STUCK_LIMIT = 30
+# 選び直すのは「タスクが終わった/不要になった」ときだけ。ただし何らかの
+# 理由で永久に進めなくなると計測が潰れるので、安全網として、まったく状況が
+# 動かないまま これだけのフレームが過ぎたら選び直す。実際に発動した回数は
+# stuck_switches として記録し、頻発するなら実装側の問題として扱う。
+STUCK_LIMIT = 100
 
 # タスク一覧を作り直す間隔(フレーム)。毎フレームだと重すぎる。
 TASK_REFRESH_EVERY = 10
@@ -71,6 +77,7 @@ class HumanModel:
         self.frames_moved = 0     # 実際に位置が変わった
         self.frames_blocked = 0   # 行動は出したのに位置が変わらなかった
         self.task_switches = 0
+        self.stuck_switches = 0
         self._prev_pos = None
         self._prev_task = None
 
@@ -114,13 +121,14 @@ class HumanModel:
         if self.model == 'random':
             return self.rng.choice(tasks) if tasks else None
 
-        # greedy: 自分の現在地から一番近いものを選ぶだけ。先読みはしない。
-        def distance(t):
-            d = self.ai.astar_distance(env, env.self_pos,
-                                       t.get('start_pos') or env.self_pos)
-            return d if d is not None else 10 ** 6
+        # greedy: 完了までが最短のタスクを選ぶ(そこまでの移動 + 作業時間)。
+        # 先読みはせず、いまの自分の位置だけから見た短さで決める。
+        def finish_cost(t):
+            _approach, total = self.ai._estimate_virtual_task_finish(
+                env, t, env.self_pos)
+            return total if total is not None else 10 ** 6
 
-        return min(tasks, key=distance) if tasks else None
+        return min(tasks, key=finish_cost) if tasks else None
 
     def record(self, env, action):
         """1フレームぶんの結果を数える。env.step の前に呼ぶ。"""
@@ -148,6 +156,7 @@ class HumanModel:
             'human_move_pct': round(100 * self.frames_moved / n, 1),
             'human_interact_pct': round(100 * self.frames_blocked / n, 1),
             'human_task_switches': self.task_switches,
+            'human_stuck_switches': self.stuck_switches,
         }
 
     def _signature(self, env):
@@ -210,17 +219,23 @@ class HumanModel:
         # 人間側スロットの現在タスクがそのまま AI の見込みになる。
         planned = self.planned_for_me()
 
+        # 実行中のタスクがまだ残っていれば続ける。終わった/不要になった
+        # ときだけ選び直す(どちらも一覧から消えるので同じ判定でよい)。
         keep = next((t for t in options if t['id'] == self.current_id), None)
-        if keep is None or self.stuck >= STUCK_LIMIT:
-            # 選び直す前に、一覧が古いかもしれないので作り直す。
+        if keep is None:
+            # 一覧が古いかもしれないので作り直してから確認する。
             tasks = self._tasks(env, refresh=True)
             options = self.available_tasks(env, tasks) or tasks
             keep = next((t for t in options if t['id'] == self.current_id), None)
-        if keep is None or self.stuck >= STUCK_LIMIT:
-            if self.stuck >= STUCK_LIMIT:
-                # 同じタスクで詰まったら、それ以外から選び直す。
-                options = [t for t in options if t['id'] != self.current_id] or options
-                self.stuck = 0
+
+        if keep is not None and self.stuck >= STUCK_LIMIT:
+            # 安全網。まったく進まないまま長く経ったので別のものにする。
+            self.stuck_switches += 1
+            self.stuck = 0
+            options = [t for t in options if t['id'] != self.current_id] or options
+            keep = None
+
+        if keep is None:
             keep = self.pick(env, options)
         if keep is None:
             self.current_id = None

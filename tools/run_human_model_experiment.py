@@ -56,7 +56,7 @@ def make_env(map_name, seed, preset):
     return env
 
 
-def make_ai(skip_budget):
+def make_ai(skip_budget, partner_is_external=True):
     ai = CSPAgent(10, Replay(), sc_2agent=True, skip_budget=skip_budget)
     # 「相手も CSP として全体最適に動く」と仮定して2体分の計画を立てさせる。
     # 実行に使うのは AI 自身(0番)の行動だけで、1番は人間役の方策で上書きする。
@@ -64,7 +64,9 @@ def make_ai(skip_budget):
     # 相手は別方策で動くので、相手の担当タスクが実行される保証はない。
     # 計画は2体分のまま(相手も賢いと信じる)だが、手待ちになったら
     # 相手の担当も引き受ける。そうしないと永久に待ち続けて何も完成しない。
-    ai.partner_is_external = True
+    # follow_plan のときだけ False。相手は計画どおりに動くので、手待ちで
+    # 相手の担当を奪いに行くと二人が同じタスクへ殺到して壊れる。
+    ai.partner_is_external = partner_is_external
     ai.own_agent_idx = 0
     ai.priority_weights = {}
     ai.gui_text_input = ""
@@ -82,12 +84,18 @@ def state_for(env, idx):
 
 
 def pick_instruction(ai, state, orders, quality, rng):
-    """指示の質に応じて対象タスクを選ぶ(前回のハーネスと同じ規則)。"""
+    """指示の質に応じて対象タスクを選ぶ。
+
+    どの注文がスープ/ジュースかは、候補一覧そのものから決める。
+    _build_order_tasks は呼ぶたびに置き場の割り当てなど内部状態が進むため、
+    別々に呼んだ結果を突き合わせると食い違うことがある(実際、1回目には
+    cook タスクが出ず、スープの判定が空になっていた)。
+    """
     candidates = ai.get_instruction_candidates(dcopy(state))
     if not candidates:
         return None
-    soup = {t['order'] for o in orders for t in o['tasks'] if t['verb'] == 'cook'}
-    juice = {t['order'] for o in orders for t in o['tasks'] if t['verb'] == 'mix'}
+    soup = {u for _d, p in candidates if p['verb'] == 'cook' for u in p['order_uids']}
+    juice = {u for _d, p in candidates if p['verb'] == 'mix' for u in p['order_uids']}
     if quality == 'random':
         return rng.choice(candidates)
     chops = [c for c in candidates if c[1]['verb'] == 'chop']
@@ -103,7 +111,7 @@ def pick_instruction(ai, state, orders, quality, rng):
 
 def run_trial(map_name, preset, seed, human_model, quality, skip_budget):
     env = make_env(map_name, seed, preset)
-    ai = make_ai(skip_budget)
+    ai = make_ai(skip_budget, partner_is_external=(human_model != 'follow_plan'))
     human_idx = 1
     human = HumanModel(human_model, ai, human_idx, Replay(), seed=seed * 31 + 7)
 
@@ -147,6 +155,8 @@ def run_trial(map_name, preset, seed, human_model, quality, skip_budget):
 
     # --- エピソード実行 ---------------------------------------------------
     watcher = PlanWatcher(ai)
+    human_name = env.sim_agents[human_idx].name
+    human_events = {}
     started = time.time()
     steps = 0
     for steps in range(1, MAX_STEPS + 1):
@@ -176,7 +186,17 @@ def run_trial(map_name, preset, seed, human_model, quality, skip_budget):
         watcher.note_human_task(h_tid)
         human.record(state_for(env, human_idx), h_action or (0, 0))
 
-        env.step(actions, passed_time=0.1)
+        _s, _r, _done, info = env.step(actions, passed_time=0.1)
+        # 「働いているのか、壁に向かって空振りしているのか」は行動だけでは
+        # 区別できない(どちらも位置が変わらない)。世界に実際に起きた出来事を
+        # 数えるのが確実なので、人間役が起こしたイベントを積算する。
+        for ev in (info.get('events') or []):
+            if ev.playerA != human_name:
+                continue
+            name = str(ev.event)
+            if name in ('No-op', 'Move'):
+                continue
+            human_events[name.split('_')[0]] = human_events.get(name.split('_')[0], 0) + 1
         if not env.order_scheduler.current_orders:
             break
 
@@ -192,6 +212,9 @@ def run_trial(map_name, preset, seed, human_model, quality, skip_budget):
                              else round(human.prediction_match_rate, 4)),
         'prediction_samples': human.pred_total,
         **human.time_breakdown(),
+        # 実際に世界へ起こした出来事の数。多いほど「手を動かして仕事をした」。
+        'human_useful_events': sum(human_events.values()),
+        'human_event_kinds': '|'.join(f'{k}:{v}' for k, v in sorted(human_events.items())),
         'replans': watcher.replans,
         'preempted_by_human': len(watcher.preempted),
         'rework': watcher.rework,
@@ -256,7 +279,9 @@ FIELDS = ['map', 'preset', 'seed', 'human_model', 'quality', 'skip_budget', 'sta
           'loss_s', 'loss_status', 'prediction_match', 'prediction_samples',
           'replans', 'preempted_by_human', 'rework',
           'human_frames', 'human_idle_pct', 'human_move_pct', 'human_interact_pct',
-          'human_task_switches', 'wall_seconds']
+          'human_task_switches', 'human_stuck_switches',
+          'human_useful_events', 'human_event_kinds',
+          'wall_seconds']
 
 
 def main():
