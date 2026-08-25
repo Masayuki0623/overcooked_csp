@@ -710,6 +710,7 @@ class CSPAgent:
             if not schedule_per_agent:
                 continue
 
+            remaining = self._remaining_ids_in_schedule(schedule_per_agent, self.current_task_idx)
             for agent_idx in [0, 1]:
                 schedule = schedule_per_agent.get(agent_idx, [])
                 if not schedule:
@@ -717,9 +718,34 @@ class CSPAgent:
                 target_idx = self._find_schedule_index_by_fixed_id(schedule, fixed_task_id, action=action)
                 if target_idx is None:
                     continue
+                # 前提の工程が済んでいないタスクに飛ばしてはいけない。混ぜる前に
+                # 「注ぐ」へ飛ぶと、ミキサーの前で永久に立ち尽くすことになる。
+                # 指示は「次にやること」を変えるものであって、工程の順序を
+                # 壊してよいという意味ではない。
+                if not self._task_is_available_in_virtual_state(schedule[target_idx], remaining):
+                    continue
                 return pending, fixed_task_id, agent_idx, target_idx
 
         return None
+
+    @staticmethod
+    def _remaining_ids_in_schedule(schedule_per_agent, current_task_idx=None):
+        """まだ終わっていないタスクの id 集合。
+
+        各エージェントの現在位置より前は済んでいるので数えない。
+        """
+        remaining = set()
+        for agent_idx, tasks in (schedule_per_agent or {}).items():
+            start = 0
+            if isinstance(current_task_idx, dict):
+                start = current_task_idx.get(agent_idx, 0)
+            elif isinstance(current_task_idx, int):
+                start = current_task_idx
+            for t in tasks[start:]:
+                tid = t.get('id')
+                if tid is not None:
+                    remaining.add(tid)
+        return remaining
 
     def _get_reschedule_reason(self, current_task_ids, added, removed):
         if not self.initialized:
