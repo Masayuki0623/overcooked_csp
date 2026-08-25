@@ -29,7 +29,7 @@ def parse_arguments():
 
     parser.add_argument(
         "--map", type=str,
-        choices=['ring', 'bottleneck', 'partition', 'quick', 'juice'], default='ring'
+        choices=['ring', 'bottleneck', 'partition', 'quick', 'juice', 'experiment'], default='ring'
     )
     parser.add_argument(
         "--agent", type=str,

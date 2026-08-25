@@ -1899,6 +1899,14 @@ class CSPAgent:
                 import copy
                 e_agent = copy.copy(env)
                 e_agent.agent_idx = agent_idx
+                # EnvState は生成時に「そのエージェントから到達できるマス」を
+                # 計算して持っている。浅いコピーで agent_idx だけ差し替えると、
+                # 中身は元のエージェント(0番)のものが残る。仕切りのあるマップでは
+                # 「相手側の資材が自分から使える」と誤認して動けなくなるので、
+                # 視点を変えたら作り直す。
+                if agent_idx != getattr(env, 'agent_idx', 0):
+                    from agent.executor.low import bfs_reachable
+                    e_agent.rch_map = bfs_reachable(e_agent.to_grid, e_agent.self_pos)
                 # 相手の現在位置を dynamic_obstacles として先に定義（can_start前に必要）
                 other_pos = env.agents[1 - agent_idx].location
                 dynamic_obstacles = {other_pos}

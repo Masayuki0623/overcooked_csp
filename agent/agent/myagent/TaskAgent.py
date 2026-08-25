@@ -529,8 +529,8 @@ class TaskAgent:
             return self.process_serve_task(env, ingredients, assigned_plate=self.assigned_plate, assigned_serve_loc=self.assigned_serve_loc, assigned_pot=self.assigned_pot, dynamic_obstacles=dynamic_obstacles)
         return (0,0), f"不明なタスク: {self.task_name}"
 
-    @staticmethod
-    def reachable_positions(env, positions):
+    @classmethod
+    def reachable_positions(cls, env, positions):
         """自分が実際に使える位置だけに絞る。
 
         仕切りのあるマップでは、皿・コップ・調理器具・提供口が両側にある。
@@ -538,10 +538,12 @@ class TaskAgent:
         そこへ行けずに動けなくなる。EnvState の到達可能マップ(rch_map)で、
         隣に立てるものだけを残す。
         """
-        rch = getattr(env, 'rch_map', None)
-        if rch is None or not positions:
-            return list(positions or [])
+        if not positions:
+            return []
         w, h = env.world_width, env.world_height
+        # rch_map は EnvState 生成時の視点で作られているため、視点を差し替えた
+        # コピーでは古い可能性がある。自分の現在地から数え直す。
+        rch = cls._reach_from(env)
 
         def usable(pos):
             for dx, dy in ((0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)):
@@ -552,6 +554,33 @@ class TaskAgent:
 
         filtered = [p for p in positions if usable(p)]
         return filtered or list(positions)
+
+    _reach_cache = {}
+
+    @classmethod
+    def _reach_from(cls, env):
+        """自分の現在地から歩いて行ける床マス(幅優先)。1手番ぶんキャッシュする。"""
+        key = (id(env), tuple(env.self_pos))
+        hit = cls._reach_cache.get(key)
+        if hit is not None:
+            return hit
+        w, h = env.world_width, env.world_height
+        grid = env.to_grid
+        rch = [[False] * h for _ in range(w)]
+        start = tuple(env.self_pos)
+        stack = [start]
+        rch[start[0]][start[1]] = True
+        while stack:
+            cx, cy = stack.pop()
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                nx, ny = cx + dx, cy + dy
+                if 0 <= nx < w and 0 <= ny < h and grid[nx][ny] == 1 and not rch[nx][ny]:
+                    rch[nx][ny] = True
+                    stack.append((nx, ny))
+        if len(cls._reach_cache) > 64:
+            cls._reach_cache.clear()
+        cls._reach_cache[key] = rch
+        return rch
 
     def process_mix_task(self, env, ingredients=None, assigned_blender=None,
                          assigned_counter=None, dynamic_obstacles=None):

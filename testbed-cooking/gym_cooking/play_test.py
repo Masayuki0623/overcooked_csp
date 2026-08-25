@@ -22,6 +22,9 @@ MAP_SETTINGS = dict(
     # ジュース工程の動作確認用。仕切りは無く、AI側/人間側の区別もしていない。
     # 実験用の非対称マップは別途追加する。
     juice=dict(level="juice_test", max_num_orders=1,),
+    # 実験用。仕切りで左右に分断し、AI側にスープ用野菜・フルーツ・鍋、
+    # 人間側にサラダ用野菜・ミキサー・提供口を置いた非対称マップ。
+    experiment=dict(level="experiment", max_num_orders=3,),
 )
 
 if __name__ == '__main__':

@@ -511,7 +511,7 @@ def parse_arguments():
     p.add_argument('--port', type=int, default=8000)
 
     p.add_argument('--map', type=str, default='ring',
-                   choices=['ring', 'bottleneck', 'partition', 'quick', 'juice'])
+                   choices=['ring', 'bottleneck', 'partition', 'quick', 'juice', 'experiment'])
     agents = ['human', 'HLA', 'SMOA', 'FMOA', 'NEA', 'Random',
               'TSPSolver', 'Greedy', 'CSP', 'Task', 'choponly']
     p.add_argument('--agent0', type=str, default='CSP', choices=agents)
