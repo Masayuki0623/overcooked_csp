@@ -1217,6 +1217,20 @@ class TaskAgent:
 
         return (0, 0), "必要な食材 (Chopped) を待機中"
 
+    @staticmethod
+    def _blocked_cutboards(env, cutboard_locs, target_ing_name, chopping_ing_name):
+        """自分の作業と関係ない物が載ったままのまな板。"""
+        blocked = []
+        for loc in cutboard_locs:
+            obj = env.pos_obj.get(loc)
+            name = getattr(obj, 'full_name', '') if obj is not None else ''
+            if not name:
+                continue
+            if target_ing_name in name or chopping_ing_name in name:
+                continue
+            blocked.append(loc)
+        return blocked
+
     def drop_unwanted_item(self, env, holding, reason="", dynamic_obstacles=None, allow_strict_override=False):
         '''手に持っている不要なアイテムを最寄りの空きカウンターに置く'''
         holding_name = getattr(holding, 'full_name', None)
@@ -1403,8 +1417,25 @@ class TaskAgent:
                 self._log_chop_debug(env, ing_name, holding_name, assigned_cutboard, assigned_counter, "place_fresh", target=best_cb)
                 return self.move_to(env, best_cb, dynamic_obstacles=dynamic_obstacles), f"{target_ing_name} を置く"
             else:
+                # まな板が全部ふさがっている。関係ない物が置きっぱなしなら、
+                # どかせば使える。まず手を空けてから片付けに向かう。
+                if self._blocked_cutboards(env, check_cbs, target_ing_name, chopping_ing_name):
+                    self._log_chop_debug(env, ing_name, holding_name, assigned_cutboard, assigned_counter, "free_hands_to_clear", reason="cutboard_blocked")
+                    return self.drop_unwanted_item(
+                        env, holding, reason="まな板を空けるために一度置く",
+                        dynamic_obstacles=dynamic_obstacles, allow_strict_override=True)
                 self._log_chop_debug(env, ing_name, holding_name, assigned_cutboard, assigned_counter, "wait_no_cutboard", reason="no_free_cutboard")
                 return (0,0), "空いているまな板がありません"
+
+        # 2.5 手ぶらで、まな板が関係ない物でふさがっている -> どかしに行く。
+        #     置きっぱなしを片付けないと、その側では誰も何も切れなくなる。
+        if not holding_name:
+            blocked = self._blocked_cutboards(env, cutboard_locs, target_ing_name, chopping_ing_name)
+            free = [loc for loc in cutboard_locs if env.pos_obj[loc] is None]
+            if blocked and not free:
+                self._log_chop_debug(env, ing_name, holding_name, assigned_cutboard, assigned_counter, "clear_cutboard", target=blocked[0])
+                return (self.move_to(env, blocked[0], dynamic_obstacles=dynamic_obstacles),
+                        "まな板に残った物をどかす")
 
         # 3. Fetch Fresh Ingredient
         target_loc = None
