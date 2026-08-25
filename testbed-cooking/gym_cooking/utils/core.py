@@ -267,7 +267,7 @@ class Object:
         if isinstance(obj, Object):
             # move obj's contents into this instance
             for i in obj.contents: self.contents.append(i)
-        elif not (isinstance(obj, Food) or isinstance(obj, Plate) or isinstance(obj, Fire)):
+        elif not isinstance(obj, (Food, Plate, Cup, Fire)):
             raise ValueError("Incorrect merge object: {}".format(obj))
         else:
             self.contents.append(obj)

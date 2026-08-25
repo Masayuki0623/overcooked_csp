@@ -19,6 +19,9 @@ MAP_SETTINGS = dict(
     bottleneck=dict(level="new3",),
     partition=dict(level="new2"),
     quick=dict(level="new5", max_num_orders=4,),
+    # ジュース工程の動作確認用。仕切りは無く、AI側/人間側の区別もしていない。
+    # 実験用の非対称マップは別途追加する。
+    juice=dict(level="juice_test", max_num_orders=1,),
 )
 
 if __name__ == '__main__':
