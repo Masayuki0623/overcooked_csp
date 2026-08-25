@@ -1,9 +1,11 @@
 """シミュレーション用の「人間役」の行動モデル。
 
-CSPAgent は human_counterpart_mode=True のとき自分の担当ぶんしか動かさない
-(exec_indices = [own_agent_idx])。空いた人間側のキャラクターを、ここで定義した
-方策で動かす。AI 側のコードには一切触れないので、「AIは人間が最適に動くと
-予測して計画する / 実際の人間はそう動かない」というズレをそのまま再現できる。
+AI(CSPAgent)は human_counterpart_mode=False で動かす。つまり「相手も CSP と
+して全体最適に動く」と仮定して2体分の計画を立てる。ただし実行に使うのは
+AI 自身の分だけで、人間側のキャラクターはここで定義した方策で動かす。
+
+こうすると「AIは相手が賢いと信じて計画を立てるが、実際の相手はそう動かない」
+という、現実の人間-AI協調に近い状況になる。AI 側のコードには一切触れない。
 
 方策は3つ。
   follow_plan : AIが人間スロットに置いた計画どおりに動く。ズレが起きない上限条件
@@ -28,6 +30,9 @@ MODELS = ('follow_plan', 'greedy', 'random')
 # 長すぎると詰まったまま固まる。
 STUCK_LIMIT = 30
 
+# タスク一覧を作り直す間隔(フレーム)。毎フレームだと重すぎる。
+TASK_REFRESH_EVERY = 10
+
 
 def task_name_of(task):
     """CSP のタスクを TaskAgent が解釈できる名前にする(CSPAgent と同じ規則)。"""
@@ -50,9 +55,24 @@ class HumanModel:
         self.current_id = None
         self.stuck = 0
         self.last_signature = None
+        # タスク一覧の組み立ては重い(1回 10〜30ms)。毎フレームやると
+        # エピソード1本が数倍の時間になるので、状況が動いたときと
+        # 一定間隔でだけ作り直す。人間役の判断が数フレーム古い一覧に
+        # 基づくことになるが、「愚かな人間」の表現としてはむしろ自然。
+        self._tasks_cache = None
+        self._cache_age = 0
         # 予測と実際のズレを測るための記録
         self.pred_hits = 0
         self.pred_total = 0
+        # 時間の使われ方。「判断が愚かで遅い」のか「動作に無駄があって遅い」のかを
+        # 切り分けるために、1フレームずつ何をしていたかを数える。
+        self.frames = 0
+        self.frames_idle = 0      # 行動を返せなかった(0,0)
+        self.frames_moved = 0     # 実際に位置が変わった
+        self.frames_blocked = 0   # 行動は出したのに位置が変わらなかった
+        self.task_switches = 0
+        self._prev_pos = None
+        self._prev_task = None
 
     # ------------------------------------------------------------------
     def available_tasks(self, env, tasks):
@@ -71,6 +91,15 @@ class HumanModel:
                 continue
             out.append(t)
         return out
+
+    def planned_for_me(self):
+        """AI が「相手(=自分)はこれをやる」と計画している、いまのタスク。"""
+        plan = (self.ai.schedule_per_agent or {}).get(self.human_idx, [])
+        idx = self.ai.current_task_idx
+        idx = idx.get(self.human_idx, 0) if isinstance(idx, dict) else 0
+        if idx < len(plan):
+            return plan[idx]['id']
+        return plan[0]['id'] if plan else None
 
     def pick(self, env, tasks):
         """方策に従ってタスクを1つ選ぶ。"""
@@ -93,34 +122,100 @@ class HumanModel:
 
         return min(tasks, key=distance) if tasks else None
 
+    def record(self, env, action):
+        """1フレームぶんの結果を数える。env.step の前に呼ぶ。"""
+        self.frames += 1
+        pos = tuple(env.self_pos)
+        if action == (0, 0):
+            self.frames_idle += 1
+        elif self._prev_pos is not None and pos != self._prev_pos:
+            self.frames_moved += 1
+        elif self._prev_pos is not None:
+            # 行動は出したが位置が変わらない。壁に向かってインタラクトして
+            # いる(=仕事をしている)か、相手にふさがれて進めていないか。
+            self.frames_blocked += 1
+        self._prev_pos = pos
+        if self.current_id != self._prev_task:
+            if self._prev_task is not None:
+                self.task_switches += 1
+            self._prev_task = self.current_id
+
+    def time_breakdown(self):
+        n = max(1, self.frames)
+        return {
+            'human_frames': self.frames,
+            'human_idle_pct': round(100 * self.frames_idle / n, 1),
+            'human_move_pct': round(100 * self.frames_moved / n, 1),
+            'human_interact_pct': round(100 * self.frames_blocked / n, 1),
+            'human_task_switches': self.task_switches,
+        }
+
     def _signature(self, env):
         """状況が動いたかを見るための指紋。手持ちと位置だけで十分。"""
         holding = getattr(env.hold, 'full_name', None)
         return (tuple(env.self_pos), holding)
 
     # ------------------------------------------------------------------
+    def _tasks(self, env, refresh):
+        if refresh or self._tasks_cache is None or self._cache_age >= TASK_REFRESH_EVERY:
+            tasks = [t for o in self.ai._build_order_tasks(env) for t in o['tasks']]
+            if tasks:
+                self.ai._annotate_task_geometry(env, tasks, env.self_pos)
+            self._tasks_cache = tasks
+            self._cache_age = 0
+        else:
+            self._cache_age += 1
+        return self._tasks_cache
+
     def act(self, env, other_pos):
         """1フレーム分の行動を返す。"""
-        tasks = [t for o in self.ai._build_order_tasks(env) for t in o['tasks']]
+        # 進んでいないなら手詰まりとみなす。
+        previous = self.last_signature
+        signature = self._signature(env)
+        if signature != previous:
+            self.stuck = 0
+        else:
+            self.stuck += 1
+        self.last_signature = signature
+
+        # 手持ちが変わったときは世界が動いているので、一覧を作り直す。
+        holding_changed = (previous or (None, None))[1] != signature[1]
+        tasks = self._tasks(env, refresh=holding_changed)
         if not tasks:
             self.current_id = None
             return (0, 0), None
 
-        self.ai._annotate_task_geometry(env, tasks, env.self_pos)
         options = self.available_tasks(env, tasks) or tasks
 
-        # 予測が当たったかを、選び直す前の時点で記録する。
-        predicted = {p['id'] for p in (self.ai.predicted_human_tasks or [])}
+        # 何かを手に持っているなら、まずそれを片付ける。持ち物と無関係な
+        # タスクを選ぶと、何をしようにも手が塞がっていて動けない。
+        # 「持っているものを置きに行く/使い切る」は先読みでも全体最適でもなく、
+        # 人間なら誰でもする最低限の行動なので、既存の判定をそのまま借りる。
+        if env.hold is not None:
+            carry = self.ai._get_carry_override_task(env, self.human_idx, None)
+            if carry is not None:
+                self.current_id = carry['id']
+                self.ta.task_name = task_name_of(carry)
+                self.ta.assigned_counter = carry.get('assigned_counter')
+                action, _reason = self.ta(env, dynamic_obstacles={tuple(other_pos)})
+                planned = self.planned_for_me()
+                if planned is not None:
+                    self.pred_total += 1
+                    if carry['id'] == planned:
+                        self.pred_hits += 1
+                return action, carry['id']
 
-        # 進んでいないなら手詰まりとみなす。
-        signature = self._signature(env)
-        if signature == self.last_signature:
-            self.stuck += 1
-        else:
-            self.stuck = 0
-        self.last_signature = signature
+        # AI が「相手はこれをやる」と計画しているタスク。
+        # human_counterpart_mode=False では2体分の計画を立てるので、
+        # 人間側スロットの現在タスクがそのまま AI の見込みになる。
+        planned = self.planned_for_me()
 
         keep = next((t for t in options if t['id'] == self.current_id), None)
+        if keep is None or self.stuck >= STUCK_LIMIT:
+            # 選び直す前に、一覧が古いかもしれないので作り直す。
+            tasks = self._tasks(env, refresh=True)
+            options = self.available_tasks(env, tasks) or tasks
+            keep = next((t for t in options if t['id'] == self.current_id), None)
         if keep is None or self.stuck >= STUCK_LIMIT:
             if self.stuck >= STUCK_LIMIT:
                 # 同じタスクで詰まったら、それ以外から選び直す。
@@ -132,15 +227,21 @@ class HumanModel:
             return (0, 0), None
 
         self.current_id = keep['id']
-        if predicted:
+        if planned is not None:
             self.pred_total += 1
-            if keep['id'] in predicted:
+            if keep['id'] == planned:
                 self.pred_hits += 1
 
         self.ta.task_name = task_name_of(keep)
         self.ta.assigned_counter = keep.get('assigned_counter')
         action, _reason = self.ta(env, dynamic_obstacles={tuple(other_pos)})
         return action, keep['id']
+
+    def observe_plan_match(self, task_id):
+        """follow_plan 用。定義上つねに計画どおりなので一致として数える。"""
+        if task_id is not None:
+            self.pred_total += 1
+            self.pred_hits += 1
 
     @property
     def prediction_match_rate(self):

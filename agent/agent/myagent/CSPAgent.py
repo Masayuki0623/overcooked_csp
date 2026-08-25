@@ -189,6 +189,11 @@ class CSPAgent:
         self._predicted_human_task_id = None
         self._human_prediction_doubt = 0
         self.human_counterpart_mode = False
+        # 相手が CSP ではなく外部(人間・別方策)に動かされているか。
+        # 計画は2体分を立てたままにしたいが、相手が計画どおり動く保証がない
+        # ときは「相手の担当タスクを待ち続ける」わけにいかない。この旗が
+        # 立っていると、手待ちになったときに相手の担当も引き受ける。
+        self.partner_is_external = False
         # 「いま即座に着手できる cook タスク」を (動詞, 対象) で保持する。
         # __call__ ごとに更新し、GamePlay の指示タイミング監視(enable_cook)が読む。
         self.ready_cook_actions = set()
@@ -1903,7 +1908,8 @@ class CSPAgent:
                     if takeover is not None:
                         self._emit_counter_debug(
                             f"[DEBUG] AI{agent_idx} 担当が尽きたが持ち物から継続: {takeover['id']}")
-                    if takeover is None and self.human_counterpart_mode:
+                    if takeover is None and (self.human_counterpart_mode
+                                             or self.partner_is_external):
                         # 人間がいま手をつけていると推測して人間スロットへ回したタスクは、
                         # 推測が外れると誰も実行しない。AI が手待ちのまま止まるより、
                         # 自分でやってしまう方が常に良い(人間が先にやれば、その結果が
@@ -1999,7 +2005,7 @@ class CSPAgent:
                     # 前提タスクがそこに割り当たっていると永久に待ち続けて停止するため、
                     # 待つ前に自分で引き受けられないか探す。
                     takeover_task = None
-                    if self.human_counterpart_mode:
+                    if self.human_counterpart_mode or self.partner_is_external:
                         takeover_task = self._find_takeover_task_for_deps(missing_deps, agent_idx)
 
                     if takeover_task is not None:

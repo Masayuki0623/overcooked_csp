@@ -1,15 +1,15 @@
 """人間役の行動モデルを変えて、skip_budget と効率の関係を実測する。
 
-前回のシミュレーションは CSP が両方のキャラクターを動かしていた
-(human_counterpart_mode=False)ため、2体が同じ最適計画を共有しており、
-AI の予測が外れることが原理的に無かった。skip_budget を大きくするほど
-効率が良くなるのは、その設定の必然だった。
+前回のシミュレーションは CSP が両方のキャラクターを動かしていたため、
+2体が同じ最適計画を共有しており、計画が外れることが原理的に無かった。
+skip_budget を大きくするほど効率が良くなるのは、その設定の必然だった。
 
-ここでは human_counterpart_mode=True にして CSP には自分の担当ぶんだけを
-動かさせ、人間側は tools/human_models.py の方策で別に動かす。これにより
-「AIは人間が最適に動くと予測して計画する / 実際の人間はそう動かない」という
-ズレが生じる。このズレが、skip_budget が大きすぎる側で体験が悪化する機序
-(仮説H1の右側)になり得るかを見る。
+ここでは AI に「相手も CSP として全体最適に動く」と仮定させたまま
+(human_counterpart_mode=False で2体分の計画を立てる)、実行に使うのは
+AI 自身の分だけにして、人間側は tools/human_models.py の方策で動かす。
+つまり「AIは相手が賢いと信じて計画を立てるが、実際の相手はそう動かない」。
+このズレが、skip_budget が大きすぎる側で体験が悪化する機序(仮説H1の右側)に
+なり得るかを見る。
 
 エピソードを実際に走らせる必要がある(ズレは時間発展の中でしか生じない)。
 
@@ -58,8 +58,13 @@ def make_env(map_name, seed, preset):
 
 def make_ai(skip_budget):
     ai = CSPAgent(10, Replay(), sc_2agent=True, skip_budget=skip_budget)
-    # 人間側は別方策で動かすので、AI は自分の担当ぶんだけを動かす。
-    ai.human_counterpart_mode = True
+    # 「相手も CSP として全体最適に動く」と仮定して2体分の計画を立てさせる。
+    # 実行に使うのは AI 自身(0番)の行動だけで、1番は人間役の方策で上書きする。
+    ai.human_counterpart_mode = False
+    # 相手は別方策で動くので、相手の担当タスクが実行される保証はない。
+    # 計画は2体分のまま(相手も賢いと信じる)だが、手待ちになったら
+    # 相手の担当も引き受ける。そうしないと永久に待ち続けて何も完成しない。
+    ai.partner_is_external = True
     ai.own_agent_idx = 0
     ai.priority_weights = {}
     ai.gui_text_input = ""
@@ -141,22 +146,35 @@ def run_trial(map_name, preset, seed, human_model, quality, skip_budget):
     row['loss_status'] = loss.get('status')
 
     # --- エピソード実行 ---------------------------------------------------
+    watcher = PlanWatcher(ai)
     started = time.time()
     steps = 0
     for steps in range(1, MAX_STEPS + 1):
         move, _ = ai(dcopy(state_for(env, 0)))
         actions = {a.name: (0, 0) for a in env.sim_agents}
+        # AI は2体分の行動を返すが、使うのは自分(0番)の分だけ。
+        # 1番は「相手はこう動くはず」という見込みにすぎないので捨てる。
         if isinstance(move, dict):
-            for key, m in move.items():
-                idx = int(str(key).split('_')[-1])
-                if idx < len(env.sim_agents):
-                    actions[env.sim_agents[idx].name] = m or (0, 0)
+            own = move.get('ai_0')
+            if own:
+                actions[env.sim_agents[0].name] = own
         elif move:
             actions[env.sim_agents[0].name] = move
 
-        h_action, _tid = human.act(state_for(env, human_idx),
-                                   env.sim_agents[0].location)
-        actions[env.sim_agents[human_idx].name] = h_action
+        watcher.observe(env)
+
+        if human_model == 'follow_plan':
+            # 相手が「AIの計画どおりに動く」条件。AI 自身が相手ぶんとして
+            # 計算した行動をそのまま使うのが、その定義そのもの。
+            h_action = move.get('ai_1') if isinstance(move, dict) else (0, 0)
+            h_tid = human.planned_for_me()
+            human.observe_plan_match(h_tid)
+        else:
+            h_action, h_tid = human.act(state_for(env, human_idx),
+                                        env.sim_agents[0].location)
+        actions[env.sim_agents[human_idx].name] = h_action or (0, 0)
+        watcher.note_human_task(h_tid)
+        human.record(state_for(env, human_idx), h_action or (0, 0))
 
         env.step(actions, passed_time=0.1)
         if not env.order_scheduler.current_orders:
@@ -173,17 +191,72 @@ def run_trial(map_name, preset, seed, human_model, quality, skip_budget):
         'prediction_match': (None if human.prediction_match_rate is None
                              else round(human.prediction_match_rate, 4)),
         'prediction_samples': human.pred_total,
+        **human.time_breakdown(),
+        'replans': watcher.replans,
+        'preempted_by_human': len(watcher.preempted),
+        'rework': watcher.rework,
         'wall_seconds': round(time.time() - started, 1),
         'status': 'ok',
     })
     return row
 
 
+class PlanWatcher:
+    """AI の計画が実行中にどれだけ揺さぶられたかを数える。
+
+    「次の1タスクが当たったか」だけでは、次は当たっているのにその先で計画が
+    破綻している状況を捉えられない。計画そのものへの影響を3つの数で見る。
+      replans            : 再計画が走った回数
+      preempted_by_human : AI が自分でやるつもりだったタスクを人間に取られた回数
+      rework             : AI が向かっていたタスクが計画から消えた回数(手戻り)
+    """
+
+    def __init__(self, ai):
+        self.ai = ai
+        self.replans = 0
+        self.preempted = set()
+        self.rework = 0
+        self._own_target = None
+        # 再計画の回数は solve を数えれば分かる。ゲーム側には触らず、
+        # このインスタンスのメソッドだけを包む。
+        original = ai.solve_csp_scheduling
+
+        def counted(*args, **kwargs):
+            self.replans += 1
+            return original(*args, **kwargs)
+
+        ai.solve_csp_scheduling = counted
+
+    def _own_plan_ids(self):
+        return [t['id'] for t in (self.ai.schedule_per_agent or {}).get(0, [])]
+
+    def observe(self, env):
+        plan = self._own_plan_ids()
+        idx = self.ai.current_task_idx
+        idx = idx.get(0, 0) if isinstance(idx, dict) else 0
+        target = plan[idx] if idx < len(plan) else None
+
+        if self._own_target is not None and target != self._own_target:
+            # 向かっていたタスクが計画から消えていたら手戻り。
+            # (単に次へ進んだだけの場合は、前のタスクは完了しているので数えない)
+            if self._own_target not in plan:
+                self.rework += 1
+        self._own_target = target
+
+    def note_human_task(self, task_id):
+        """人間が、AI が自分でやるつもりだったタスクに手を付けたか。"""
+        if task_id is not None and task_id in self._own_plan_ids():
+            self.preempted.add(task_id)
+
+
 FIELDS = ['map', 'preset', 'seed', 'human_model', 'quality', 'skip_budget', 'status',
           'orders', 'target', 'target_verb', 'target_obj',
           'served', 'reward', 'orders_left', 'completed', 'timed_out',
           'makespan_actual_s', 'makespan_plan_baseline_s', 'makespan_plan_constrained_s',
-          'loss_s', 'loss_status', 'prediction_match', 'prediction_samples', 'wall_seconds']
+          'loss_s', 'loss_status', 'prediction_match', 'prediction_samples',
+          'replans', 'preempted_by_human', 'rework',
+          'human_frames', 'human_idle_pct', 'human_move_pct', 'human_interact_pct',
+          'human_task_switches', 'wall_seconds']
 
 
 def main():
