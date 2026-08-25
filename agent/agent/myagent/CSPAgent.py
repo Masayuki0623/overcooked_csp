@@ -1954,6 +1954,9 @@ class CSPAgent:
             'pots': pots,
             'delivery': deliveries[0] if deliveries else (0,0),
             'plate': plates[0] if plates else (0,0),
+            # 仕切りのあるマップでは皿置き場が側ごとに要るため、一覧も持たせる。
+            # 'plate' は後方互換のための代表1枚。
+            'plates': plates,
             'counters': counters,
         }
 
@@ -2078,8 +2081,8 @@ class CSPAgent:
 
             elif verb == 'serve_salad':
                 # サラダ: 刻んだ食材のある置き場 → 皿タイル → 提供口。鍋は使わない。
-                plate = resources['plate']
                 delivery = resources['delivery']
+                plate = self._pick_plate(env, resources, delivery)
                 needed_ings = dish_ingredients(obj)
 
                 start_pos = t.get('assigned_counter')
@@ -2103,12 +2106,27 @@ class CSPAgent:
             elif verb == 'serve':
                 pots = resources['pots']
                 pot = pots[order_idx % len(pots)] if pots else default_start_pos
-                plate = resources['plate']
                 delivery = resources['delivery']
+                plate = self._pick_plate(env, resources, delivery)
 
                 t['start_pos'] = plate
                 t['end_pos'] = delivery
                 t['fixed_res'] = ('pot', pot)
+
+            elif verb == 'handover':
+                pots = resources['pots']
+                pot = pots[order_idx % len(pots)] if pots else default_start_pos
+                counter = t.get('assigned_counter') or self._find_shared_counter(env, pot)
+                t['start_pos'] = self._pick_plate(env, resources, pot)
+                t['end_pos'] = counter
+                t['fixed_res'] = ('pot', pot)
+
+            elif verb == 'serve_from_counter':
+                delivery = resources['delivery']
+                counter = t.get('assigned_counter') or self._find_shared_counter(env, delivery)
+                t['start_pos'] = counter
+                t['end_pos'] = delivery
+                t['fixed_res'] = ('delivery', delivery)
 
     def _task_is_available_in_virtual_state(self, task, remaining_task_ids):
         verb, obj, order_uid = task['id']
@@ -2477,8 +2495,8 @@ class CSPAgent:
 
         elif verb == 'serve_salad':
             # サラダ: 置き場の刻んだ食材を取る → 皿タイルへ寄って皿に乗せる → 提供口。
-            plate_pos = resources['plate']
             delivery_pos = resources['delivery']
+            plate_pos = self._pick_plate(env, resources, delivery_pos)
 
             needed_ings = dish_ingredients(obj)
             start_pos = assigned_counter
@@ -2505,9 +2523,9 @@ class CSPAgent:
             return int(d1 + d2 + 3)
 
         elif verb == 'serve':
-            plate_pos = resources['plate']
             pot_pos_list = resources['pots']
             delivery_pos = resources['delivery']
+            plate_pos = self._pick_plate(env, resources, delivery_pos)
 
             if not pot_pos_list: return None
             pot_pos = pot_pos_list[order_idx % len(pot_pos_list)]
@@ -2517,6 +2535,31 @@ class CSPAgent:
 
             if d1 is None or d2 is None: return None
             return int(d1 + d2 + 3)
+
+        elif verb == 'handover':
+            # 仕切りの向こうへ渡すための工程。皿を取り、鍋から盛り、受け渡し台に置く。
+            pot_pos_list = resources['pots']
+            if not pot_pos_list: return None
+            pot_pos = pot_pos_list[order_idx % len(pot_pos_list)]
+            plate_pos = self._pick_plate(env, resources, pot_pos)
+            counter = assigned_counter or self._find_shared_counter(env, pot_pos)
+            if counter is None: return None
+
+            d1 = self.astar_distance(env, plate_pos, pot_pos)
+            d2 = self.astar_distance(env, pot_pos, counter)
+            if d1 is None or d2 is None: return None
+            # 皿を取る + 鍋から盛る + 台に置く の3インタラクト
+            return int(d1 + d2 + 3)
+
+        elif verb == 'serve_from_counter':
+            # 受け渡し台に置かれた完成品を取って提供口へ運ぶだけ。
+            delivery_pos = resources['delivery']
+            counter = assigned_counter or self._find_shared_counter(env, delivery_pos)
+            if counter is None: return None
+            d = self.astar_distance(env, counter, delivery_pos)
+            if d is None: return None
+            # 台から取る + 提供する の2インタラクト
+            return int(d + 2)
         else:
             return None
     def get_assigned_counters(self):
@@ -3090,6 +3133,16 @@ class CSPAgent:
         pot = pots[order_idx % len(pots)] if pots else (0, 0)
 
         counters = resources.get('counters', [])
+        if self._map_is_partitioned(env):
+            # 仕切りのあるマップでは、置き場は「両側から使えるカウンター」に
+            # 限る。片側にしか届かない台を集合場所にすると、相手が材料を
+            # 取りに来られず、その注文は永久に完成しない。
+            # 壁に専用の受け渡し口を作るのではなく、既存の置き場割り当ての
+            # 候補を絞るだけで受け渡しが成立する。
+            shared = [c for c in counters if len(self._components_touching(env, c)) > 1]
+            if shared:
+                counters = shared
+
         empty_counters = []
         for c in counters:
             if c in reserved:
@@ -3573,6 +3626,38 @@ class CSPAgent:
             # サラダは鍋を経由せず、刻んだ食材をそのまま皿に乗せて提供する。
             serve_verb = 'serve_salad' if is_salad else 'serve'
             dur = self._task_duration_frames(env, serve_verb, dish_name, order_idx, assigned_counter)
+
+            if dur is None and self._map_is_partitioned(env):
+                # 提供までを1人でこなせない = 仕切りの向こう側に提供口がある。
+                # 「自分ができず相手ができる」ので、受け渡しを挟んで2つに割る。
+                #   handover           : 鍋から盛って受け渡し台に置く(こちら側)
+                #   serve_from_counter : 受け渡し台から取って提供する(向こう側)
+                handover_counter = self._find_shared_counter(
+                    env, resources['pots'][0] if resources['pots'] else None)
+                dur_h = self._task_duration_frames(
+                    env, 'handover', dish_name, order_idx, handover_counter)
+                dur_s = self._task_duration_frames(
+                    env, 'serve_from_counter', dish_name, order_idx, handover_counter)
+                if dur_h is not None and dur_s is not None:
+                    tasks.append({
+                        'id': ('handover', dish_name, order_uid),
+                        'verb': 'handover', 'obj': dish_name, 'order': order_uid,
+                        'slot_idx': order_idx,
+                        'display_order': display_order,
+                        'dur': dur_h,
+                        'res_candidates': [('pot', r) for r in resources['pots']],
+                        'assigned_counter': handover_counter,
+                    })
+                    tasks.append({
+                        'id': ('serve_from_counter', dish_name, order_uid),
+                        'verb': 'serve_from_counter', 'obj': dish_name, 'order': order_uid,
+                        'slot_idx': order_idx,
+                        'display_order': display_order,
+                        'dur': dur_s,
+                        'res_candidates': [],
+                        'assigned_counter': handover_counter,
+                    })
+
             if dur is not None:
                 tasks.append({
                     'id': (serve_verb, dish_name, order_uid),
@@ -3761,10 +3846,17 @@ class CSPAgent:
             # 毎回入れ替わってしまう(食材を置く→拾うを延々繰り返す等の揺れの原因)。
             # 人間の実座標を計画に反映させず、常に自分(実際に動かす側)と同じ地点から
             # 出発すると仮定することで、この人間の動きに起因する揺れを断つ。
-            if self.own_agent_idx == 0:
-                agent1_pos = agent_pos
-            else:
-                agent_pos = agent1_pos
+            # ただし仕切りのあるマップでは、この置き換えをしてはいけない。
+            # 相手の出発地点を自分と同じ側にしてしまうと、相手側にしかない
+            # タスクへの距離が「到達不能」となり、既定値の 1000 フレーム
+            # (=100秒)が入って計画が壊れる。両者が同じ連結成分にいるとき
+            # だけ置き換える。
+            same_region = (self._agent_component(env, 0) == self._agent_component(env, 1))
+            if same_region:
+                if self.own_agent_idx == 0:
+                    agent1_pos = agent_pos
+                else:
+                    agent_pos = agent1_pos
         
         # リソース位置の特定と固定 (Fixed Position)
         resources = self._get_resources(env)
@@ -3886,13 +3978,29 @@ class CSPAgent:
                             if tasks[i]['id'] == human_task['id']:
                                 human_task_idx = i
                                 break
+                    partitioned = self._map_is_partitioned(env)
                     for i in range(num_tasks):
-                        model.Add(is_a1[i] == (human_is_a1 if i == human_task_idx else own_is_a1))
+                        forced = human_is_a1 if i == human_task_idx else own_is_a1
+                        if partitioned:
+                            # 仕切りのあるマップでは、AI が物理的に行けないタスクがある。
+                            # それを AI に割り当てると永久に実行できず全体が止まるので、
+                            # 到達できる側のエージェントへ回す。
+                            allowed = self._task_allowed_agents(env, tasks[i])
+                            if len(allowed) == 1:
+                                forced = next(iter(allowed))
+                        model.Add(is_a1[i] == forced)
                     self.predicted_human_tasks = (
                         [{'id': human_task['id'], 'task': human_task}]
                         if human_task_idx is not None else []
                     )
 
+
+                elif self._map_is_partitioned(env):
+                    # 両方AIのモードでも、行ける側にしか割り当てないよう縛る。
+                    for i in range(num_tasks):
+                        allowed = self._task_allowed_agents(env, tasks[i])
+                        if len(allowed) == 1:
+                            model.Add(is_a1[i] == next(iter(allowed)))
 
                 # エージェント出発位置からの最低到達時間
                 for i in range(num_tasks):
@@ -3990,12 +4098,32 @@ class CSPAgent:
                 for c in cooks:
                     # cook終了 + 実際の調理時間(config.pyのCOOKING_TIME_SECONDS)が経過してからserve可能
                     model.Add(starts[i] >= c['end'] + cooking_frames)
+            elif verb == 'handover':
+                order_vars = vars_by_order.get(t['order'], [])
+                cooks = [v for v in order_vars if v['task']['verb'] == 'cook']
+                if cooks:
+                    # 渡せるのは煮上がってから。serve と同じ条件。
+                    for c in cooks:
+                        model.Add(starts[i] >= c['end'] + cooking_frames)
+                else:
+                    # 鍋を使わない料理は、下ごしらえが全部終われば渡せる。
+                    for c in [v for v in order_vars if v['task']['verb'] == 'chop']:
+                        model.Add(starts[i] >= c['end'])
+            elif verb == 'serve_from_counter':
+                # 受け渡し台に置かれてからでないと取れない。
+                order_vars = vars_by_order.get(t['order'], [])
+                handovers = [v for v in order_vars if v['task']['verb'] == 'handover']
+                for h in handovers:
+                    model.Add(starts[i] >= h['end'])
 
         # 鍋の占有制約 (Pot Usage Constraint)
         pot_usage_intervals = {}
         for order_idx, tasks_list in vars_by_order.items():
             cooks = [v for v in tasks_list if v['task']['verb'] == 'cook']
-            serves = [v for v in tasks_list if v['task']['verb'] == 'serve']
+            # 鍋が空くのは中身を取り出したとき。仕切りありのマップでは
+            # serve ではなく handover がその役割を担う。
+            serves = [v for v in tasks_list
+                      if v['task']['verb'] in ('serve', 'handover')]
             if cooks and serves:
                 cook_task = cooks[0]
                 serve_task = serves[0]
@@ -4369,6 +4497,137 @@ class CSPAgent:
 
         self._emit_counter_debug(f"\n総投入フレーム: {total_frames}")
         self._emit_counter_debug("===================================\n")
+
+    # ------------------------------------------------------------------
+    # 到達可能性(仕切りのあるマップ用)
+    # ------------------------------------------------------------------
+    def _walkable_components(self, env):
+        """歩ける床マスを連結成分に分ける。
+
+        仕切りで左右が分断されていれば2つ以上になる。1回のスケジューリング中に
+        地形は変わらないので、env ごとにキャッシュする。
+        """
+        cached = getattr(self, '_component_cache', None)
+        key = id(env)
+        if cached is not None and cached[0] == key:
+            return cached[1]
+
+        width, height = env.world_width, env.world_height
+        grid = env.to_grid
+        seen = set()
+        comps = []
+        for sx in range(width):
+            for sy in range(height):
+                if grid[sx][sy] != 1 or (sx, sy) in seen:
+                    continue
+                comp = set()
+                stack = [(sx, sy)]
+                seen.add((sx, sy))
+                while stack:
+                    cx, cy = stack.pop()
+                    comp.add((cx, cy))
+                    for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                        nx, ny = cx + dx, cy + dy
+                        if (0 <= nx < width and 0 <= ny < height
+                                and grid[nx][ny] == 1 and (nx, ny) not in seen):
+                            seen.add((nx, ny))
+                            stack.append((nx, ny))
+                comps.append(comp)
+        self._component_cache = (key, comps)
+        return comps
+
+    def _components_touching(self, env, pos):
+        """その位置を使うために立てる床マスが属する連結成分の番号の集合。
+
+        資材(まな板・鍋・カウンター等)は通れないマスなので、隣から使う。
+        仕切りの上のカウンターは両側から使えるため、複数の番号を返す。
+        """
+        if pos is None:
+            return set()
+        comps = self._walkable_components(env)
+        width, height = env.world_width, env.world_height
+        cells = [tuple(pos)]
+        x, y = pos
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nx, ny = x + dx, y + dy
+            if 0 <= nx < width and 0 <= ny < height and env.to_grid[nx][ny] == 1:
+                cells.append((nx, ny))
+        out = set()
+        for i, comp in enumerate(comps):
+            if any(c in comp for c in cells):
+                out.add(i)
+        return out
+
+    def _agent_component(self, env, agent_idx):
+        """そのエージェントがいる連結成分の番号。分からなければ None。"""
+        agents = getattr(env, 'agents', None)
+        if not agents or agent_idx >= len(agents):
+            return None
+        touching = self._components_touching(env, tuple(agents[agent_idx].location))
+        return min(touching) if touching else None
+
+    def _map_is_partitioned(self, env):
+        """歩ける領域が2つ以上に分かれているか(仕切りのあるマップか)。"""
+        return len(self._walkable_components(env)) > 1
+
+    def _pick_plate(self, env, resources, near_pos):
+        """near_pos と同じ側にある皿置き場を選ぶ。
+
+        仕切りのあるマップでは皿置き場が両側にあり、代表1枚だけを見ると
+        「向こう側の皿を取りに行く」経路になって到達不能と判定されてしまう。
+        """
+        plates = resources.get('plates') or []
+        if not plates:
+            return resources.get('plate')
+        if near_pos is None or not self._map_is_partitioned(env):
+            return plates[0]
+        want = self._components_touching(env, near_pos)
+        same_side = [p for p in plates if self._components_touching(env, p) & want]
+        pool = same_side or plates
+        return min(pool, key=lambda p: abs(p[0] - near_pos[0]) + abs(p[1] - near_pos[1]))
+
+    def _find_shared_counter(self, env, near_pos=None):
+        """両側から使えるカウンター(受け渡し台)を1つ選ぶ。
+
+        仕切りの上に並んだカウンターは、どちらの側からも手が届く。
+        壁を1マスだけ開けるような専用の仕組みは作らず、既存のカウンターの
+        うち「両側の連結成分から使えるもの」をそのまま受け渡し口として使う。
+        """
+        counters = env.get_pos_by_obj_gs(gs="Counter")
+        shared = [c for c in counters if len(self._components_touching(env, c)) > 1]
+        if not shared:
+            return None
+        if near_pos is None:
+            return shared[0]
+        return min(shared, key=lambda c: abs(c[0] - near_pos[0]) + abs(c[1] - near_pos[1]))
+
+    def _task_components(self, env, task):
+        """そのタスクを単独でこなせる連結成分の集合。
+
+        タスクは start_pos -> (使う資材) -> end_pos という移動を含むので、
+        それら全部が同じ連結成分から使えなければ、1人では完結できない。
+        空集合を返したときは仕切りを跨いでいる = 受け渡しが必要ということ。
+        """
+        positions = []
+        for key in ('start_pos', 'end_pos', 'assigned_counter'):
+            if task.get(key) is not None:
+                positions.append(tuple(task[key]))
+        res = task.get('fixed_res')
+        if res and len(res) > 1 and res[1] is not None:
+            positions.append(tuple(res[1]))
+        if not positions:
+            return set(range(len(self._walkable_components(env))))
+
+        comps = None
+        for pos in positions:
+            touching = self._components_touching(env, pos)
+            comps = touching if comps is None else (comps & touching)
+        return comps or set()
+
+    def _task_allowed_agents(self, env, task):
+        """そのタスクを実行できるエージェント番号の集合。"""
+        comps = self._task_components(env, task)
+        return {a for a in (0, 1) if self._agent_component(env, a) in comps}
 
     def astar_distance(self, env, start, goal):
         import heapq
