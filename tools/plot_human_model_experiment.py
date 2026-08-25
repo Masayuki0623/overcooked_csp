@@ -61,14 +61,36 @@ def mean_se(values):
     return m, se
 
 
+def _paired_delta(rows, model, key='makespan_actual_s'):
+    """同じ注文・同じ指示の質のなかで、d=0 からどれだけ増えたか。
+
+    場面ごとの難しさの差は d の効果より大きい。同じ場面同士で引き算すれば
+    その差が消え、skip_budget の効果だけが残る。
+    """
+    base = {}
+    for r in rows:
+        if r['human_model'] == model and r['skip_budget'] == 0 and r[key] is not None:
+            base[(r['seed'], r['quality'])] = r[key]
+    out = defaultdict(list)
+    for r in rows:
+        if r['human_model'] != model or r[key] is None:
+            continue
+        b = base.get((r['seed'], r['quality']))
+        if b is None:
+            continue
+        out[r['skip_budget']].append(r[key] - b)
+    return out
+
+
 def figA(rows, out):
     """図A: 人間役の行動モデル別・skip_budget別の効率。
 
     最も知りたいのは「非最適な人間のとき、skip_budget が大きいほど
-    効率が悪化する(右肩上がりになる)か」なので、計画上の損失 L と
-    実測 makespan を並べて出す。
+    効率が悪化する(右肩上がりになる)か」。計画上は d を大きくするほど
+    制約が緩むので損失 L は必ず下がる(H1 の左側)。それでも実測が悪化
+    するなら、悪化させているのは計画ではなく人間とのズレだと言える。
     """
-    fig, axes = plt.subplots(1, 2, figsize=(12.5, 4.6))
+    fig, axes = plt.subplots(1, 3, figsize=(16.5, 4.8))
     fig.suptitle('図A: 人間役の行動モデル別・skip_budget 別の効率',
                  fontsize=13, fontweight='bold')
 
@@ -91,6 +113,32 @@ def figA(rows, out):
         ax.set_ylabel(label)
         ax.grid(alpha=0.25)
         ax.legend()
+
+    # 右: 同じ場面での d=0 との差。交互作用がここに出る。
+    ax = axes[2]
+    ax.axhline(0, color='#444', lw=1)
+    for m in MODELS:
+        deltas = _paired_delta(rows, m)
+        ys, es, xs = [], [], []
+        for d in BUDGETS:
+            if not deltas.get(d):
+                continue
+            mu, se = mean_se(deltas[d])
+            xs.append(d)
+            ys.append(mu)
+            es.append(se)
+        if not xs:
+            continue
+        slope = np.polyfit(xs, ys, 1)[0] if len(xs) > 1 else 0.0
+        ax.errorbar(xs, ys, yerr=es, marker='o', capsize=4, lw=2,
+                    color=MODEL_COLOR[m],
+                    label=f'{MODEL_JA[m]}（傾き {slope:+.2f} 秒/d）')
+    ax.set_xticks(BUDGETS)
+    ax.set_xlabel('skip_budget')
+    ax.set_ylabel('同じ場面での d=0 との差（秒）')
+    ax.set_title('上向きなら「d を増やすほど悪化」', fontsize=10)
+    ax.grid(alpha=0.25)
+    ax.legend()
     save(fig, out, 'figA_efficiency_by_human_model.png')
 
 
