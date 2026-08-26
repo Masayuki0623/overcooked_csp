@@ -32,7 +32,29 @@ from gym_cooking.utils.replay import Replay  # noqa: E402
 import run_human_model_experiment as H  # noqa: E402
 from human_models import HumanModel  # noqa: E402
 
+# 実験ハーネスは画面なしで回す前提なので、読み込むだけで
+# SDL_VIDEODRIVER=dummy を設定する。こちらは見るための道具なので取り消す。
+# pygame はウィンドウを作る瞬間にこの値を読むため、ここで消しておけば間に合う。
+for _var in ('SDL_VIDEODRIVER', 'SDL_AUDIODRIVER'):
+    if os.environ.get(_var) == 'dummy':
+        os.environ.pop(_var)
+
 MAX_STEPS = 1000
+
+
+def task_label(ai, agent_idx, human=None):
+    """いまその担当者が取り組んでいる作業の名前。"""
+    if human is not None and getattr(human, 'current_id', None) is not None:
+        tid = human.current_id
+        return f'{tid[0]}:{tid[1]}'
+    sched = (ai.schedule_per_agent or {}).get(agent_idx) or []
+    idx = ai.current_task_idx
+    idx = idx.get(agent_idx, 0) if isinstance(idx, dict) else (idx or 0)
+    if 0 <= idx < len(sched):
+        tid = sched[idx].get('id')
+        if tid:
+            return f'{tid[0]}:{tid[1]}'
+    return '(手待ち)'
 
 
 def main():
@@ -70,14 +92,24 @@ def main():
 
     print(f'注文: ' + ' | '.join(recipes))
     print(f'人間役: {args.model} / skip_budget: {args.d} / 指示: {target_label} ({args.quality})')
-    print('左が AI(0番)、右が人間役(1番)。ウィンドウを閉じると終了します。')
+    print('左が AI(0番)、右が人間役(1番)。別ウィンドウが開きます(背面に出ることがあります)。')
+    print('1秒ごとに進行状況をここに出します。終わったらウィンドウの×で閉じてください。')
 
     # play=True にすると Game が実ウィンドウを作る(play=False は隠しSurface)。
     # 中身の描画は同じで、見えるかどうかだけの違い。
     game = Game(env, play=True)
-    game.on_init()
+    pygame.display.quit()          # dummy で初期化済みなら捨てて開き直す
+    try:
+        pygame.display.init()
+        game.on_init()
+    except pygame.error as e:
+        print(f'ウィンドウを開けませんでした: {e}')
+        print('画面のない環境では --gif を付けて録画してください。')
+        return
     pygame.display.set_caption(
         f'{args.model} / d={args.d} / {target_label}')
+    print(f'描画ドライバ: {pygame.display.get_driver()}'
+          f"  (dummy なら画面には出ません)")
     clock = pygame.time.Clock()
     frames = []
 
@@ -105,6 +137,11 @@ def main():
         game.on_render()
         pygame.display.flip()
 
+        # 画面だけだと動いているか分かりにくいので、1秒ごとに状況を出す。
+        if step % 10 == 0:
+            print(f'  t={env.current_time:5.1f}秒  提供={env.order_scheduler.successful_orders}'
+                  f'  AI={task_label(ai, 0)}  人間役={task_label(ai, 1, human)}', flush=True)
+
         if args.gif:
             buf = pygame.surfarray.array3d(game.screen)
             frames.append(buf.swapaxes(0, 1).copy())
@@ -129,7 +166,16 @@ def main():
         except ImportError:
             print('GIF 保存には imageio が要ります: pip install imageio')
 
-    time.sleep(2)
+    # 最後の盤面を見られるように、閉じられるまで待つ。
+    print('(ウィンドウの×を押すか、Ctrl+C で終了します)')
+    try:
+        while True:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    raise KeyboardInterrupt
+            clock.tick(10)
+    except KeyboardInterrupt:
+        pass
     pygame.quit()
 
 
