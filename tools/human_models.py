@@ -78,6 +78,10 @@ class HumanModel:
         self.frames_blocked = 0   # 行動は出したのに位置が変わらなかった
         self.task_switches = 0
         self.stuck_switches = 0
+        # 進まないタスクを一定時間だけ避けるための記録。
+        # 人は「これは今できない」と分かれば別の仕事に移る。
+        self._blocked_since = {}
+        self._cooldown = {}
         self._prev_pos = None
         self._prev_task = None
 
@@ -129,6 +133,22 @@ class HumanModel:
             return total if total is not None else 10 ** 6
 
         return min(tasks, key=finish_cost) if tasks else None
+
+    BLOCKED_LIMIT = 30      # これだけ動けなければ、そのタスクは今できないとみなす
+    COOLDOWN_FRAMES = 150   # 避けておく長さ
+
+    def note_progress(self, task_id, action):
+        """同じタスクで動けない状態が続いていないかを見る。"""
+        if task_id is None:
+            return
+        if action and tuple(action) != (0, 0):
+            self._blocked_since.pop(task_id, None)
+            return
+        n = self._blocked_since.get(task_id, 0) + 1
+        self._blocked_since[task_id] = n
+        if n >= self.BLOCKED_LIMIT:
+            self._blocked_since.pop(task_id, None)
+            self._cooldown[task_id] = self.COOLDOWN_FRAMES
 
     def record(self, env, action):
         """1フレームぶんの結果を数える。env.step の前に呼ぶ。"""
@@ -228,16 +248,23 @@ class HumanModel:
 
         # 実行中のタスクがまだ残っていれば続ける。終わった/不要になった
         # ときだけ選び直す(どちらも一覧から消えるので同じ判定でよい)。
-        # 実行中のタスクは、一覧から消えるまで持ち続ける。着手可能かどうかで
-        # 判断すると、持ち物の変化で毎フレーム可否が入れ替わり、2つの作業の
-        # 間を往復し続けることがある。仕様は「終わったら」「不要になったら」
-        # 選び直す、なので一覧に残っているかどうかで見る。
-        keep = next((t for t in tasks if t['id'] == self.current_id), None)
+        # しばらく進まなかったタスクは、いったん避けて別の仕事に移る。
+        for tid in list(self._cooldown):
+            self._cooldown[tid] -= 1
+            if self._cooldown[tid] <= 0:
+                del self._cooldown[tid]
+        if self._cooldown:
+            # 進まないと分かったタスクは、本当に候補から外す。ここで
+            # 「他に無いなら戻す」ことにすると、同じ場所で止まり続ける。
+            options = [t for t in options if t['id'] not in self._cooldown]
+
+        # 実行中のタスクは、終わるか着手できなくなるまで続ける。
+        keep = next((t for t in options if t['id'] == self.current_id), None)
         if keep is None:
             # 一覧が古いかもしれないので作り直してから確認する。
             tasks = self._tasks(env, refresh=True)
             options = self.available_tasks(env, tasks)
-            keep = next((t for t in tasks if t['id'] == self.current_id), None)
+            keep = next((t for t in options if t['id'] == self.current_id), None)
 
         if keep is not None and self.stuck >= STUCK_LIMIT:
             # 安全網。まったく進まないまま長く経ったので別のものにする。
@@ -261,6 +288,7 @@ class HumanModel:
         self.ta.task_name = task_name_of(keep)
         self.ta.assigned_counter = keep.get('assigned_counter')
         action, _reason = self.ta(env, dynamic_obstacles={tuple(other_pos)})
+        self.note_progress(keep['id'], action)
         return action, keep['id']
 
     def observe_plan_match(self, task_id):
