@@ -250,7 +250,7 @@ def main():
     t0 = time.time()
     for k, (case, quality, budget) in enumerate(combos, 1):
         rows.append(run_trial(case, sets[case], quality, budget, args.human_model))
-        if k % 5 == 0 or k == len(combos):
+        if True:   # 1件ごとに出す(黙っていると止まって見えるため)
             el = time.time() - t0
             print(f'  {k}/{len(combos)} 件 ({el:.0f}秒経過, '
                   f'残り約{el / k * (len(combos) - k):.0f}秒)', flush=True)

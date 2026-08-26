@@ -330,7 +330,7 @@ def main():
     for k, (seed, model, quality, budget) in enumerate(combos, 1):
         recipes = order_sets[seed] if order_sets is not None else None
         rows.append(run_trial(args.map, args.preset, seed, model, quality, budget, recipes))
-        if k % 5 == 0 or k == len(combos):
+        if True:   # 1件ごとに出す(黙っていると止まって見えるため)
             el = time.time() - started
             print(f'  {k}/{len(combos)} 件 ({el:.0f}秒経過, '
                   f'残り約{el / k * (len(combos) - k):.0f}秒)', flush=True)
