@@ -47,6 +47,8 @@ FIELDS = [
     'ai_idle_seconds_while_waiting', 'ai_idle_pct_while_waiting',
     # 3-3 実行順位
     'exec_rank', 'natural_rank', 'rank_gain',
+    # 指示が AI 以外に割り当たった場合の把握
+    'plan_owner', 'wait_any_seconds', 'wait_any_censored', 'done_by_other',
     # 参考
     'served', 'completed', 'makespan_actual_s', 'human_idle_pct', 'wall_seconds',
 ]
@@ -55,6 +57,26 @@ FIELDS = [
 def target_matches(task_id, verb, obj):
     """指示は「玉ねぎを切る」という行動単位。どの注文の分でも一致とみなす。"""
     return bool(task_id) and task_id[0] == verb and task_id[1] == obj
+
+
+def remaining_matches(ai, verb, obj):
+    """その作業がまだ計画に残っているか(どちらの担当かは問わない)。"""
+    for agent_idx, sched in (ai.schedule_per_agent or {}).items():
+        idx = ai.current_task_idx
+        idx = idx.get(agent_idx, 0) if isinstance(idx, dict) else (idx or 0)
+        for t in sched[idx:]:
+            if target_matches(t.get('id'), verb, obj):
+                return True
+    return False
+
+
+def plan_owner_of(ai, verb, obj):
+    """その作業を、計画はどちらの担当にしたか。"""
+    owners = []
+    for agent_idx, sched in sorted((ai.schedule_per_agent or {}).items()):
+        if any(target_matches(t.get('id'), verb, obj) for t in sched):
+            owners.append('AI' if agent_idx == 0 else '人')
+    return '|'.join(owners) if owners else '(計画に無し)'
 
 
 def current_task_id(ai, agent_idx=0):
@@ -119,7 +141,9 @@ def run_trial(case, recipes, quality, skip_budget, human_model='greedy'):
     ai._pending_instructions = [dcopy(pending)]
 
     # --- 観測 -----------------------------------------------------------
-    wait_seconds = None            # 指示 -> 着手 までの経過時間
+    wait_seconds = None            # 指示 -> AI が着手 までの経過時間
+    wait_any_seconds = None        # 指示 -> 誰かがやり終える までの経過時間
+    plan_owner = None              # 計画がその作業をどちらに割り当てたか
     finished_before = []           # 着手までに AI がこなした他タスク
     ai_idle_ticks = 0              # 待っている間、AI が動かなかった回数
     ticks_while_waiting = 0
@@ -131,6 +155,11 @@ def run_trial(case, recipes, quality, skip_budget, human_model='greedy'):
 
         cur = current_task_id(ai, 0)
         now = env.current_time
+        if plan_owner is None:
+            plan_owner = plan_owner_of(ai, verb, obj)
+        if wait_any_seconds is None and not remaining_matches(ai, verb, obj):
+            # 計画から消えた = 誰かがやり終えた
+            wait_any_seconds = round(now, 1)
 
         if wait_seconds is None:
             ticks_while_waiting += 1
@@ -171,6 +200,12 @@ def run_trial(case, recipes, quality, skip_budget, human_model='greedy'):
         'ai_idle_seconds_while_waiting': round(ai_idle_ticks * STEP_SECONDS, 1),
         'ai_idle_pct_while_waiting': (round(100 * ai_idle_ticks / ticks_while_waiting, 1)
                                       if ticks_while_waiting else None),
+        'plan_owner': plan_owner,
+        'wait_any_seconds': (wait_any_seconds if wait_any_seconds is not None
+                             else round(env.current_time, 1)),
+        'wait_any_censored': int(wait_any_seconds is None),
+        # AI は着手しなかったが、作業自体は片づいた = 相手がやった
+        'done_by_other': int(wait_seconds is None and wait_any_seconds is not None),
         'exec_rank': len(finished_before) + 1 if wait_seconds is not None else None,
         'rank_gain': ((nat_rank - (len(finished_before) + 1))
                       if (nat_rank is not None and wait_seconds is not None) else None),
