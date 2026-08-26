@@ -278,6 +278,16 @@ class OvercookedEnvironment(gym.Env):
         return state, reward, done, info
 
     def done(self):
+        # 注文が全部片づいたら終わり。残っていない盤面を動かし続けても
+        # することが無く、実験では待ち時間が伸びるだけになる。
+        sched = self.order_scheduler
+        resolved = sched.successful_orders + sched.failed_orders
+        if sched.max_num_orders and resolved >= sched.max_num_orders and not sched.current_orders:
+            self.termination_info = "Terminating because all {} orders are resolved".format(
+                sched.max_num_orders)
+            self.successful = sched.failed_orders == 0
+            return True
+
         # Done if the episode maxes out
         if self.current_time >= self.arglist.max_num_timesteps and self.arglist.max_num_timesteps:
             self.termination_info = "Terminating because passed {} timesteps".format(

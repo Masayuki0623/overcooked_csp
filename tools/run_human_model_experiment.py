@@ -301,6 +301,10 @@ def main():
     ap.add_argument('--out', default=str(ROOT / 'results' / 'human_model_experiment.csv'))
     args = ap.parse_args()
 
+    print(f'表示: なし(画面なしで実行します)  '
+          f'[SDL_VIDEODRIVER={os.environ.get("SDL_VIDEODRIVER")}]')
+    print('様子を目で見たいときは tools/watch_human_model.py を使ってください。')
+
     models = [m.strip() for m in args.models.split(',') if m.strip()]
     if args.enumerate_orders:
         order_sets = enumerate_order_recipes(args.preset)

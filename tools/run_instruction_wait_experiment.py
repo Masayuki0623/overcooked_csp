@@ -194,6 +194,10 @@ def main():
     ap.add_argument('--out', default=str(ROOT / 'results' / 'instruction_wait.csv'))
     args = ap.parse_args()
 
+    print(f'表示: なし(画面なしで実行します)  '
+          f'[SDL_VIDEODRIVER={os.environ.get("SDL_VIDEODRIVER")}]')
+    print('様子を目で見たいときは tools/watch_human_model.py を使ってください。')
+
     sets = enumerate_order_recipes('experiment2')
     if args.cases:
         sets = sets[:args.cases]

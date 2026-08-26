@@ -67,6 +67,8 @@ def main():
     ap.add_argument('--speed', type=float, default=1.0,
                     help='1.0 で実時間。0.5 で半分の速さ、2.0 で倍速')
     ap.add_argument('--gif', default=None, help='録画して保存する GIF のパス')
+    ap.add_argument('--headless', action='store_true',
+                    help='ウィンドウを開かない(画面のない環境や録画だけしたいとき)')
     args = ap.parse_args()
 
     sets = enumerate_order_recipes('experiment2')
@@ -97,19 +99,23 @@ def main():
 
     # play=True にすると Game が実ウィンドウを作る(play=False は隠しSurface)。
     # 中身の描画は同じで、見えるかどうかだけの違い。
-    game = Game(env, play=True)
-    pygame.display.quit()          # dummy で初期化済みなら捨てて開き直す
+    if args.headless:
+        os.environ['SDL_VIDEODRIVER'] = 'dummy'
+    game = Game(env, play=not args.headless)
+    pygame.display.quit()          # 初期化済みのドライバを捨てて開き直す
     try:
         pygame.display.init()
         game.on_init()
     except pygame.error as e:
         print(f'ウィンドウを開けませんでした: {e}')
-        print('画面のない環境では --gif を付けて録画してください。')
+        print('画面のない環境では --headless --gif out.gif で録画してください。')
         return
     pygame.display.set_caption(
         f'{args.model} / d={args.d} / {target_label}')
-    print(f'描画ドライバ: {pygame.display.get_driver()}'
-          f"  (dummy なら画面には出ません)")
+    driver = pygame.display.get_driver()
+    visible = driver != 'dummy'
+    print(f'表示: {"ウィンドウを開きます" if visible else "なし(画面には出ません)"}'
+          f'  [描画ドライバ: {driver}]')
     clock = pygame.time.Clock()
     frames = []
 
@@ -165,6 +171,10 @@ def main():
             print(f'録画を保存しました -> {args.gif}')
         except ImportError:
             print('GIF 保存には imageio が要ります: pip install imageio')
+
+    if args.headless:
+        pygame.quit()
+        return
 
     # 最後の盤面を見られるように、閉じられるまで待つ。
     print('(ウィンドウの×を押すか、Ctrl+C で終了します)')
