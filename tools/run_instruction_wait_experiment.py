@@ -230,8 +230,14 @@ def main():
     ap.add_argument('--qualities', default=','.join(QUALITIES))
     ap.add_argument('--budgets', default=','.join(str(d) for d in SKIP_BUDGETS))
     ap.add_argument('--shard', default=None, help='"i/n" 形式')
+    ap.add_argument('--max-seconds', type=float, default=100.0,
+                    help='1試行の制限時間(ゲーム内秒)')
     ap.add_argument('--out', default=str(ROOT / 'results' / 'instruction_wait.csv'))
     args = ap.parse_args()
+
+    global MAX_STEPS
+    MAX_STEPS = int(args.max_seconds / STEP_SECONDS)
+    H.MAX_SECONDS_OVERRIDE = args.max_seconds
 
     print(f'表示: なし(画面なしで実行します)  '
           f'[SDL_VIDEODRIVER={os.environ.get("SDL_VIDEODRIVER")}]')

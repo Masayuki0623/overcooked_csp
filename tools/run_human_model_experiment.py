@@ -49,8 +49,13 @@ SKIP_BUDGETS = (0, 2, 4)
 MAX_STEPS = 1000   # ゲーム内100秒。max_num_timesteps と同じ。
 
 
+MAX_SECONDS_OVERRIDE = None
+
+
 def make_env(map_name, seed, preset, recipes=None):
     kw = dict(MAP_SETTINGS[map_name])
+    if MAX_SECONDS_OVERRIDE:
+        kw['max_num_timesteps'] = MAX_SECONDS_OVERRIDE
     kw['order_recipes'] = (list(recipes) if recipes is not None
                            else generate_order_recipes(preset, random.Random(seed)))
     env = OvercookedEnvironment(MapSetting(**kw))
