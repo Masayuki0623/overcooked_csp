@@ -1,0 +1,163 @@
+seed,orders,quality,skip_budget,human_model,served,completed,makespan_actual_s,unfinished_dish,human_stall,human_stall_count,ai_stall,ai_stall_count
+0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,good,0,follow_plan,3,1,21.9,,,0,,0
+0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,bad,2,follow_plan,3,1,28.3,,,0,,0
+0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,random,4,follow_plan,3,1,21.9,,,0,,0
+1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,bad,0,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,handover_onion_tomato :: ターゲットの完成品が入った鍋が見つかりません,803
+1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,random,2,follow_plan,3,1,21.9,,,0,,0
+2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,good,4,follow_plan,3,1,21.9,,,0,,0
+2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,random,0,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,handover_onion_tomato :: ターゲットの完成品が入った鍋が見つかりません,801
+3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,good,2,follow_plan,3,1,23.3,,,0,,0
+3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,bad,4,follow_plan,3,1,26.7,,,0,,0
+4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,good,0,follow_plan,3,1,26.7,,,0,,0
+4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,bad,2,follow_plan,3,1,26.7,,,0,,0
+4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,random,4,follow_plan,3,1,26.7,,,0,,0
+5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,bad,0,follow_plan,3,1,26.9,,,0,,0
+5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,random,2,follow_plan,3,1,23.5,,,0,,0
+6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,good,4,follow_plan,3,1,24.7,,,0,,0
+6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,random,0,follow_plan,3,1,31.3,,,0,,0
+7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,good,2,follow_plan,3,1,28.3,,,0,cook_lettuce_onion :: 調理完了 (Done),1
+7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,bad,4,follow_plan,3,1,28.3,,,0,,0
+8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,good,0,follow_plan,3,1,29.5,,,0,,0
+8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,bad,2,follow_plan,3,1,28.7,,,0,,0
+8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,random,4,follow_plan,3,1,24.7,,,0,,0
+9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,bad,0,follow_plan,3,1,27.1,,,0,,0
+9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,random,2,follow_plan,3,1,26.7,,,0,,0
+10,OnionTomatoSalad|TomatoLettuceSoup|AppleOrangeJuice,good,4,follow_plan,3,1,26.7,,,0,,0
+10,OnionTomatoSalad|TomatoLettuceSoup|AppleOrangeJuice,random,0,follow_plan,0,0,100.0,3品未完(Juice/Salad/Soup),,0,handover_lettuce_tomato :: ターゲットの完成品が入った鍋が見つかりません,873
+11,OnionTomatoSalad|TomatoLettuceSoup|BananaOrangeJuice,good,2,follow_plan,3,1,26.9,,,0,,0
+11,OnionTomatoSalad|TomatoLettuceSoup|BananaOrangeJuice,bad,4,follow_plan,3,1,26.9,,,0,,0
+12,TomatoLettuceSalad|OnionLettuceSoup|AppleBananaJuice,good,0,follow_plan,3,1,22.3,,,0,,0
+12,TomatoLettuceSalad|OnionLettuceSoup|AppleBananaJuice,bad,2,follow_plan,3,1,31.1,,,0,,0
+12,TomatoLettuceSalad|OnionLettuceSoup|AppleBananaJuice,random,4,follow_plan,3,1,32.1,,,0,,0
+13,TomatoLettuceSalad|OnionLettuceSoup|AppleOrangeJuice,bad,0,follow_plan,3,1,32.3,,,0,,0
+13,TomatoLettuceSalad|OnionLettuceSoup|AppleOrangeJuice,random,2,follow_plan,0,0,100.0,3品未完(Juice/Salad/Soup),,0,,0
+14,TomatoLettuceSalad|OnionLettuceSoup|BananaOrangeJuice,good,4,follow_plan,3,1,32.3,,,0,,0
+14,TomatoLettuceSalad|OnionLettuceSoup|BananaOrangeJuice,random,0,follow_plan,3,1,22.3,,,0,,0
+15,TomatoLettuceSalad|OnionTomatoSoup|AppleBananaJuice,good,2,follow_plan,3,1,25.7,,,0,,0
+15,TomatoLettuceSalad|OnionTomatoSoup|AppleBananaJuice,bad,4,follow_plan,3,1,25.7,,,0,,0
+16,TomatoLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,good,0,follow_plan,3,1,25.7,,,0,,0
+16,TomatoLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,bad,2,follow_plan,3,1,25.7,,,0,,0
+16,TomatoLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,random,4,follow_plan,3,1,25.7,,,0,,0
+17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,bad,0,follow_plan,3,1,26.3,,,0,,0
+17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,random,2,follow_plan,0,0,100.0,3品未完(Juice/Salad/Soup),,0,,0
+0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,good,2,follow_plan,3,1,21.9,,,0,,0
+0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,bad,4,follow_plan,3,1,21.9,,,0,,0
+1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,good,0,follow_plan,3,1,21.9,,,0,,0
+1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,bad,2,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,,0
+1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,random,4,follow_plan,3,1,21.9,,,0,,0
+2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,bad,0,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,handover_onion_tomato :: ターゲットの完成品が入った鍋が見つかりません,801
+2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,random,2,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,,0
+3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,good,4,follow_plan,3,1,26.7,,,0,,0
+3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,random,0,follow_plan,0,0,100.0,3品未完(Juice/Salad/Soup),,0,,0
+4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,good,2,follow_plan,3,1,26.7,,,0,,0
+4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,bad,4,follow_plan,3,1,26.7,,,0,,0
+5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,good,0,follow_plan,3,1,26.9,,,0,,0
+5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,bad,2,follow_plan,3,1,26.9,,,0,,0
+5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,random,4,follow_plan,3,1,26.9,,,0,,0
+6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,bad,0,follow_plan,3,1,28.9,,,0,cook_lettuce_onion :: 調理完了 (Done),1
+6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,random,2,follow_plan,3,1,28.3,,,0,,0
+7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,good,4,follow_plan,3,1,24.7,,,0,,0
+7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,random,0,follow_plan,3,1,28.3,,,0,,0
+8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,good,2,follow_plan,3,1,28.5,,,0,cook_lettuce_onion :: 調理完了 (Done),1
+8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,bad,4,follow_plan,3,1,28.7,,,0,,0
+9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,good,0,follow_plan,3,1,26.7,,,0,,0
+9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,bad,2,follow_plan,3,1,26.7,,,0,,0
+9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,random,4,follow_plan,3,1,26.7,,,0,,0
+10,OnionTomatoSalad|TomatoLettuceSoup|AppleOrangeJuice,bad,0,follow_plan,3,1,26.7,,,0,,0
+10,OnionTomatoSalad|TomatoLettuceSoup|AppleOrangeJuice,random,2,follow_plan,3,1,26.7,,,0,,0
+11,OnionTomatoSalad|TomatoLettuceSoup|BananaOrangeJuice,good,4,follow_plan,3,1,26.9,,,0,,0
+11,OnionTomatoSalad|TomatoLettuceSoup|BananaOrangeJuice,random,0,follow_plan,3,1,29.7,,,0,,0
+12,TomatoLettuceSalad|OnionLettuceSoup|AppleBananaJuice,good,2,follow_plan,3,1,28.1,,,0,,0
+12,TomatoLettuceSalad|OnionLettuceSoup|AppleBananaJuice,bad,4,follow_plan,3,1,36.1,,,0,,0
+13,TomatoLettuceSalad|OnionLettuceSoup|AppleOrangeJuice,good,0,follow_plan,3,1,22.3,,,0,,0
+13,TomatoLettuceSalad|OnionLettuceSoup|AppleOrangeJuice,bad,2,follow_plan,3,1,32.1,,,0,,0
+13,TomatoLettuceSalad|OnionLettuceSoup|AppleOrangeJuice,random,4,follow_plan,3,1,32.1,,,0,,0
+14,TomatoLettuceSalad|OnionLettuceSoup|BananaOrangeJuice,bad,0,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,,0
+14,TomatoLettuceSalad|OnionLettuceSoup|BananaOrangeJuice,random,2,follow_plan,3,1,28.3,,,0,,0
+15,TomatoLettuceSalad|OnionTomatoSoup|AppleBananaJuice,good,4,follow_plan,3,1,25.7,,,0,,0
+15,TomatoLettuceSalad|OnionTomatoSoup|AppleBananaJuice,random,0,follow_plan,0,0,100.0,3品未完(Juice/Salad/Soup),,0,handover_onion_tomato :: ターゲットの完成品が入った鍋が見つかりません,857
+16,TomatoLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,good,2,follow_plan,3,1,25.7,,,0,,0
+16,TomatoLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,bad,4,follow_plan,3,1,25.7,,,0,,0
+17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,good,0,follow_plan,3,1,25.9,,,0,,0
+17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,bad,2,follow_plan,3,1,29.3,,,0,,0
+17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,random,4,follow_plan,3,1,27.0,,,0,,0
+0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,good,4,follow_plan,3,1,21.9,,,0,,0
+0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,random,0,follow_plan,3,1,21.9,,,0,,0
+1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,good,2,follow_plan,3,1,21.9,,,0,,0
+1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,bad,4,follow_plan,3,1,21.9,,,0,,0
+2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,good,0,follow_plan,3,1,21.9,,,0,,0
+2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,bad,2,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,,0
+2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,random,4,follow_plan,3,1,21.9,,,0,,0
+3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,bad,0,follow_plan,3,1,27.1,,,0,,0
+3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,random,2,follow_plan,3,1,26.7,,,0,,0
+4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,good,4,follow_plan,3,1,26.7,,,0,,0
+4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,random,0,follow_plan,3,1,26.7,,,0,,0
+5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,good,2,follow_plan,3,1,26.9,,,0,,0
+5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,bad,4,follow_plan,3,1,26.9,,,0,,0
+6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,good,0,follow_plan,3,1,29.3,,,0,,0
+6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,bad,2,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,chop_apple :: 空きカウンターがありません,167
+6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,random,4,follow_plan,3,1,28.3,,,0,,0
+7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,bad,0,follow_plan,3,1,31.1,,,0,,0
+7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,random,2,follow_plan,3,1,28.3,,,0,,0
+8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,good,4,follow_plan,3,1,24.7,,,0,,0
+8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,random,0,follow_plan,3,1,29.5,,,0,,0
+9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,good,2,follow_plan,3,1,26.7,,,0,,0
+9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,bad,4,follow_plan,3,1,26.7,,,0,,0
+10,OnionTomatoSalad|TomatoLettuceSoup|AppleOrangeJuice,good,0,follow_plan,3,1,26.7,,,0,,0
+10,OnionTomatoSalad|TomatoLettuceSoup|AppleOrangeJuice,bad,2,follow_plan,3,1,26.7,,,0,,0
+10,OnionTomatoSalad|TomatoLettuceSoup|AppleOrangeJuice,random,4,follow_plan,3,1,26.7,,,0,,0
+11,OnionTomatoSalad|TomatoLettuceSoup|BananaOrangeJuice,bad,0,follow_plan,3,1,26.9,,,0,,0
+11,OnionTomatoSalad|TomatoLettuceSoup|BananaOrangeJuice,random,2,follow_plan,3,1,26.9,,,0,,0
+12,TomatoLettuceSalad|OnionLettuceSoup|AppleBananaJuice,good,4,follow_plan,3,1,32.1,,,0,,0
+12,TomatoLettuceSalad|OnionLettuceSoup|AppleBananaJuice,random,0,follow_plan,0,0,100.0,3品未完(Juice/Salad/Soup),,0,handover_lettuce_onion :: ターゲットの完成品が入った鍋が見つかりません,989
+13,TomatoLettuceSalad|OnionLettuceSoup|AppleOrangeJuice,good,2,follow_plan,3,1,28.1,,,0,,0
+13,TomatoLettuceSalad|OnionLettuceSoup|AppleOrangeJuice,bad,4,follow_plan,3,1,32.1,,,0,,0
+14,TomatoLettuceSalad|OnionLettuceSoup|BananaOrangeJuice,good,0,follow_plan,3,1,22.3,,,0,,0
+14,TomatoLettuceSalad|OnionLettuceSoup|BananaOrangeJuice,bad,2,follow_plan,3,1,32.3,,,0,,0
+14,TomatoLettuceSalad|OnionLettuceSoup|BananaOrangeJuice,random,4,follow_plan,3,1,32.3,,,0,,0
+15,TomatoLettuceSalad|OnionTomatoSoup|AppleBananaJuice,bad,0,follow_plan,3,1,25.9,,,0,,0
+15,TomatoLettuceSalad|OnionTomatoSoup|AppleBananaJuice,random,2,follow_plan,0,0,100.0,3品未完(Juice/Salad/Soup),,0,,0
+16,TomatoLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,good,4,follow_plan,3,1,25.7,,,0,,0
+16,TomatoLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,random,0,follow_plan,3,1,25.7,,,0,,0
+17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,good,2,follow_plan,3,1,25.9,,,0,,0
+17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,bad,4,follow_plan,3,1,31.9,,,0,,0
+0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,bad,0,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,handover_onion_tomato :: ターゲットの完成品が入った鍋が見つかりません,833
+0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,random,2,follow_plan,3,1,21.9,,,0,,0
+1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,good,4,follow_plan,3,1,21.9,,,0,,0
+1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,random,0,follow_plan,3,1,21.9,,,0,,0
+2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,good,2,follow_plan,3,1,21.9,,,0,,0
+2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,bad,4,follow_plan,3,1,21.9,,,0,,0
+3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,good,0,follow_plan,3,1,22.3,,,0,,0
+3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,bad,2,follow_plan,3,1,26.7,,,0,,0
+3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,random,4,follow_plan,3,1,26.7,,,0,,0
+4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,bad,0,follow_plan,3,1,26.7,,,0,,0
+4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,random,2,follow_plan,3,1,26.7,,,0,,0
+5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,good,4,follow_plan,3,1,26.9,,,0,,0
+5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,random,0,follow_plan,3,1,22.3,,,0,,0
+6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,good,2,follow_plan,3,1,28.3,,,0,cook_lettuce_onion :: 調理完了 (Done),1
+6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,bad,4,follow_plan,3,1,28.7,,,0,,0
+7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,good,0,follow_plan,3,1,29.3,,,0,,0
+7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,bad,2,follow_plan,3,1,28.3,,,0,,0
+7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,random,4,follow_plan,3,1,28.3,,,0,,0
+8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,bad,0,follow_plan,3,1,28.9,,,0,cook_lettuce_onion :: 調理完了 (Done),1
+8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,random,2,follow_plan,3,1,28.5,,,0,cook_lettuce_onion :: 調理完了 (Done),1
+9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,good,4,follow_plan,3,1,26.7,,,0,,0
+9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,random,0,follow_plan,3,1,26.7,,,0,,0
+10,OnionTomatoSalad|TomatoLettuceSoup|AppleOrangeJuice,good,2,follow_plan,3,1,26.7,,,0,,0
+10,OnionTomatoSalad|TomatoLettuceSoup|AppleOrangeJuice,bad,4,follow_plan,3,1,26.7,,,0,,0
+11,OnionTomatoSalad|TomatoLettuceSoup|BananaOrangeJuice,good,0,follow_plan,0,0,100.0,3品未完(Juice/Salad/Soup),,0,handover_lettuce_tomato :: ターゲットの完成品が入った鍋が見つかりません,857
+11,OnionTomatoSalad|TomatoLettuceSoup|BananaOrangeJuice,bad,2,follow_plan,3,1,26.9,,,0,,0
+11,OnionTomatoSalad|TomatoLettuceSoup|BananaOrangeJuice,random,4,follow_plan,3,1,26.9,,,0,,0
+12,TomatoLettuceSalad|OnionLettuceSoup|AppleBananaJuice,bad,0,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,,0
+12,TomatoLettuceSalad|OnionLettuceSoup|AppleBananaJuice,random,2,follow_plan,3,1,33.9,,,0,,0
+13,TomatoLettuceSalad|OnionLettuceSoup|AppleOrangeJuice,good,4,follow_plan,3,1,32.1,,,0,,0
+13,TomatoLettuceSalad|OnionLettuceSoup|AppleOrangeJuice,random,0,follow_plan,0,0,100.0,3品未完(Juice/Salad/Soup),,0,,0
+14,TomatoLettuceSalad|OnionLettuceSoup|BananaOrangeJuice,good,2,follow_plan,3,1,28.3,,,0,,0
+14,TomatoLettuceSalad|OnionLettuceSoup|BananaOrangeJuice,bad,4,follow_plan,3,1,32.3,,,0,,0
+15,TomatoLettuceSalad|OnionTomatoSoup|AppleBananaJuice,good,0,follow_plan,3,1,25.7,,,0,,0
+15,TomatoLettuceSalad|OnionTomatoSoup|AppleBananaJuice,bad,2,follow_plan,3,1,25.7,,,0,,0
+15,TomatoLettuceSalad|OnionTomatoSoup|AppleBananaJuice,random,4,follow_plan,3,1,25.7,,,0,,0
+16,TomatoLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,bad,0,follow_plan,3,1,25.9,,,0,,0
+16,TomatoLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,random,2,follow_plan,3,1,25.7,,,0,,0
+17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,good,4,follow_plan,3,1,25.9,,,0,,0
+17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,random,0,follow_plan,3,1,30.5,,,0,,0

@@ -987,7 +987,7 @@ class TaskAgent:
                     min_dist = float('inf')
                     local_target_merge_loc = None
                     for pos, obj in env.pos_obj.items():
-                        if self._is_available_object(obj):
+                        if self._is_available_object(obj) and self.can_use_position(env, pos):
                             obj_name = getattr(obj, 'full_name', '')
                             parts = obj_name.replace('Cooking', 'Chopped').replace('Cooked', 'Chopped').replace('Charred', 'Chopped').replace('Mixing', 'Chopped').replace('Mixed', 'Chopped').split('-')
 
@@ -1062,6 +1062,8 @@ class TaskAgent:
 
         for pos, obj in env.pos_obj.items():
             if not self._is_available_object(obj):
+                continue
+            if not self.can_use_position(env, pos):
                 continue
             if only_assigned_counter and assigned_counter and pos != assigned_counter:
                 continue
@@ -1240,6 +1242,24 @@ class TaskAgent:
             return self.move_to(env, target_ing_loc, dynamic_obstacles=dynamic_obstacles), "食材の取得"
 
         return (0, 0), "必要な食材 (Chopped) を待機中"
+
+    @classmethod
+    def can_use_position(cls, env, pos):
+        """その場所の物に手を届かせられるか。
+
+        盤面を無条件に走査すると、仕切りの向こうの食材を目標に選んでしまい、
+        そこへ行けないまま (0,0) を返し続けることになる。実行側は「行ける
+        場所の物」しか対象にしてはいけない。
+        """
+        if pos is None:
+            return False
+        rch = cls._reach_from(env)
+        w, h = env.world_width, env.world_height
+        for dx, dy in ((0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)):
+            nx, ny = pos[0] + dx, pos[1] + dy
+            if 0 <= nx < w and 0 <= ny < h and rch[nx][ny]:
+                return True
+        return False
 
     @staticmethod
     def _counter_covers(env, pos, needed_names):
@@ -1478,7 +1498,8 @@ class TaskAgent:
         min_dist = float('inf')
         
         for pos, obj in env.pos_obj.items():
-            if self._is_available_object(obj) and target_ing_name in obj.full_name:
+            if (self._is_available_object(obj) and target_ing_name in obj.full_name
+                    and self.can_use_position(env, pos)):
                 dist = abs(self_pos[0]-pos[0]) + abs(self_pos[1]-pos[1])
                 if dist < min_dist:
                     min_dist = dist
