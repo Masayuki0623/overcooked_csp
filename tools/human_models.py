@@ -228,12 +228,16 @@ class HumanModel:
 
         # 実行中のタスクがまだ残っていれば続ける。終わった/不要になった
         # ときだけ選び直す(どちらも一覧から消えるので同じ判定でよい)。
-        keep = next((t for t in options if t['id'] == self.current_id), None)
+        # 実行中のタスクは、一覧から消えるまで持ち続ける。着手可能かどうかで
+        # 判断すると、持ち物の変化で毎フレーム可否が入れ替わり、2つの作業の
+        # 間を往復し続けることがある。仕様は「終わったら」「不要になったら」
+        # 選び直す、なので一覧に残っているかどうかで見る。
+        keep = next((t for t in tasks if t['id'] == self.current_id), None)
         if keep is None:
             # 一覧が古いかもしれないので作り直してから確認する。
             tasks = self._tasks(env, refresh=True)
             options = self.available_tasks(env, tasks)
-            keep = next((t for t in options if t['id'] == self.current_id), None)
+            keep = next((t for t in tasks if t['id'] == self.current_id), None)
 
         if keep is not None and self.stuck >= STUCK_LIMIT:
             # 安全網。まったく進まないまま長く経ったので別のものにする。

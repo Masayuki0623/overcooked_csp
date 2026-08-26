@@ -932,7 +932,12 @@ class TaskAgent:
         if holding_name and len(held_ings) < len(holding_parts):
             # 不要なものを持っている場合は捨てる
             # print(f"[DEBUG] cook:drop_unwanted holding_parts={holding_parts} held_ings={held_ings} missing={missing_ings}")
-            return self.drop_unwanted_item(env, holding, reason=f"不要なもの({holding_name})を持っています", dynamic_obstacles=dynamic_obstacles)
+            # 置き場の管理中でも、どの工程にも要らない物は手放せなければ
+            # ならない。持ったまま固まると、その人は以後何もできなくなる。
+            # (余った食材を持つのは初心者なら普通に起きる)
+            return self.drop_unwanted_item(
+                env, holding, reason=f"不要なもの({holding_name})を持っています",
+                dynamic_obstacles=dynamic_obstacles, allow_strict_override=True)
             
         # 3. 必要な全てを持っていれば鍋へ
         if set(held_ings) == set(missing_ings):

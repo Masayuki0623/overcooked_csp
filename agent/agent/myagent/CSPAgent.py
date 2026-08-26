@@ -3860,6 +3860,25 @@ class CSPAgent:
                     bucket = held_chopped_unassigned
                 bucket[ing_name] = bucket.get(ing_name, 0) + 1
 
+        # 仕切りのある地図では、刻んだ食材が向こう側の台に置かれていることが
+        # ある。それを「もう刻んである」と数えると、必要とする側は取りに行け
+        # ないまま工程が永久に進まない(参加者が自分の側でスープの具材を刻むと
+        # AI が鍋に入れられず、スープが完成しない)。届く範囲の物だけ数える。
+        partitioned = self._map_is_partitioned(env)
+        usable_components = set()
+        if partitioned:
+            for gs in ('Pot', 'Blender', 'Delivery'):
+                for pos in env.get_pos_by_obj_gs(gs=gs):
+                    usable_components |= self._components_touching(env, tuple(pos))
+
+        def reachable_for_use(location):
+            """その場所の物を、工程を進める側が取りに行けるか。"""
+            if not partitioned or location is None:
+                return True
+            touching = self._components_touching(env, tuple(location))
+            # 調理器具か提供口と同じ側にあれば使える(共有台は両側に触れる)
+            return bool(touching & usable_components)
+
         def register_chopped_item(item, location=None):
             if item is None:
                 return
@@ -3897,7 +3916,15 @@ class CSPAgent:
         # この注文で「切らずに運ぶだけ」にできる食材 -> 運び元カウンター
         carry_sources = {}
 
-        def consume_chopped(ingredient_name, assigned_counter, reserved_counters, order_uid=None):
+        def consume_chopped(ingredient_name, assigned_counter, reserved_counters,
+                            order_uid=None, use_component=None):
+            def usable_here(pos):
+                # 仕切りの向こうに置かれた物は、この注文を進める側からは
+                # 取りに行けない。数に入れると工程が永久に止まる。
+                if use_component is None or pos is None:
+                    return True
+                return use_component in self._components_touching(env, tuple(pos))
+
             preferred_positions = []
             if assigned_counter is not None:
                 preferred_positions.append(assigned_counter)
@@ -3919,6 +3946,8 @@ class CSPAgent:
                         preferred_positions.append(pos)
 
             for pos in preferred_positions:
+                if not usable_here(pos):
+                    continue
                 pos_stock = available_chopped_by_pos.get(pos, {})
                 if pos_stock.get(ingredient_name, 0) <= 0:
                     continue
@@ -4112,6 +4141,22 @@ class CSPAgent:
                     mixing_unfinished = not ps.get('mixed', True)
                     break
 
+            # この注文を仕上げる器具・提供口がある側。刻んだ食材はそこから
+            # 取りに行ける場所に無ければ使えない。
+            use_component = None
+            if self._map_is_partitioned(env):
+                if dish_kind == KIND_SOUP:
+                    anchors = env.get_pos_by_obj_gs(gs='Pot')
+                elif is_juice:
+                    anchors = env.get_pos_by_obj_gs(gs='Blender')
+                else:
+                    anchors = env.get_pos_by_obj_gs(gs='Delivery')
+                comps = set()
+                for a in anchors:
+                    comps |= self._components_touching(env, tuple(a))
+                if len(comps) == 1:
+                    use_component = next(iter(comps))
+
             cook_needed = assembly_needed and dish_kind == KIND_SOUP
             # 集め終わっていても、混ぜ終わるまで mix タスクは残す。
             mix_needed = is_juice and (assembly_needed or mixing_unfinished)
@@ -4202,7 +4247,8 @@ class CSPAgent:
                     counter for counter in used_counters
                     if counter is not None and counter != assigned_counter
                 }
-                if consume_chopped(ing, assigned_counter, reserved_other_counters, order_uid=order_uid):
+                if consume_chopped(ing, assigned_counter, reserved_other_counters,
+                                   order_uid=order_uid, use_component=use_component):
                     continue
                 dur = self._task_duration_frames(env, 'chop', ing.lower(), order_idx, assigned_counter)
                 if dur is None:
