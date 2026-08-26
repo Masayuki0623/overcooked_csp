@@ -155,8 +155,12 @@ def run_trial(case, recipes, quality, skip_budget, human_model='greedy'):
 
         cur = current_task_id(ai, 0)
         now = env.current_time
-        if plan_owner is None:
-            plan_owner = plan_owner_of(ai, verb, obj)
+        if wait_any_seconds is None:
+            # 指示が計画に反映されるまで数フレームかかるので、消える直前まで
+            # 追い続けて「最終的にどちらの担当だったか」を記録する。
+            owner_now = plan_owner_of(ai, verb, obj)
+            if owner_now != '(計画に無し)':
+                plan_owner = owner_now
         if wait_any_seconds is None and not remaining_matches(ai, verb, obj):
             # 計画から消えた = 誰かがやり終えた
             wait_any_seconds = round(now, 1)

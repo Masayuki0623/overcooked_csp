@@ -194,6 +194,12 @@ class CSPAgent:
         # ときは「相手の担当タスクを待ち続ける」わけにいかない。この旗が
         # 立っていると、手待ちになったときに相手の担当も引き受ける。
         self.partner_is_external = False
+        # 指示されたタスクを必ず AI 側の担当にするか。
+        # 「AI に指示する」という行為の意味からは常に True が筋だが、いまの
+        # 実装で有効にすると、相手が同じ食材を自分の側で刻んでしまい、その
+        # 刻んだ物に AI が手を届かせられずに止まる(下の注記を参照)。
+        # 先にそちらを直してから既定を True にすること。
+        self.force_instruction_to_ai = False
         # 「いま即座に着手できる cook タスク」を (動詞, 対象) で保持する。
         # __call__ ごとに更新し、GamePlay の指示タイミング監視(enable_cook)が読む。
         self.ready_cook_actions = set()
@@ -487,6 +493,32 @@ class CSPAgent:
                         pending['status'] = 'done'
                         continue
 
+                    target_ids = {tasks[idx].get('id') for idx in group_indices}
+
+                    # --- 指示を受けてから AI が片づけた分を、毎回引き直す ---
+                    # 完了通知に頼ると、chop や提供は別経路で完了扱いになるため
+                    # 一度も引かれず、再計画のたびに初期値で縛り直すことになる
+                    # (実質的に猶予が無制限に延びる)。計画から消えたかどうかで
+                    # 数えれば、どの経路で終わっても取りこぼさない。
+                    current_ids = {t.get('id') for t in tasks}
+                    watched = pending.get('_watched_ai_task_ids')
+                    if watched:
+                        gone = [tid for tid in watched if tid not in current_ids]
+                        if gone:
+                            pending['_consumed_tasks'] = (
+                                pending.get('_consumed_tasks', 0) + len(gone))
+                    # 次回のために、いま AI の担当として残っている他タスクを控える
+                    ai_now = {t.get('id')
+                              for t in (self.schedule_per_agent or {}).get(0, [])}
+                    pending['_watched_ai_task_ids'] = {
+                        tid for tid in ai_now
+                        if tid in current_ids and tid not in target_ids
+                        and tid not in self._dependency_ids_of(tasks, group_indices)
+                    }
+                    consumed = pending.get('_consumed_tasks', 0)
+                    remaining = init_budget - consumed
+                    pending['remaining_skip_budget'] = remaining
+
                     budget_bound = max(0, remaining)
                     overage = max(0, -remaining)
 
@@ -532,6 +564,16 @@ class CSPAgent:
                             break
                         ok_k = model.NewBoolVar(f'sb_ok_{matched_idx}')
                         model.Add(sum(counts_vars) <= budget_bound).OnlyEnforceIf(ok_k)
+                        # 指示は AI 宛て(target_idx=0)。相手に振られると AI は
+                        # 永久に着手せず、参加者から見れば完全な無視になる。
+                        # 猶予を満たす担当者は AI 側であることを課す。
+                        # ただし、物理的に AI が行けない作業(仕切りの向こうの
+                        # ミキサー等)まで縛ると解が無くなるので、その場合は課さない。
+                        if (self.force_instruction_to_ai
+                                and is_a1 is not None and is_a1[matched_idx] is not None
+                                and pending.get('target_idx', 0) in (0, None)
+                                and 0 in self._assignable_agents(env, tasks[matched_idx])):
+                            model.AddImplication(ok_k, is_a1[matched_idx].Not())
                         ok_vars.append(ok_k)
 
                     if ok_vars:
@@ -548,6 +590,19 @@ class CSPAgent:
                     pass
         except Exception:
             pass
+
+    def _dependency_ids_of(self, tasks, group_indices):
+        """指示対象の前提になっているタスクの id 集合。
+
+        前提工程は「横入りされた他の作業」ではないので、猶予の消費に数えない。
+        """
+        out = set()
+        for idx in group_indices:
+            for j in self._get_dep_indices_for_target(tasks, idx):
+                tid = tasks[j].get('id')
+                if tid is not None:
+                    out.add(tid)
+        return out
 
     def _update_skip_budget_on_completion(self, completed_tid, completed_agent_idx, completed_dur_frames):
         """タスク完了時に pending_instructions の remaining_skip_budget を更新しログする。"""
