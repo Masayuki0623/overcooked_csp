@@ -1209,6 +1209,12 @@ class TaskAgent:
         if assigned_counter:
             target_ing_loc, _, assigned_counter_candidate, _ = self._find_chopped_pickup_target(
                 env, ingredients, missing_ings, assigned_counter, True)
+            # 指定テーブルの中身だけでは足りないなら、拾い上げても行き先は
+            # 同じテーブルで、置き直すだけの往復になる。不足分が他所から
+            # 来るまで手を出さない。
+            if (target_ing_loc == assigned_counter
+                    and not self._counter_covers(env, assigned_counter, missing_ings)):
+                target_ing_loc = None
             if target_ing_loc is None:
                 # 指定テーブルに「一部だけ」乗っている状態で、それを拾ってしまうと
                 # 次のフレームに同じ場所へ置き直すだけの往復になる。
@@ -1224,10 +1230,28 @@ class TaskAgent:
         if target_ing_loc is None and assigned_counter_candidate is not None:
             target_ing_loc = assigned_counter_candidate
 
+        # 指定テーブルの物を拾い上げても、置き先は同じテーブルなので
+        # 置き直すだけの往復になる。不足分が届くまで手を出さない。
+        if (target_ing_loc == assigned_counter
+                and not self._counter_covers(env, assigned_counter, missing_ings)):
+            return (0, 0), "不足分がそろうのを待機中"
+
         if target_ing_loc:
             return self.move_to(env, target_ing_loc, dynamic_obstacles=dynamic_obstacles), "食材の取得"
 
         return (0, 0), "必要な食材 (Chopped) を待機中"
+
+    @staticmethod
+    def _counter_covers(env, pos, needed_names):
+        """そのテーブルの物だけで、必要な食材が全部そろうか。"""
+        if pos is None or not needed_names:
+            return False
+        obj = env.pos_obj.get(pos)
+        name = getattr(obj, 'full_name', '') if obj is not None else ''
+        if not name:
+            return False
+        parts = set(name.split('-'))
+        return all(n in parts for n in needed_names)
 
     @staticmethod
     def _blocked_cutboards(env, cutboard_locs, target_ing_name, chopping_ing_name):
