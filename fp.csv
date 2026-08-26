@@ -1,0 +1,163 @@
+seed,orders,quality,skip_budget,human_model,status,target,target_verb,target_obj,wait_seconds,wait_censored,tasks_before,verbs_before,durations_before,ai_idle_seconds_while_waiting,ai_idle_pct_while_waiting,exec_rank,natural_rank,rank_gain,plan_owner,wait_any_seconds,wait_any_censored,done_by_other,served,completed,makespan_actual_s,human_idle_pct,wall_seconds
+0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,good,0,follow_plan,ok,chop_tomato,chop,tomato,21.9,1,8,chop|chop|chop|cook|chop|chop|chop|chop,1.7|2.4|0.8|0.4|2.9|3.4|2.3|0.8,0.0,0.0,,,,人,2.1,0,1,3,1,21.9,44.3,19.5
+0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,random,4,follow_plan,ok,chop_lettuce,chop,lettuce,0.0,0,0,,,0.0,0.0,1,1,0,AI,1.7,0,0,3,1,21.9,44.3,19.6
+1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,random,2,follow_plan,ok,chop_tomato,chop,tomato,21.9,1,8,chop|chop|chop|cook|chop|chop|chop|chop,1.7|2.4|0.8|0.4|2.9|3.4|2.3|0.8,0.0,0.0,,,,人,2.1,0,1,3,1,21.9,44.7,19.2
+2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,random,0,follow_plan,ok,chop_banana,chop,banana,0.0,0,0,,,0.0,0.0,1,4,3,AI,2.5,0,0,1,0,100.0,7.0,72.1
+3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,bad,4,follow_plan,ok,chop_banana,chop,banana,2.1,0,1,chop,2.1,0.0,0.0,2,2,0,AI,5.7,0,0,3,1,26.7,33.7,21.2
+4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,bad,2,follow_plan,ok,chop_apple,chop,apple,0.0,0,0,,,0.0,0.0,1,1,0,AI,2.1,0,0,3,1,26.7,33.7,20.9
+5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,bad,0,follow_plan,ok,chop_orange,chop,orange,0.0,0,0,,,0.0,0.0,1,1,0,AI,2.4,0,0,3,1,26.9,34.2,21.3
+6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,good,4,follow_plan,ok,chop_onion,chop,onion,0.0,0,0,,,0.0,0.0,1,1,0,AI,6.9,0,0,3,1,24.7,38.9,20.6
+7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,good,2,follow_plan,ok,chop_onion,chop,onion,0.0,0,0,,,0.0,0.0,1,1,0,AI,2.6,0,0,3,1,28.3,21.9,21.8
+8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,good,0,follow_plan,ok,chop_onion,chop,onion,0.0,0,0,,,0.0,0.0,1,1,0,AI,6.0,0,0,3,1,29.5,29.2,21.0
+8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,random,4,follow_plan,ok,chop_onion,chop,onion,0.0,0,0,,,0.0,0.0,1,1,0,AI,6.9,0,0,3,1,24.7,38.9,18.8
+9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,random,2,follow_plan,ok,cook_lettuce_tomatosoup,cook,lettuce-tomato soup,8.9,0,3,chop|chop|chop,2.1|3.4|3.4,0.0,0.0,4,,,,0.0,0,0,3,1,26.7,27.7,18.8
+10,OnionTomatoSalad|TomatoLettuceSoup|AppleOrangeJuice,random,0,follow_plan,ok,serve_juice_apple_orangejuice,serve_juice,apple-orange juice,100.0,1,4,chop|chop|chop|chop,2.3|3.5|3.4|2.4,87.3,87.3,,,,人,100.0,1,0,0,0,100.0,98.8,75.0
+11,OnionTomatoSalad|TomatoLettuceSoup|BananaOrangeJuice,bad,4,follow_plan,ok,chop_orange,chop,orange,0.0,0,0,,,0.0,0.0,1,1,0,AI,2.4,0,0,3,1,26.9,27.5,18.5
+12,TomatoLettuceSalad|OnionLettuceSoup|AppleBananaJuice,bad,2,follow_plan,ok,chop_banana,chop,banana,2.7,0,2,chop|chop,1.7|1.0,0.0,0.0,3,4,1,AI,0.3,0,0,3,1,31.1,21.5,20.6
+13,TomatoLettuceSalad|OnionLettuceSoup|AppleOrangeJuice,bad,0,follow_plan,ok,chop_apple,chop,apple,0.0,0,0,,,0.0,0.0,1,3,2,AI,2.1,0,0,3,1,32.3,26.9,21.5
+14,TomatoLettuceSalad|OnionLettuceSoup|BananaOrangeJuice,good,4,follow_plan,ok,chop_onion,chop,onion,5.0,0,3,chop|chop|chop,1.7|0.4|2.9,0.0,0.0,4,5,1,AI,1.4,0,0,3,1,32.3,52.3,24.7
+15,TomatoLettuceSalad|OnionTomatoSoup|AppleBananaJuice,good,2,follow_plan,ok,chop_tomato,chop,tomato,25.7,1,6,chop|chop|chop|chop|cook|chop,1.7|2.8|2.5|1.0|1.2|2.8,0.0,0.0,,,,人,4.9,0,1,3,1,25.7,13.2,16.9
+16,TomatoLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,good,0,follow_plan,ok,chop_tomato,chop,tomato,25.7,1,6,chop|chop|chop|chop|cook|chop,1.7|2.8|2.5|1.0|1.2|2.8,0.0,0.0,,,,人,4.9,0,1,3,1,25.7,13.2,17.0
+16,TomatoLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,random,4,follow_plan,ok,chop_lettuce,chop,lettuce,0.0,0,0,,,0.0,0.0,1,1,0,AI,1.7,0,0,3,1,25.7,13.2,16.6
+17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,random,2,follow_plan,ok,serve_from_counter_onion_tomatosoup,serve_from_counter,onion-tomato soup,100.0,1,2,chop|chop,1.7|2.5,0.0,0.0,,,,人,100.0,1,0,0,0,100.0,0.0,61.5
+0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,good,2,follow_plan,ok,chop_tomato,chop,tomato,21.9,1,8,chop|chop|chop|cook|chop|chop|chop|chop,1.7|2.4|0.8|0.4|2.9|3.4|2.3|0.8,0.0,0.0,,,,人,2.1,0,1,3,1,21.9,44.3,19.5
+1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,good,0,follow_plan,ok,chop_tomato,chop,tomato,21.9,1,8,chop|chop|chop|cook|chop|chop|chop|chop,1.7|2.4|0.8|0.4|2.9|3.4|2.3|0.8,0.0,0.0,,,,人,2.1,0,1,3,1,21.9,44.7,19.3
+1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,random,4,follow_plan,ok,chop_tomato,chop,tomato,21.9,1,8,chop|chop|chop|cook|chop|chop|chop|chop,1.7|2.4|0.8|0.4|2.9|3.4|2.3|0.8,0.0,0.0,,,,人,2.1,0,1,3,1,21.9,44.7,19.2
+2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,random,2,follow_plan,ok,chop_banana,chop,banana,5.0,0,2,chop|chop,1.7|3.3,0.0,0.0,3,4,1,AI,0.3,0,0,1,0,100.0,69.6,71.3
+3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,random,0,follow_plan,ok,serve_juice_apple_bananajuice,serve_juice,apple-banana juice,100.0,1,6,chop|chop|chop|chop|chop|chop,2.3|3.5|3.4|2.4|0.6|1.9,85.9,85.9,,,,人,100.0,1,0,0,0,100.0,98.8,83.4
+4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,bad,4,follow_plan,ok,chop_apple,chop,apple,0.0,0,0,,,0.0,0.0,1,1,0,AI,2.1,0,0,3,1,26.7,33.7,20.4
+5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,bad,2,follow_plan,ok,chop_orange,chop,orange,0.0,0,0,,,0.0,0.0,1,1,0,AI,2.4,0,0,3,1,26.9,34.2,19.7
+6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,bad,0,follow_plan,ok,chop_banana,chop,banana,0.0,0,0,,,0.0,0.0,1,4,3,AI,2.5,0,0,3,1,28.9,14.9,21.6
+7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,good,4,follow_plan,ok,chop_onion,chop,onion,0.0,0,0,,,0.0,0.0,1,1,0,AI,6.9,0,0,3,1,24.7,38.9,18.4
+8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,good,2,follow_plan,ok,chop_onion,chop,onion,0.0,0,0,,,0.0,0.0,1,1,0,AI,2.6,0,0,3,1,28.5,22.5,22.9
+9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,good,0,follow_plan,ok,chop_tomato,chop,tomato,26.7,1,6,chop|chop|chop|cook|chop|handover,2.1|3.4|3.4|1.9|1.9|3.1,0.0,0.0,,,,人,5.1,0,1,3,1,26.7,27.7,18.7
+9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,random,4,follow_plan,ok,cook_lettuce_tomatosoup,cook,lettuce-tomato soup,8.9,0,3,chop|chop|chop,2.1|3.4|3.4,0.0,0.0,4,,,,0.0,0,0,3,1,26.7,27.7,18.4
+10,OnionTomatoSalad|TomatoLettuceSoup|AppleOrangeJuice,random,2,follow_plan,ok,serve_juice_apple_orangejuice,serve_juice,apple-orange juice,26.7,1,6,chop|chop|chop|cook|chop|handover,2.1|3.4|3.4|1.9|1.9|3.1,0.0,0.0,,,,人,9.3,0,1,3,1,26.7,27.7,18.8
+11,OnionTomatoSalad|TomatoLettuceSoup|BananaOrangeJuice,random,0,follow_plan,ok,mix_orange_bananajuice,mix,orange-banana juice,29.7,1,6,chop|chop|chop|chop|cook|handover,2.4|3.6|3.1|3.1|0.8|2.0,0.0,0.0,,,,人,0.7,0,1,3,1,29.7,18.9,20.3
+12,TomatoLettuceSalad|OnionLettuceSoup|AppleBananaJuice,bad,4,follow_plan,ok,chop_banana,chop,banana,8.0,0,4,chop|chop|chop|chop,1.7|0.4|2.7|3.2,0.0,0.0,5,4,-1,AI,2.4,0,0,3,1,36.1,58.4,27.2
+13,TomatoLettuceSalad|OnionLettuceSoup|AppleOrangeJuice,bad,2,follow_plan,ok,chop_apple,chop,apple,2.1,0,2,chop|chop,1.7|0.4,0.0,0.0,3,3,0,AI,1.4,0,0,3,1,32.1,52.0,24.8
+14,TomatoLettuceSalad|OnionLettuceSoup|BananaOrangeJuice,bad,0,follow_plan,ok,chop_orange,chop,orange,0.0,0,0,,,0.0,0.0,1,3,2,AI,2.4,0,0,1,0,100.0,13.7,53.3
+15,TomatoLettuceSalad|OnionTomatoSoup|AppleBananaJuice,good,4,follow_plan,ok,chop_tomato,chop,tomato,25.7,1,6,chop|chop|chop|chop|cook|chop,1.7|2.8|2.5|1.0|1.2|2.8,0.0,0.0,,,,人,4.9,0,1,3,1,25.7,13.2,17.8
+16,TomatoLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,good,2,follow_plan,ok,chop_tomato,chop,tomato,25.7,1,6,chop|chop|chop|chop|cook|chop,1.7|2.8|2.5|1.0|1.2|2.8,0.0,0.0,,,,人,4.9,0,1,3,1,25.7,13.2,17.4
+17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,good,0,follow_plan,ok,chop_tomato,chop,tomato,25.9,1,6,chop|chop|chop|chop|cook|chop,1.7|3.0|2.5|1.0|1.2|2.8,0.0,0.0,,,,人,5.1,0,1,3,1,25.9,13.9,14.2
+17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,random,4,follow_plan,ok,serve_from_counter_onion_tomatosoup,serve_from_counter,onion-tomato soup,27.0,1,7,chop|chop|chop|chop|cook|chop|handover,1.7|3.0|2.5|1.0|1.2|2.8|13.7,0.7,2.6,,,,人,12.2,0,1,3,1,27.0,14.4,12.9
+0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,good,4,follow_plan,ok,chop_tomato,chop,tomato,21.9,1,8,chop|chop|chop|cook|chop|chop|chop|chop,1.7|2.4|0.8|0.4|2.9|3.4|2.3|0.8,0.0,0.0,,,,人,2.1,0,1,3,1,21.9,44.3,19.5
+1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,good,2,follow_plan,ok,chop_tomato,chop,tomato,21.9,1,8,chop|chop|chop|cook|chop|chop|chop|chop,1.7|2.4|0.8|0.4|2.9|3.4|2.3|0.8,0.0,0.0,,,,人,2.1,0,1,3,1,21.9,44.7,19.3
+2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,good,0,follow_plan,ok,chop_tomato,chop,tomato,21.9,1,8,chop|chop|chop|cook|chop|chop|chop|chop,1.7|2.4|0.8|0.4|2.9|3.4|2.3|0.8,0.0,0.0,,,,人,2.1,0,1,3,1,21.9,44.3,19.2
+2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,random,4,follow_plan,ok,chop_banana,chop,banana,5.3,0,4,chop|chop|chop|cook,1.7|2.4|0.8|0.4,0.0,0.0,5,4,-1,AI,8.2,0,0,3,1,21.9,44.7,19.0
+3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,random,2,follow_plan,ok,serve_juice_apple_bananajuice,serve_juice,apple-banana juice,26.7,1,7,chop|chop|chop|cook|chop|chop|handover,2.1|3.6|3.2|1.2|2.6|2.4|2.9,0.0,0.0,,,,人,9.7,0,1,3,1,26.7,33.7,22.7
+4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,random,0,follow_plan,ok,mix_apple_orangejuice,mix,apple-orange juice,26.7,1,7,chop|chop|chop|cook|chop|chop|handover,2.1|3.6|3.2|1.2|2.6|2.4|2.9,0.0,0.0,,,,人,0.6,0,1,3,1,26.7,33.7,21.2
+5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,bad,4,follow_plan,ok,chop_orange,chop,orange,0.0,0,0,,,0.0,0.0,1,1,0,AI,2.4,0,0,3,1,26.9,34.2,21.3
+6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,bad,2,follow_plan,ok,chop_banana,chop,banana,4.2,0,2,chop|chop,1.9|2.3,0.0,0.0,3,4,1,AI,0.4,0,0,1,0,100.0,95.5,86.6
+7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,bad,0,follow_plan,ok,chop_apple,chop,apple,0.0,0,0,,,0.0,0.0,1,3,2,AI,2.1,0,0,3,1,31.1,27.3,20.8
+8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,good,4,follow_plan,ok,chop_onion,chop,onion,0.0,0,0,,,0.0,0.0,1,1,0,AI,6.9,0,0,3,1,24.7,38.9,18.8
+9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,good,2,follow_plan,ok,chop_tomato,chop,tomato,26.7,1,6,chop|chop|chop|cook|chop|handover,2.1|3.4|3.4|1.9|1.9|3.1,0.0,0.0,,,,人,5.1,0,1,3,1,26.7,27.7,18.7
+10,OnionTomatoSalad|TomatoLettuceSoup|AppleOrangeJuice,good,0,follow_plan,ok,chop_tomato,chop,tomato,26.7,1,6,chop|chop|chop|cook|chop|handover,2.1|3.4|3.4|1.9|1.9|3.1,0.0,0.0,,,,人,5.1,0,1,3,1,26.7,27.7,19.7
+10,OnionTomatoSalad|TomatoLettuceSoup|AppleOrangeJuice,random,4,follow_plan,ok,serve_juice_apple_orangejuice,serve_juice,apple-orange juice,26.7,1,6,chop|chop|chop|cook|chop|handover,2.1|3.4|3.4|1.9|1.9|3.1,0.0,0.0,,,,人,9.3,0,1,3,1,26.7,27.7,19.4
+11,OnionTomatoSalad|TomatoLettuceSoup|BananaOrangeJuice,random,2,follow_plan,ok,mix_orange_bananajuice,mix,orange-banana juice,26.9,1,6,chop|chop|chop|cook|chop|handover,2.4|3.3|3.4|1.9|1.9|3.1,0.0,0.0,,,,人,8.4,0,1,3,1,26.9,27.5,18.7
+12,TomatoLettuceSalad|OnionLettuceSoup|AppleBananaJuice,random,0,follow_plan,ok,handover_lettuce_onionsoup,handover,lettuce-onion soup,0.3,0,1,chop,0.3,0.0,0.0,2,6,4,AI,100.0,1,0,0,0,100.0,0.0,89.5
+13,TomatoLettuceSalad|OnionLettuceSoup|AppleOrangeJuice,bad,4,follow_plan,ok,chop_apple,chop,apple,2.1,0,2,chop|chop,1.7|0.4,0.0,0.0,3,3,0,AI,4.8,0,0,3,1,32.1,52.0,24.3
+14,TomatoLettuceSalad|OnionLettuceSoup|BananaOrangeJuice,bad,2,follow_plan,ok,chop_orange,chop,orange,2.1,0,2,chop|chop,1.7|0.4,0.0,0.0,3,3,0,AI,1.4,0,0,3,1,32.3,52.3,23.2
+15,TomatoLettuceSalad|OnionTomatoSoup|AppleBananaJuice,bad,0,follow_plan,ok,chop_apple,chop,apple,0.0,0,0,,,0.0,0.0,1,2,1,AI,2.1,0,0,3,1,25.9,10.8,17.9
+16,TomatoLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,good,4,follow_plan,ok,chop_tomato,chop,tomato,25.7,1,6,chop|chop|chop|chop|cook|chop,1.7|2.8|2.5|1.0|1.2|2.8,0.0,0.0,,,,人,4.9,0,1,3,1,25.7,13.2,17.9
+17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,good,2,follow_plan,ok,chop_tomato,chop,tomato,25.9,1,6,chop|chop|chop|chop|cook|chop,1.7|3.0|2.5|1.0|1.2|2.8,0.0,0.0,,,,人,5.1,0,1,3,1,25.9,13.9,17.7
+0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,bad,0,follow_plan,ok,chop_apple,chop,apple,0.0,0,0,,,0.0,0.0,1,3,2,AI,2.1,0,0,1,0,100.0,6.3,75.4
+1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,good,4,follow_plan,ok,chop_tomato,chop,tomato,21.9,1,8,chop|chop|chop|cook|chop|chop|chop|chop,1.7|2.4|0.8|0.4|2.9|3.4|2.3|0.8,0.0,0.0,,,,人,2.1,0,1,3,1,21.9,44.7,20.2
+2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,good,2,follow_plan,ok,chop_tomato,chop,tomato,21.9,1,8,chop|chop|chop|cook|chop|chop|chop|chop,1.7|2.4|0.8|0.4|2.9|3.4|2.3|0.8,0.0,0.0,,,,人,2.1,0,1,3,1,21.9,44.3,19.3
+3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,good,0,follow_plan,ok,chop_lettuce,chop,lettuce,0.0,0,0,,,0.0,0.0,1,4,3,AI,4.5,0,0,3,1,22.3,45.3,19.5
+3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,random,4,follow_plan,ok,serve_juice_apple_bananajuice,serve_juice,apple-banana juice,26.7,1,7,chop|chop|chop|cook|chop|chop|handover,2.1|3.6|3.2|1.2|2.6|2.4|2.9,0.0,0.0,,,,人,9.7,0,1,3,1,26.7,33.7,21.4
+4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,random,2,follow_plan,ok,mix_apple_orangejuice,mix,apple-orange juice,26.7,1,7,chop|chop|chop|cook|chop|chop|handover,2.1|3.6|3.2|1.2|2.6|2.4|2.9,0.0,0.0,,,,人,8.3,0,1,3,1,26.7,33.7,21.0
+5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,random,0,follow_plan,ok,chop_lettuce,chop,lettuce,0.0,0,0,,,0.0,0.0,1,4,3,AI,4.5,0,0,3,1,22.3,45.7,19.5
+6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,bad,4,follow_plan,ok,chop_banana,chop,banana,4.4,0,2,chop|chop,1.9|2.5,0.0,0.0,3,4,1,AI,7.8,0,0,3,1,28.7,27.2,22.5
+7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,bad,2,follow_plan,ok,chop_apple,chop,apple,4.4,0,2,chop|chop,1.9|2.5,0.0,0.0,3,3,0,AI,1.6,0,0,3,1,28.3,26.1,20.6
+8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,bad,0,follow_plan,ok,chop_banana,chop,banana,0.0,0,0,,,0.0,0.0,1,4,3,AI,2.5,0,0,3,1,28.9,14.9,21.6
+9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,good,4,follow_plan,ok,chop_tomato,chop,tomato,26.7,1,6,chop|chop|chop|cook|chop|handover,2.1|3.4|3.4|1.9|1.9|3.1,0.0,0.0,,,,人,5.1,0,1,3,1,26.7,27.7,18.7
+10,OnionTomatoSalad|TomatoLettuceSoup|AppleOrangeJuice,good,2,follow_plan,ok,chop_tomato,chop,tomato,26.7,1,6,chop|chop|chop|cook|chop|handover,2.1|3.4|3.4|1.9|1.9|3.1,0.0,0.0,,,,人,5.1,0,1,3,1,26.7,27.7,18.9
+11,OnionTomatoSalad|TomatoLettuceSoup|BananaOrangeJuice,good,0,follow_plan,ok,chop_lettuce,chop,lettuce,0.0,0,0,,,0.0,0.0,1,4,3,AI,1.7,0,0,0,0,100.0,0.7,70.0
+11,OnionTomatoSalad|TomatoLettuceSoup|BananaOrangeJuice,random,4,follow_plan,ok,mix_orange_bananajuice,mix,orange-banana juice,26.9,1,6,chop|chop|chop|cook|chop|handover,2.4|3.3|3.4|1.9|1.9|3.1,0.0,0.0,,,,人,8.4,0,1,3,1,26.9,27.5,18.7
+12,TomatoLettuceSalad|OnionLettuceSoup|AppleBananaJuice,random,2,follow_plan,ok,handover_lettuce_onionsoup,handover,lettuce-onion soup,8.5,0,9,chop|chop|chop|chop|chop|chop|chop|chop|cook,1.7|0.4|0.3|0.3|0.6|1.4|0.4|2.6|0.8,0.0,0.0,10,6,-4,AI,0.3,0,0,3,1,33.9,25.1,24.0
+13,TomatoLettuceSalad|OnionLettuceSoup|AppleOrangeJuice,random,0,follow_plan,ok,serve_juice_apple_orangejuice,serve_juice,apple-orange juice,100.0,1,12,chop|chop|chop|chop|cook|chop|handover|chop|chop|cook|chop|chop,1.5|3.3|3.4|2.5|1.9|2.2|13.4|2.5|2.8|1.7|2.4|2.8,40.4,40.4,,,,人,100.0,1,0,0,0,100.0,98.8,68.4
+14,TomatoLettuceSalad|OnionLettuceSoup|BananaOrangeJuice,bad,4,follow_plan,ok,chop_orange,chop,orange,2.1,0,2,chop|chop,1.7|0.4,0.0,0.0,3,3,0,AI,5.0,0,0,3,1,32.3,52.3,23.0
+15,TomatoLettuceSalad|OnionTomatoSoup|AppleBananaJuice,bad,2,follow_plan,ok,chop_apple,chop,apple,1.7,0,1,chop,1.7,0.0,0.0,2,2,0,AI,4.5,0,0,3,1,25.7,13.2,18.2
+16,TomatoLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,bad,0,follow_plan,ok,chop_apple,chop,apple,0.0,0,0,,,0.0,0.0,1,2,1,AI,2.1,0,0,3,1,25.9,10.8,17.7
+17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,good,4,follow_plan,ok,chop_tomato,chop,tomato,25.9,1,6,chop|chop|chop|chop|cook|chop,1.7|3.0|2.5|1.0|1.2|2.8,0.0,0.0,,,,人,5.1,0,1,3,1,25.9,13.9,13.3
+0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,bad,2,follow_plan,ok,chop_apple,chop,apple,4.1,0,2,chop|chop,1.7|2.4,0.0,0.0,3,3,0,AI,3.1,0,0,3,1,28.3,24.7,22.4
+1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,bad,0,follow_plan,ok,chop_orange,chop,orange,0.0,0,0,,,0.0,0.0,1,4,3,AI,2.4,0,0,1,0,100.0,6.8,72.1
+2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,good,4,follow_plan,ok,chop_tomato,chop,tomato,21.9,1,8,chop|chop|chop|cook|chop|chop|chop|chop,1.7|2.4|0.8|0.4|2.9|3.4|2.3|0.8,0.0,0.0,,,,人,2.1,0,1,3,1,21.9,44.3,19.2
+3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,good,2,follow_plan,ok,chop_lettuce,chop,lettuce,2.1,0,1,chop,2.1,0.0,0.0,2,4,2,AI,6.5,0,0,3,1,23.3,21.5,20.0
+4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,good,0,follow_plan,ok,chop_tomato,chop,tomato,26.7,1,7,chop|chop|chop|cook|chop|chop|handover,2.1|3.6|3.2|1.2|2.6|2.4|2.9,0.0,0.0,,,,人,2.1,0,1,3,1,26.7,33.7,21.4
+4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,random,4,follow_plan,ok,mix_apple_orangejuice,mix,apple-orange juice,26.7,1,7,chop|chop|chop|cook|chop|chop|handover,2.1|3.6|3.2|1.2|2.6|2.4|2.9,0.0,0.0,,,,人,8.3,0,1,3,1,26.7,33.7,21.1
+5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,random,2,follow_plan,ok,chop_lettuce,chop,lettuce,2.4,0,1,chop,2.4,0.0,0.0,2,4,2,AI,6.7,0,0,3,1,23.5,22.1,20.4
+6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,random,0,follow_plan,ok,chop_apple,chop,apple,0.0,0,0,,,0.0,0.0,1,3,2,AI,2.1,0,0,3,1,31.3,27.2,23.2
+7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,bad,4,follow_plan,ok,chop_apple,chop,apple,4.4,0,2,chop|chop,1.9|2.5,0.0,0.0,3,3,0,AI,7.4,0,0,3,1,28.3,26.1,20.5
+8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,bad,2,follow_plan,ok,chop_banana,chop,banana,4.4,0,2,chop|chop,1.9|2.5,0.0,0.0,3,4,1,AI,0.4,0,0,3,1,28.7,27.2,20.5
+9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,bad,0,follow_plan,ok,chop_banana,chop,banana,0.0,0,0,,,0.0,0.0,1,2,1,AI,2.5,0,0,3,1,27.1,27.3,18.9
+10,OnionTomatoSalad|TomatoLettuceSoup|AppleOrangeJuice,good,4,follow_plan,ok,chop_tomato,chop,tomato,26.7,1,6,chop|chop|chop|cook|chop|handover,2.1|3.4|3.4|1.9|1.9|3.1,0.0,0.0,,,,人,5.1,0,1,3,1,26.7,27.7,18.8
+11,OnionTomatoSalad|TomatoLettuceSoup|BananaOrangeJuice,good,2,follow_plan,ok,chop_lettuce,chop,lettuce,5.7,0,2,chop|chop,2.4|3.3,0.0,0.0,3,4,1,AI,2.8,0,0,3,1,26.9,27.5,20.1
+12,TomatoLettuceSalad|OnionLettuceSoup|AppleBananaJuice,good,0,follow_plan,ok,chop_onion,chop,onion,0.0,0,0,,,0.0,0.0,1,5,4,AI,1.9,0,0,3,1,22.3,33.2,18.5
+12,TomatoLettuceSalad|OnionLettuceSoup|AppleBananaJuice,random,4,follow_plan,ok,handover_lettuce_onionsoup,handover,lettuce-onion soup,12.0,0,6,chop|chop|chop|chop|cook|chop,1.7|0.4|2.7|3.2|1.2|2.8,0.0,0.0,7,6,-1,AI,25.4,0,0,3,1,32.1,52.0,25.1
+13,TomatoLettuceSalad|OnionLettuceSoup|AppleOrangeJuice,random,2,follow_plan,ok,serve_juice_apple_orangejuice,serve_juice,apple-orange juice,100.0,1,12,chop|chop|chop|chop|chop|cook|handover|chop|chop|cook|chop|chop,1.7|2.8|3.7|3.4|2.5|1.3|16.2|2.5|2.8|0.8|2.0|3.2,40.3,40.3,,,,人,100.0,1,0,0,0,100.0,96.2,64.5
+14,TomatoLettuceSalad|OnionLettuceSoup|BananaOrangeJuice,random,0,follow_plan,ok,chop_onion,chop,onion,0.0,0,0,,,0.0,0.0,1,5,4,AI,1.9,0,0,3,1,22.3,33.2,18.5
+15,TomatoLettuceSalad|OnionTomatoSoup|AppleBananaJuice,bad,4,follow_plan,ok,chop_apple,chop,apple,1.7,0,1,chop,1.7,0.0,0.0,2,2,0,AI,4.5,0,0,3,1,25.7,13.2,17.3
+16,TomatoLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,bad,2,follow_plan,ok,chop_apple,chop,apple,1.7,0,1,chop,1.7,0.0,0.0,2,2,0,AI,4.5,0,0,3,1,25.7,13.2,16.9
+17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,bad,0,follow_plan,ok,chop_banana,chop,banana,0.0,0,0,,,0.0,0.0,1,3,2,AI,2.5,0,0,3,1,26.3,10.6,17.9
+0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,bad,4,follow_plan,ok,chop_apple,chop,apple,5.3,0,4,chop|chop|chop|cook,1.7|2.4|0.8|0.4,0.0,0.0,5,3,-2,AI,8.2,0,0,3,1,21.9,44.3,19.6
+1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,bad,2,follow_plan,ok,chop_orange,chop,orange,4.8,0,2,chop|chop,1.7|3.1,0.0,0.0,3,4,1,AI,0.3,0,0,1,0,100.0,69.5,71.6
+2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,bad,0,follow_plan,ok,chop_banana,chop,banana,0.0,0,0,,,0.0,0.0,1,4,3,AI,2.5,0,0,1,0,100.0,7.0,71.2
+3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,good,4,follow_plan,ok,chop_lettuce,chop,lettuce,5.7,0,2,chop|chop,2.1|3.6,0.0,0.0,3,4,1,AI,11.8,0,0,3,1,26.7,33.7,21.4
+4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,good,2,follow_plan,ok,chop_tomato,chop,tomato,26.7,1,7,chop|chop|chop|cook|chop|chop|handover,2.1|3.6|3.2|1.2|2.6|2.4|2.9,0.0,0.0,,,,人,2.1,0,1,3,1,26.7,33.7,21.0
+5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,good,0,follow_plan,ok,chop_tomato,chop,tomato,26.9,1,7,chop|chop|chop|cook|chop|chop|handover,2.4|3.5|3.2|1.2|2.6|2.4|2.9,0.0,0.0,,,,人,2.1,0,1,3,1,26.9,34.2,21.6
+5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,random,4,follow_plan,ok,chop_lettuce,chop,lettuce,5.9,0,2,chop|chop,2.4|3.5,0.0,0.0,3,4,1,AI,12.0,0,0,3,1,26.9,34.2,20.3
+6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,random,2,follow_plan,ok,chop_apple,chop,apple,4.4,0,2,chop|chop,1.9|2.5,0.0,0.0,3,3,0,AI,1.6,0,0,3,1,28.3,26.1,20.3
+7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,random,0,follow_plan,ok,cook_lettuce_onionsoup,cook,lettuce-onion soup,10.6,0,4,chop|chop|chop|chop,1.9|2.5|3.0|3.2,0.0,0.0,5,,,,0.0,0,0,3,1,28.3,26.1,20.0
+8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,bad,4,follow_plan,ok,chop_banana,chop,banana,4.4,0,2,chop|chop,1.9|2.5,0.0,0.0,3,4,1,AI,7.8,0,0,3,1,28.7,27.2,21.7
+9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,bad,2,follow_plan,ok,chop_banana,chop,banana,2.1,0,1,chop,2.1,0.0,0.0,2,2,0,AI,5.5,0,0,3,1,26.7,27.7,19.2
+10,OnionTomatoSalad|TomatoLettuceSoup|AppleOrangeJuice,bad,0,follow_plan,ok,chop_apple,chop,apple,0.0,0,0,,,0.0,0.0,1,1,0,AI,2.1,0,0,3,1,26.7,27.7,18.6
+11,OnionTomatoSalad|TomatoLettuceSoup|BananaOrangeJuice,good,4,follow_plan,ok,chop_lettuce,chop,lettuce,5.7,0,2,chop|chop,2.4|3.3,0.0,0.0,3,4,1,AI,2.8,0,0,3,1,26.9,27.5,19.2
+12,TomatoLettuceSalad|OnionLettuceSoup|AppleBananaJuice,good,2,follow_plan,ok,chop_onion,chop,onion,1.7,0,1,chop,1.7,0.0,0.0,2,5,3,AI,1.4,0,0,3,1,28.1,27.4,19.6
+13,TomatoLettuceSalad|OnionLettuceSoup|AppleOrangeJuice,good,0,follow_plan,ok,chop_onion,chop,onion,0.0,0,0,,,0.0,0.0,1,5,4,AI,1.9,0,0,3,1,22.3,33.2,18.8
+13,TomatoLettuceSalad|OnionLettuceSoup|AppleOrangeJuice,random,4,follow_plan,ok,serve_juice_apple_orangejuice,serve_juice,apple-orange juice,32.1,1,13,chop|chop|chop|chop|cook|chop|handover|chop|chop|chop|chop|handover|chop,1.7|0.4|2.7|3.2|1.2|2.8|13.4|2.5|0.7|0.9|1.0|0.8|0.6,0.0,0.0,,,,人,15.5,0,1,3,1,32.1,52.0,24.9
+14,TomatoLettuceSalad|OnionLettuceSoup|BananaOrangeJuice,random,2,follow_plan,ok,chop_onion,chop,onion,1.7,0,1,chop,1.7,0.0,0.0,2,5,3,AI,1.4,0,0,3,1,28.3,27.9,19.9
+15,TomatoLettuceSalad|OnionTomatoSoup|AppleBananaJuice,random,0,follow_plan,ok,chop_onion,chop,onion,0.0,0,0,,,0.0,0.0,1,4,3,AI,1.9,0,0,0,0,100.0,0.7,65.2
+16,TomatoLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,bad,4,follow_plan,ok,chop_apple,chop,apple,1.7,0,1,chop,1.7,0.0,0.0,2,2,0,AI,4.5,0,0,3,1,25.7,13.2,17.6
+17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,bad,2,follow_plan,ok,chop_banana,chop,banana,4.7,0,2,chop|chop,1.7|3.0,0.0,0.0,3,3,0,AI,3.0,0,0,3,1,29.3,18.1,15.5
+0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,random,0,follow_plan,ok,chop_lettuce,chop,lettuce,0.0,0,0,,,0.0,0.0,1,1,0,AI,1.7,0,0,3,1,21.9,44.3,19.4
+1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,bad,4,follow_plan,ok,chop_orange,chop,orange,5.3,0,4,chop|chop|chop|cook,1.7|2.4|0.8|0.4,0.0,0.0,5,4,-1,AI,8.2,0,0,3,1,21.9,44.3,19.6
+2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,bad,2,follow_plan,ok,chop_banana,chop,banana,5.0,0,2,chop|chop,1.7|3.3,0.0,0.0,3,4,1,AI,0.3,0,0,1,0,100.0,69.6,71.7
+3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,bad,0,follow_plan,ok,chop_banana,chop,banana,0.0,0,0,,,0.0,0.0,1,2,1,AI,2.5,0,0,3,1,27.1,34.7,21.3
+4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,good,4,follow_plan,ok,chop_tomato,chop,tomato,26.7,1,7,chop|chop|chop|cook|chop|chop|handover,2.1|3.6|3.2|1.2|2.6|2.4|2.9,0.0,0.0,,,,人,2.1,0,1,3,1,26.7,33.7,21.2
+5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,good,2,follow_plan,ok,chop_tomato,chop,tomato,26.9,1,7,chop|chop|chop|cook|chop|chop|handover,2.4|3.5|3.2|1.2|2.6|2.4|2.9,0.0,0.0,,,,人,2.1,0,1,3,1,26.9,34.2,21.3
+6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,good,0,follow_plan,ok,chop_onion,chop,onion,0.0,0,0,,,0.0,0.0,1,1,0,AI,6.0,0,0,3,1,29.3,28.7,22.4
+6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,random,4,follow_plan,ok,chop_apple,chop,apple,4.4,0,2,chop|chop,1.9|2.5,0.0,0.0,3,3,0,AI,7.4,0,0,3,1,28.3,26.1,22.3
+7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,random,2,follow_plan,ok,cook_lettuce_onionsoup,cook,lettuce-onion soup,10.6,0,4,chop|chop|chop|chop,1.9|2.5|3.0|3.2,0.0,0.0,5,,,,0.0,0,0,3,1,28.3,26.1,20.4
+8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,random,0,follow_plan,ok,chop_onion,chop,onion,0.0,0,0,,,0.0,0.0,1,1,0,AI,6.0,0,0,3,1,29.5,29.2,20.9
+9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,bad,4,follow_plan,ok,chop_banana,chop,banana,2.1,0,1,chop,2.1,0.0,0.0,2,2,0,AI,5.5,0,0,3,1,26.7,27.7,18.7
+10,OnionTomatoSalad|TomatoLettuceSoup|AppleOrangeJuice,bad,2,follow_plan,ok,chop_apple,chop,apple,0.0,0,0,,,0.0,0.0,1,1,0,AI,2.1,0,0,3,1,26.7,27.7,18.6
+11,OnionTomatoSalad|TomatoLettuceSoup|BananaOrangeJuice,bad,0,follow_plan,ok,chop_orange,chop,orange,0.0,0,0,,,0.0,0.0,1,1,0,AI,2.4,0,0,3,1,26.9,27.5,20.2
+12,TomatoLettuceSalad|OnionLettuceSoup|AppleBananaJuice,good,4,follow_plan,ok,chop_onion,chop,onion,4.8,0,3,chop|chop|chop,1.7|0.4|2.7,0.0,0.0,4,5,1,AI,1.4,0,0,3,1,32.1,52.0,24.6
+13,TomatoLettuceSalad|OnionLettuceSoup|AppleOrangeJuice,good,2,follow_plan,ok,chop_onion,chop,onion,1.7,0,1,chop,1.7,0.0,0.0,2,5,3,AI,1.4,0,0,3,1,28.1,27.4,20.0
+14,TomatoLettuceSalad|OnionLettuceSoup|BananaOrangeJuice,good,0,follow_plan,ok,chop_onion,chop,onion,0.0,0,0,,,0.0,0.0,1,5,4,AI,1.9,0,0,3,1,22.3,33.2,18.7
+14,TomatoLettuceSalad|OnionLettuceSoup|BananaOrangeJuice,random,4,follow_plan,ok,chop_onion,chop,onion,5.0,0,3,chop|chop|chop,1.7|0.4|2.9,0.0,0.0,4,5,1,AI,1.4,0,0,3,1,32.3,52.3,25.0
+15,TomatoLettuceSalad|OnionTomatoSoup|AppleBananaJuice,random,2,follow_plan,ok,chop_onion,chop,onion,1.7,0,1,chop,1.7,0.0,0.0,2,4,2,AI,0.3,0,0,0,0,100.0,0.0,79.9
+16,TomatoLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,random,0,follow_plan,ok,chop_lettuce,chop,lettuce,0.0,0,0,,,0.0,0.0,1,1,0,AI,1.7,0,0,3,1,25.7,13.2,16.3
+17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,bad,4,follow_plan,ok,chop_banana,chop,banana,7.2,0,3,chop|chop|chop,1.7|3.0|2.5,0.0,0.0,4,3,-1,AI,3.0,0,0,3,1,31.9,16.9,21.5
+0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,random,2,follow_plan,ok,chop_lettuce,chop,lettuce,0.0,0,0,,,0.0,0.0,1,1,0,AI,1.7,0,0,3,1,21.9,44.3,19.5
+1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,random,0,follow_plan,ok,chop_tomato,chop,tomato,21.9,1,8,chop|chop|chop|cook|chop|chop|chop|chop,1.7|2.4|0.8|0.4|2.9|3.4|2.3|0.8,0.0,0.0,,,,人,2.1,0,1,3,1,21.9,44.7,19.4
+2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,bad,4,follow_plan,ok,chop_banana,chop,banana,5.3,0,4,chop|chop|chop|cook,1.7|2.4|0.8|0.4,0.0,0.0,5,4,-1,AI,8.2,0,0,3,1,21.9,44.7,19.4
+3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,bad,2,follow_plan,ok,chop_banana,chop,banana,2.1,0,1,chop,2.1,0.0,0.0,2,2,0,AI,5.7,0,0,3,1,26.7,33.7,21.2
+4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,bad,0,follow_plan,ok,chop_apple,chop,apple,0.0,0,0,,,0.0,0.0,1,1,0,AI,2.1,0,0,3,1,26.7,33.7,22.5
+5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,good,4,follow_plan,ok,chop_tomato,chop,tomato,26.9,1,7,chop|chop|chop|cook|chop|chop|handover,2.4|3.5|3.2|1.2|2.6|2.4|2.9,0.0,0.0,,,,人,2.1,0,1,3,1,26.9,34.2,21.2
+6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,good,2,follow_plan,ok,chop_onion,chop,onion,0.0,0,0,,,0.0,0.0,1,1,0,AI,2.6,0,0,3,1,28.3,21.9,23.0
+7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,good,0,follow_plan,ok,chop_onion,chop,onion,0.0,0,0,,,0.0,0.0,1,1,0,AI,6.0,0,0,3,1,29.3,28.7,22.4
+7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,random,4,follow_plan,ok,cook_lettuce_onionsoup,cook,lettuce-onion soup,10.6,0,4,chop|chop|chop|chop,1.9|2.5|3.0|3.2,0.0,0.0,5,,,,0.0,0,0,3,1,28.3,26.1,21.5
+8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,random,2,follow_plan,ok,chop_onion,chop,onion,0.0,0,0,,,0.0,0.0,1,1,0,AI,2.6,0,0,3,1,28.5,22.5,23.7
+9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,random,0,follow_plan,ok,cook_lettuce_tomatosoup,cook,lettuce-tomato soup,8.9,0,3,chop|chop|chop,2.1|3.4|3.4,0.0,0.0,4,,,,0.0,0,0,3,1,26.7,27.7,19.3
+10,OnionTomatoSalad|TomatoLettuceSoup|AppleOrangeJuice,bad,4,follow_plan,ok,chop_apple,chop,apple,0.0,0,0,,,0.0,0.0,1,1,0,AI,2.1,0,0,3,1,26.7,27.7,18.4
+11,OnionTomatoSalad|TomatoLettuceSoup|BananaOrangeJuice,bad,2,follow_plan,ok,chop_orange,chop,orange,0.0,0,0,,,0.0,0.0,1,1,0,AI,2.4,0,0,3,1,26.9,27.5,18.9
+12,TomatoLettuceSalad|OnionLettuceSoup|AppleBananaJuice,bad,0,follow_plan,ok,chop_banana,chop,banana,0.0,0,0,,,0.0,0.0,1,4,3,AI,2.5,0,0,1,0,100.0,14.0,57.9
+13,TomatoLettuceSalad|OnionLettuceSoup|AppleOrangeJuice,good,4,follow_plan,ok,chop_onion,chop,onion,4.8,0,3,chop|chop|chop,1.7|0.4|2.7,0.0,0.0,4,5,1,AI,1.4,0,0,3,1,32.1,52.0,24.8
+14,TomatoLettuceSalad|OnionLettuceSoup|BananaOrangeJuice,good,2,follow_plan,ok,chop_onion,chop,onion,1.7,0,1,chop,1.7,0.0,0.0,2,5,3,AI,1.4,0,0,3,1,28.3,27.9,20.3
+15,TomatoLettuceSalad|OnionTomatoSoup|AppleBananaJuice,good,0,follow_plan,ok,chop_tomato,chop,tomato,25.7,1,6,chop|chop|chop|chop|cook|chop,1.7|2.8|2.5|1.0|1.2|2.8,0.0,0.0,,,,人,4.9,0,1,3,1,25.7,13.2,18.0
+15,TomatoLettuceSalad|OnionTomatoSoup|AppleBananaJuice,random,4,follow_plan,ok,chop_onion,chop,onion,4.5,0,2,chop|chop,1.7|2.8,0.0,0.0,3,4,1,AI,3.0,0,0,3,1,25.7,13.2,18.4
+16,TomatoLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,random,2,follow_plan,ok,chop_lettuce,chop,lettuce,0.0,0,0,,,0.0,0.0,1,1,0,AI,1.7,0,0,3,1,25.7,13.2,18.1
+17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,random,0,follow_plan,ok,serve_from_counter_onion_tomatosoup,serve_from_counter,onion-tomato soup,30.5,1,7,chop|chop|cook|handover|chop|chop|chop,1.7|2.4|1.3|16.5|2.0|2.3|1.0,2.1,6.9,,,,人,0.3,0,1,3,1,30.5,16.1,23.3
