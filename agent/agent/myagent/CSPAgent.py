@@ -212,8 +212,8 @@ class CSPAgent:
         # 「AI に指示する」という行為の意味からは常に True が筋だが、いまの
         # 実装で有効にすると、相手が同じ食材を自分の側で刻んでしまい、その
         # 刻んだ物に AI が手を届かせられずに止まる(下の注記を参照)。
-        # 先にそちらを直してから既定を True にすること。
-        self.force_instruction_to_ai = False
+        # 停滞の根本原因を潰したので有効にする。
+        self.force_instruction_to_ai = True
         # 「いま即座に着手できる cook タスク」を (動詞, 対象) で保持する。
         # __call__ ごとに更新し、GamePlay の指示タイミング監視(enable_cook)が読む。
         self.ready_cook_actions = set()
@@ -1305,8 +1305,17 @@ class CSPAgent:
         for verb, obj, order_uid in sorted_tids:
             grouped.setdefault((verb, obj), []).append(order_uid)
 
+        # AI が物理的にできない作業は、指示の候補に出さない。
+        # 仕切りの向こうのミキサーや提供口を使う作業を「やれ」と言われても
+        # AI は永久に着手できず、参加者から見れば完全な無視になる。
+        # それは指示の効き方(skip_budget)とは無関係に起きるので、
+        # そもそも指示できないようにしておく。
+        doable = self._instructable_actions(env, current_orders)
+
         candidates = []
         for (verb, obj), order_uids in grouped.items():
+            if doable is not None and (verb, obj) not in doable:
+                continue
             display = f"{verb}_{obj.replace(' ', '').replace('-', '_')}"
             payload = {
                 # 後方互換のため代表IDも持たせる(グループ先頭)
@@ -1319,6 +1328,24 @@ class CSPAgent:
             candidates.append((display, payload))
 
         return candidates
+
+    def _instructable_actions(self, env, current_orders):
+        """AI(0番)が実行できる (動詞, 対象) の集合。
+
+        判定できないときは None を返し、呼び出し側は絞り込みを行わない。
+        """
+        try:
+            doable = set()
+            for order in current_orders:
+                for task in order.get('tasks', []):
+                    tid = task.get('id')
+                    if not tid:
+                        continue
+                    if 0 in self._task_allowed_agents(env, task):
+                        doable.add((tid[0], tid[1]))
+            return doable or None
+        except Exception:
+            return None
 
     def high_level_infer(self, env, chat: str):
         """Handle a high-level chat/instruction input from gameplay.
