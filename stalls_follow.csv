@@ -14,7 +14,7 @@ seed,orders,quality,skip_budget,human_model,served,completed,makespan_actual_s,u
 5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,bad,0,follow_plan,3,1,26.9,,,0,,0,0,
 5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,random,2,follow_plan,3,1,23.5,,,0,,0,0,
 6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,good,4,follow_plan,3,1,24.7,,,0,,0,0,
-6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,random,0,follow_plan,3,1,31.3,,,0,,0,0,
+6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,random,0,follow_plan,3,1,34.3,,,0,,0,0,
 7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,good,2,follow_plan,3,1,28.3,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
 7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,bad,4,follow_plan,3,1,28.3,,,0,,0,0,
 8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,good,0,follow_plan,3,1,29.5,,,0,,0,0,
@@ -95,9 +95,9 @@ seed,orders,quality,skip_budget,human_model,served,completed,makespan_actual_s,u
 5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,good,2,follow_plan,3,1,26.9,,,0,,0,0,
 5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,bad,4,follow_plan,3,1,26.9,,,0,,0,0,
 6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,good,0,follow_plan,3,1,29.3,,,0,,0,0,
-6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,bad,2,follow_plan,2,0,100.0,1品未完(Juice/Salad/Soup),,0,,0,2,A1:serve_juice:ターゲットの完成品が入ったミキサーが見つかりません|A1:serve_juice:ターゲットの完成品が入ったミキサーが見つかりません
+6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,bad,2,follow_plan,3,1,33.3,,,0,,0,0,
 6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,random,4,follow_plan,3,1,28.3,,,0,,0,0,
-7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,bad,0,follow_plan,3,1,31.1,,,0,,0,0,
+7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,bad,0,follow_plan,3,1,34.1,,,0,,0,0,
 7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,random,2,follow_plan,3,1,28.3,,,0,,0,0,
 8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,good,4,follow_plan,3,1,24.7,,,0,,0,0,
 8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,random,0,follow_plan,3,1,29.5,,,0,,0,0,
@@ -109,14 +109,14 @@ seed,orders,quality,skip_budget,human_model,served,completed,makespan_actual_s,u
 11,OnionTomatoSalad|TomatoLettuceSoup|BananaOrangeJuice,bad,0,follow_plan,3,1,26.9,,,0,,0,0,
 11,OnionTomatoSalad|TomatoLettuceSoup|BananaOrangeJuice,random,2,follow_plan,3,1,26.9,,,0,,0,0,
 12,TomatoLettuceSalad|OnionLettuceSoup|AppleBananaJuice,good,4,follow_plan,3,1,32.1,,,0,,0,0,
-12,TomatoLettuceSalad|OnionLettuceSoup|AppleBananaJuice,random,0,follow_plan,3,1,50.0,,,0,handover_lettuce_onion :: ターゲットの完成品が入った鍋が見つかりません,243,2,A0:handover:ターゲットの完成品が入った鍋が見つかりません|A1:serve_from_counter:受け渡し待ち
+12,TomatoLettuceSalad|OnionLettuceSoup|AppleBananaJuice,random,0,follow_plan,3,1,53.0,,,0,handover_lettuce_onion :: ターゲットの完成品が入った鍋が見つかりません,243,2,A0:handover:ターゲットの完成品が入った鍋が見つかりません|A1:serve_from_counter:受け渡し待ち
 13,TomatoLettuceSalad|OnionLettuceSoup|AppleOrangeJuice,good,2,follow_plan,3,1,28.1,,,0,,0,0,
 13,TomatoLettuceSalad|OnionLettuceSoup|AppleOrangeJuice,bad,4,follow_plan,3,1,32.1,,,0,,0,0,
 14,TomatoLettuceSalad|OnionLettuceSoup|BananaOrangeJuice,good,0,follow_plan,3,1,22.3,,,0,,0,0,
 14,TomatoLettuceSalad|OnionLettuceSoup|BananaOrangeJuice,bad,2,follow_plan,3,1,32.3,,,0,,0,0,
 14,TomatoLettuceSalad|OnionLettuceSoup|BananaOrangeJuice,random,4,follow_plan,3,1,32.3,,,0,,0,0,
 15,TomatoLettuceSalad|OnionTomatoSoup|AppleBananaJuice,bad,0,follow_plan,3,1,25.9,,,0,,0,0,
-15,TomatoLettuceSalad|OnionTomatoSoup|AppleBananaJuice,random,2,follow_plan,0,0,100.0,3品未完(Juice/Salad/Soup),,0,handover_onion_tomato :: ターゲットの完成品が入った鍋が見つかりません,627,5,A0:cook:食材の取得|A1:serve_salad:指定テーブルにて食材をマージさせるために置く|A1:mix:指定テーブルにて食材をマージさせるために置く|A0:handover:ターゲットの完成品が入った鍋が見つかりません|A1:serve_juice:指定テーブルにて食材をマージさせるために置く
+15,TomatoLettuceSalad|OnionTomatoSoup|AppleBananaJuice,random,2,follow_plan,0,0,100.0,3品未完(Juice/Salad/Soup),,0,handover_onion_tomato :: ターゲットの完成品が入った鍋が見つかりません,631,5,A0:cook:食材の取得|A1:serve_salad:指定テーブルにて食材をマージさせるために置く|A1:mix:指定テーブルにて食材をマージさせるために置く|A0:handover:ターゲットの完成品が入った鍋が見つかりません|A1:serve_juice:指定テーブルにて食材をマージさせるために置く
 16,TomatoLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,good,4,follow_plan,3,1,25.7,,,0,,0,0,
 16,TomatoLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,random,0,follow_plan,3,1,25.7,,,0,,0,0,
 17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,good,2,follow_plan,3,1,25.9,,,0,,0,0,

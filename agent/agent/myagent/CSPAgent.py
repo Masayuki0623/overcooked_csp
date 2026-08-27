@@ -2406,6 +2406,24 @@ class CSPAgent:
             'counters': counters,
         }
 
+    def _usable_counters(self, env, counters):
+        """隣に立てる床マスがあるカウンターだけを返す。
+
+        地図の角のカウンターは四方が壁で、誰も触れない。それを起点に
+        経路を測ると必ず失敗し、所要時間が None になってタスクごと
+        計画から消える(鍋に材料を入れる工程が丸ごと無くなる)。
+        """
+        width, height = env.world_width, env.world_height
+        grid = env.to_grid
+        out = []
+        for pos in counters:
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                nx, ny = pos[0] + dx, pos[1] + dy
+                if 0 <= nx < width and 0 <= ny < height and grid[nx][ny] == 1:
+                    out.append(pos)
+                    break
+        return out
+
     def _resources_for_agent(self, env, agent_idx):
         """そのエージェントが自分の側で使える資材だけに絞った一覧。
 
@@ -3100,7 +3118,7 @@ class CSPAgent:
                 if start_candidates:
                     start_pos = get_nearest(pot_pos, start_candidates)
                 else:
-                    counters = env.get_pos_by_obj_gs(gs="Counter")
+                    counters = self._usable_counters(env, env.get_pos_by_obj_gs(gs="Counter"))
                     if not counters: return None
                     start_pos = get_nearest(pot_pos, counters)
 
@@ -3126,7 +3144,7 @@ class CSPAgent:
                 if start_candidates:
                     start_pos = get_nearest(plate_pos, start_candidates)
                 else:
-                    counters = env.get_pos_by_obj_gs(gs="Counter")
+                    counters = self._usable_counters(env, env.get_pos_by_obj_gs(gs="Counter"))
                     if not counters: return None
                     start_pos = get_nearest(plate_pos, counters)
 
