@@ -2053,12 +2053,13 @@ class CSPAgent:
                 sc = self.schedule_per_agent.get(agent_idx, [])
                 t_idx = self.current_task_idx[agent_idx]
                 # 進められないと分かったタスクは飛ばして、次の作業を試す。
-                # (諦め期間が切れれば、また順番が回ってくる)
+                # 飛ばした位置を current_task_idx に書き戻してはいけない。
+                # 書き戻すと、再計画で計画が短くなったときに末尾を超えたまま
+                # 戻れなくなり、以後ずっと手待ちになる。飛ばすのはこの回だけ。
                 blocked = self.blocked_tasks.get(agent_idx, {})
                 while (t_idx < len(sc) and sc[t_idx].get('id') in blocked
                        and any(sc[j].get('id') not in blocked for j in range(t_idx + 1, len(sc)))):
                     t_idx += 1
-                self.current_task_idx[agent_idx] = t_idx
                 if t_idx >= len(sc):
                     # 自分の担当が尽きたら、人間スロットに置いたタスクを引き受ける。
                     # 人間がいま手をつけていると推測して人間スロットへ回したタスクは、
@@ -2665,11 +2666,19 @@ class CSPAgent:
                     if base_name is not None and base_name.lower() in needed_ings:
                         start_candidates.append(pos)
 
-                if start_candidates:
-                    start_pos = self._nearest_by_path(env, default_start_pos, start_candidates) or get_nearest(default_start_pos, start_candidates)
-                else:
-                    counters = env.get_pos_by_obj_gs(gs="Counter")
-                    start_pos = get_nearest(pot, counters) if counters else pot
+                # 材料は指定テーブルに集めるので、そこが実際の出発点。
+                # 指定が無いときだけ、置かれている材料や使えるカウンターから
+                # 見積もる。隣に立てない角のカウンターを選ぶと、そのタスクは
+                # 「誰にもできない」と誤判定される。
+                start_pos = t.get('assigned_counter')
+                if start_pos is None:
+                    if start_candidates:
+                        start_pos = (self._nearest_by_path(env, default_start_pos, start_candidates)
+                                     or get_nearest(default_start_pos, start_candidates))
+                    else:
+                        counters = self._usable_counters(
+                            env, env.get_pos_by_obj_gs(gs="Counter"))
+                        start_pos = get_nearest(pot, counters) if counters else pot
 
                 t['start_pos'] = start_pos
                 t['end_pos'] = pot
