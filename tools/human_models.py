@@ -235,6 +235,9 @@ class HumanModel:
                 self.current_id = carry['id']
                 self.ta.task_name = task_name_of(carry)
                 self.ta.assigned_counter = carry.get('assigned_counter')
+                # 注文外の食材を合流させないための材料一覧。渡し忘れると
+                # 判定が素通りし、別注文の山に混ぜてしまう。
+                self.ta.order_ingredients = self.ai._order_ingredients_of(carry)
                 action, _reason = self.ta(env, dynamic_obstacles={tuple(other_pos)})
                 planned = self.planned_for_me()
                 if planned is not None:
@@ -289,6 +292,7 @@ class HumanModel:
 
         self.ta.task_name = task_name_of(keep)
         self.ta.assigned_counter = keep.get('assigned_counter')
+        self.ta.order_ingredients = self.ai._order_ingredients_of(keep)
         action, _reason = self.ta(env, dynamic_obstacles={tuple(other_pos)})
         self.note_progress(keep['id'], action)
         return action, keep['id']

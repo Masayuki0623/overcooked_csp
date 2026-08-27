@@ -71,6 +71,42 @@ class TaskAgent:
 
     ALL_INGREDIENT_NAMES = {'lettuce', 'onion', 'tomato', 'apple', 'orange', 'banana'}
 
+    @classmethod
+    def _free_counter_near(cls, env, near_pos):
+        """near_pos の代わりに使える、空いていて手の届くカウンター。"""
+        best, best_d = None, None
+        for pos in cls.reachable_positions(env, env.get_pos_by_obj_gs(gs='Counter')):
+            if env.pos_obj.get(pos) is not None:
+                continue
+            if not cls.can_use_position(env, pos):
+                continue
+            d = (abs(pos[0] - near_pos[0]) + abs(pos[1] - near_pos[1])
+                 if near_pos else 0)
+            if best_d is None or d < best_d:
+                best, best_d = pos, d
+        return best
+
+    @classmethod
+    def _current_order_ingredient_sets(cls, env):
+        """いま出ている注文それぞれの材料の集合。
+
+        置き場の判定は複数の経路から呼ばれ、呼び出し元が注文の材料を
+        渡してくれるとは限らない。盤面の注文表から直接読めば、どこから
+        呼ばれても同じ判定ができる。
+        """
+        out = []
+        try:
+            orders = getattr(getattr(env, 'order', None), 'current_orders', None) or []
+            for entry in orders:
+                goal = entry[0] if isinstance(entry, (list, tuple)) else entry
+                name = str(getattr(goal, 'full_name', '')).lower()
+                ings = {i for i in cls.ALL_INGREDIENT_NAMES if i in name}
+                if ings:
+                    out.append(ings)
+        except Exception:
+            return []
+        return out
+
     def _resolve_assigned_counter_target(self, env, holding, assigned_counter, blocked_reason):
         if not assigned_counter:
             return None, None
@@ -104,13 +140,24 @@ class TaskAgent:
         # assigned counter はその注文専用の保持場所とみなすが、
         # 「必要な食材が既に counter 上にある」か「same ingredient overlap がある」場合は
         # 安全な partial state とみなし、再割り当てや待機を起こさない。
-        # その注文に使わない食材を混ぜてしまうと、二度と外せない。
-        # (レタス+トマトのサラダの山に玉ねぎが入ると、サラダとして成立
-        #  しなくなり、その材料を待つ他の注文もろとも進まなくなる)
-        allowed = self.order_ingredients
-        if allowed and not ((holding_ings | counter_ings) <= allowed):
+        # どの注文にも当てはまらない組み合わせを作ってしまうと、その山は
+        # 二度と使えない。(レタス+トマトのサラダの山に玉ねぎが入ると、
+        # サラダとして成立せず、その材料を待つ他の注文もろとも止まる)
+        # 呼び出し元によって order_ingredients が渡らないことがあるので、
+        # 盤面の注文表からも判定できるようにしておく。
+        merged = holding_ings | counter_ings
+        allowed_sets = []
+        if self.order_ingredients:
+            allowed_sets.append(set(self.order_ingredients))
+        allowed_sets.extend(self._current_order_ingredient_sets(env))
+        if merged and allowed_sets and not any(merged <= a for a in allowed_sets):
+            # 指定の台には他の注文の山が居座っている。拒否して待つだけでは
+            # 永久に進まないので、空いている別の台へ回す。
+            alt = self._free_counter_near(env, assigned_counter)
+            if alt is not None:
+                return alt, None
             content_name = self._get_counter_content_name(env, assigned_counter)
-            return None, f"{blocked_reason}: 注文外の食材が混ざるため content='{content_name}'"
+            return None, f"{blocked_reason}: どの注文にもならない組み合わせ content='{content_name}'"
 
         if holding_ings or counter_ings:
             valid_ingredients = self.ALL_INGREDIENT_NAMES

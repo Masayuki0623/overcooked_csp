@@ -1,163 +1,163 @@
 seed,orders,quality,skip_budget,human_model,served,completed,makespan_actual_s,unfinished_dish,human_stall,human_stall_count,ai_stall,ai_stall_count,progress_stall_events,progress_stall_detail
-0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,good,0,follow_plan,3,1,23.7,,,0,,0,0,
-0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,bad,2,follow_plan,3,1,23.4,,,0,cook_onion_tomato :: 調理完了 (Done),1,0,
-0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,random,4,follow_plan,3,1,22.3,,,0,,0,0,
-1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,bad,0,follow_plan,3,1,21.9,,,0,,0,0,
-1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,random,2,follow_plan,3,1,25.1,,,0,cook_onion_tomato :: 調理完了 (Done),1,0,
-2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,good,4,follow_plan,3,1,31.7,,,0,,0,0,
-2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,random,0,follow_plan,0,0,100.0,3品未完(Juice/Salad/Soup),,0,handover_onion_tomato :: ターゲットの完成品が入った鍋が見つかりません,744,2,A0:handover:ターゲットの完成品が入った鍋が見つかりません|A1:serve_from_counter:受け渡し待ち
-3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,good,2,follow_plan,3,1,24.5,,,0,cook_lettuce_tomato :: 調理完了 (Done),1,0,
-3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,bad,4,follow_plan,3,1,29.3,,,0,,0,0,
-4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,good,0,follow_plan,3,1,20.7,,,0,,0,0,
-4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,bad,2,follow_plan,3,1,23.4,,,0,cook_lettuce_tomato :: 調理完了 (Done),1,0,
-4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,random,4,follow_plan,3,1,24.5,,,0,cook_lettuce_tomato :: 調理完了 (Done),1,0,
-5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,bad,0,follow_plan,3,1,21.9,,,0,,0,0,
-5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,random,2,follow_plan,3,1,23.6,,,0,cook_lettuce_tomato :: 調理完了 (Done),1,0,
-6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,good,4,follow_plan,3,1,22.1,,,0,,0,0,
-6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,random,0,follow_plan,3,1,32.0,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
-7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,good,2,follow_plan,3,1,22.1,,,0,,0,0,
-7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,bad,4,follow_plan,3,1,30.1,,,0,cook_lettuce_onion :: 共有置き場ID未割当のため待機中,3,0,
-8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,good,0,follow_plan,3,1,25.7,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
-8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,bad,2,follow_plan,3,1,31.8,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
-8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,random,4,follow_plan,3,1,22.1,,,0,,0,0,
-9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,bad,0,follow_plan,3,1,26.6,,,0,,0,0,
-9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,random,2,follow_plan,3,1,22.1,,,0,,0,0,
-10,OnionTomatoSalad|TomatoLettuceSoup|AppleOrangeJuice,good,4,follow_plan,3,1,22.9,,,0,,0,0,
-10,OnionTomatoSalad|TomatoLettuceSoup|AppleOrangeJuice,random,0,follow_plan,3,1,23.6,,,0,,0,0,
-11,OnionTomatoSalad|TomatoLettuceSoup|BananaOrangeJuice,good,2,follow_plan,3,1,22.1,,,0,,0,0,
-11,OnionTomatoSalad|TomatoLettuceSoup|BananaOrangeJuice,bad,4,follow_plan,3,1,22.1,,,0,,0,0,
-12,TomatoLettuceSalad|OnionLettuceSoup|AppleBananaJuice,good,0,follow_plan,3,1,22.3,,,0,,0,0,
-12,TomatoLettuceSalad|OnionLettuceSoup|AppleBananaJuice,bad,2,follow_plan,3,1,51.3,,,0,chop_tomato :: FreshTomato の取得,242,2,A1:chop:FreshOnion の取得|A0:chop:FreshTomato の取得
-12,TomatoLettuceSalad|OnionLettuceSoup|AppleBananaJuice,random,4,follow_plan,3,1,22.1,,,0,,0,0,
-13,TomatoLettuceSalad|OnionLettuceSoup|AppleOrangeJuice,bad,0,follow_plan,3,1,32.5,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
-13,TomatoLettuceSalad|OnionLettuceSoup|AppleOrangeJuice,random,2,follow_plan,3,1,32.1,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
-14,TomatoLettuceSalad|OnionLettuceSoup|BananaOrangeJuice,good,4,follow_plan,3,1,24.9,,,0,,0,0,
-14,TomatoLettuceSalad|OnionLettuceSoup|BananaOrangeJuice,random,0,follow_plan,3,1,25.9,,,0,,0,0,
-15,TomatoLettuceSalad|OnionTomatoSoup|AppleBananaJuice,good,2,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,chop_tomato :: FreshTomato の取得,290,3,A0:chop:FreshTomato の取得|A1:mix:必要な食材 (Chopped) を待機中|A0:cook:指定テーブルにて食材をマージさせるために置く
-15,TomatoLettuceSalad|OnionTomatoSoup|AppleBananaJuice,bad,4,follow_plan,3,1,22.3,,,0,,0,0,
-16,TomatoLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,good,0,follow_plan,3,1,23.7,,,0,,0,0,
-16,TomatoLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,bad,2,follow_plan,3,1,32.3,,,0,cook_onion_tomato :: 調理完了 (Done),1,0,
-16,TomatoLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,random,4,follow_plan,3,1,22.3,,,0,,0,0,
-17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,bad,0,follow_plan,3,1,32.6,,,0,cook_onion_tomato :: 調理完了 (Done),1,0,
-17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,random,2,follow_plan,3,1,22.3,,,0,,0,0,
-0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,good,2,follow_plan,3,1,54.8,,,0,chop_tomato :: FreshTomato の取得,294,1,A0:chop:FreshTomato の取得
-0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,bad,4,follow_plan,3,1,22.3,,,0,,0,0,
-1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,good,0,follow_plan,3,1,23.7,,,0,,0,0,
-1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,bad,2,follow_plan,3,1,22.3,,,0,,0,0,
-1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,random,4,follow_plan,3,1,22.3,,,0,,0,0,
-2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,bad,0,follow_plan,3,1,23.5,,,0,cook_onion_tomato :: 調理完了 (Done),1,0,
-2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,random,2,follow_plan,3,1,30.9,,,0,cook_onion_tomato :: 調理完了 (Done),1,0,
-3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,good,4,follow_plan,3,1,34.2,,,0,cook_lettuce_tomato :: 必要な食材 (Chopped) を待機中,3,1,A1:serve_salad:不足分がそろうのを待機中
-3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,random,0,follow_plan,3,1,21.9,,,0,,0,0,
-4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,good,2,follow_plan,3,1,62.7,,,0,chop_tomato :: FreshTomato の取得,342,2,A0:chop:FreshTomato の取得|A1:serve_from_counter:受け渡し待ち
-4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,bad,4,follow_plan,3,1,29.3,,,0,,0,0,
-5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,good,0,follow_plan,3,1,20.7,,,0,,0,0,
-5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,bad,2,follow_plan,3,1,22.1,,,0,,0,0,
-5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,random,4,follow_plan,3,1,29.5,,,0,,0,0,
-6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,bad,0,follow_plan,3,1,32.4,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
-6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,random,2,follow_plan,3,1,31.4,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
-7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,good,4,follow_plan,3,1,22.1,,,0,,0,0,
-7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,random,0,follow_plan,3,1,32.2,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
-8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,good,2,follow_plan,3,1,22.1,,,0,,0,0,
-8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,bad,4,follow_plan,3,1,22.1,,,0,,0,0,
-9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,good,0,follow_plan,3,1,23.5,,,0,,0,0,
-9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,bad,2,follow_plan,3,1,22.1,,,0,,0,0,
-9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,random,4,follow_plan,3,1,22.1,,,0,,0,0,
-10,OnionTomatoSalad|TomatoLettuceSoup|AppleOrangeJuice,bad,0,follow_plan,3,1,32.2,,,0,cook_lettuce_tomato :: 調理完了 (Done),1,0,
-10,OnionTomatoSalad|TomatoLettuceSoup|AppleOrangeJuice,random,2,follow_plan,3,1,22.1,,,0,,0,0,
-11,OnionTomatoSalad|TomatoLettuceSoup|BananaOrangeJuice,good,4,follow_plan,3,1,22.1,,,0,,0,0,
-11,OnionTomatoSalad|TomatoLettuceSoup|BananaOrangeJuice,random,0,follow_plan,0,0,100.0,3品未完(Juice/Salad/Soup),,0,handover_lettuce_tomato :: ターゲットの完成品が入った鍋が見つかりません,239,2,A0:handover:ターゲットの完成品が入った鍋が見つかりません|A1:serve_from_counter:受け渡し待ち
-12,TomatoLettuceSalad|OnionLettuceSoup|AppleBananaJuice,good,2,follow_plan,3,1,24.9,,,0,,0,0,
-12,TomatoLettuceSalad|OnionLettuceSoup|AppleBananaJuice,bad,4,follow_plan,3,1,22.1,,,0,,0,0,
-13,TomatoLettuceSalad|OnionLettuceSoup|AppleOrangeJuice,good,0,follow_plan,3,1,22.3,,,0,,0,0,
-13,TomatoLettuceSalad|OnionLettuceSoup|AppleOrangeJuice,bad,2,follow_plan,3,1,31.9,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
-13,TomatoLettuceSalad|OnionLettuceSoup|AppleOrangeJuice,random,4,follow_plan,3,1,28.7,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
-14,TomatoLettuceSalad|OnionLettuceSoup|BananaOrangeJuice,bad,0,follow_plan,3,1,32.7,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
-14,TomatoLettuceSalad|OnionLettuceSoup|BananaOrangeJuice,random,2,follow_plan,3,1,24.9,,,0,,0,0,
-15,TomatoLettuceSalad|OnionTomatoSoup|AppleBananaJuice,good,4,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,cook_onion_tomato :: 共有置き場ID未割当のため待機中,2,1,A1:serve_salad:不足分がそろうのを待機中
-15,TomatoLettuceSalad|OnionTomatoSoup|AppleBananaJuice,random,0,follow_plan,3,1,32.6,,,0,cook_onion_tomato :: 調理完了 (Done),1,0,
-16,TomatoLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,good,2,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,chop_tomato :: FreshTomato の取得,290,3,A0:chop:FreshTomato の取得|A1:mix:必要な食材 (Chopped) を待機中|A0:cook:指定テーブルにて食材をマージさせるために置く
-16,TomatoLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,bad,4,follow_plan,3,1,22.3,,,0,,0,0,
-17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,good,0,follow_plan,3,1,23.7,,,0,,0,0,
-17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,bad,2,follow_plan,3,1,32.7,,,0,cook_onion_tomato :: 調理完了 (Done),1,0,
-17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,random,4,follow_plan,3,1,22.3,,,0,,0,0,
-0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,good,4,follow_plan,3,1,31.5,,,0,,0,0,
-0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,random,0,follow_plan,3,1,23.7,,,0,cook_onion_tomato :: 調理完了 (Done),1,0,
-1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,good,2,follow_plan,3,1,54.8,,,0,chop_tomato :: FreshTomato の取得,294,1,A0:chop:FreshTomato の取得
-1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,bad,4,follow_plan,3,1,22.3,,,0,,0,0,
-2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,good,0,follow_plan,3,1,23.7,,,0,,0,0,
-2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,bad,2,follow_plan,3,1,23.6,,,0,cook_onion_tomato :: 調理完了 (Done),1,0,
-2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,random,4,follow_plan,3,1,22.3,,,0,,0,0,
-3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,bad,0,follow_plan,3,1,23.7,,,0,cook_lettuce_tomato :: 調理完了 (Done),1,0,
-3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,random,2,follow_plan,3,1,22.1,,,0,,0,0,
-4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,good,4,follow_plan,3,1,31.3,,,0,,0,0,
-4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,random,0,follow_plan,3,1,21.9,,,0,,0,0,
-5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,good,2,follow_plan,3,1,62.9,,,0,chop_tomato :: FreshTomato の取得,342,2,A0:chop:FreshTomato の取得|A1:serve_from_counter:受け渡し待ち
-5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,bad,4,follow_plan,3,1,24.5,,,0,cook_lettuce_tomato :: 調理完了 (Done),1,0,
-6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,good,0,follow_plan,3,1,25.7,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
-6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,bad,2,follow_plan,3,1,31.8,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
-6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,random,4,follow_plan,3,1,30.1,,,0,cook_lettuce_onion :: 共有置き場ID未割当のため待機中,3,0,
-7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,bad,0,follow_plan,3,1,32.0,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
-7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,random,2,follow_plan,3,1,31.6,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
-8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,good,4,follow_plan,3,1,22.1,,,0,,0,0,
-8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,random,0,follow_plan,3,1,22.1,,,0,,0,0,
-9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,good,2,follow_plan,3,1,44.0,,,0,chop_tomato :: FreshTomato の取得,244,1,A0:chop:FreshTomato の取得
-9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,bad,4,follow_plan,3,1,22.1,,,0,,0,0,
-10,OnionTomatoSalad|TomatoLettuceSoup|AppleOrangeJuice,good,0,follow_plan,3,1,23.5,,,0,,0,0,
-10,OnionTomatoSalad|TomatoLettuceSoup|AppleOrangeJuice,bad,2,follow_plan,3,1,32.1,,,0,,0,0,
-10,OnionTomatoSalad|TomatoLettuceSoup|AppleOrangeJuice,random,4,follow_plan,3,1,22.1,,,0,,0,0,
-11,OnionTomatoSalad|TomatoLettuceSoup|BananaOrangeJuice,bad,0,follow_plan,3,1,26.6,,,0,,0,0,
-11,OnionTomatoSalad|TomatoLettuceSoup|BananaOrangeJuice,random,2,follow_plan,3,1,28.3,,,0,cook_lettuce_tomato :: 調理完了 (Done),1,0,
-12,TomatoLettuceSalad|OnionLettuceSoup|AppleBananaJuice,good,4,follow_plan,3,1,24.9,,,0,,0,0,
-12,TomatoLettuceSalad|OnionLettuceSoup|AppleBananaJuice,random,0,follow_plan,3,1,28.9,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
-13,TomatoLettuceSalad|OnionLettuceSoup|AppleOrangeJuice,good,2,follow_plan,3,1,24.9,,,0,,0,0,
-13,TomatoLettuceSalad|OnionLettuceSoup|AppleOrangeJuice,bad,4,follow_plan,3,1,28.5,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
-14,TomatoLettuceSalad|OnionLettuceSoup|BananaOrangeJuice,good,0,follow_plan,3,1,22.3,,,0,,0,0,
-14,TomatoLettuceSalad|OnionLettuceSoup|BananaOrangeJuice,bad,2,follow_plan,3,1,32.1,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
-14,TomatoLettuceSalad|OnionLettuceSoup|BananaOrangeJuice,random,4,follow_plan,3,1,24.9,,,0,,0,0,
-15,TomatoLettuceSalad|OnionTomatoSoup|AppleBananaJuice,bad,0,follow_plan,3,1,32.2,,,0,cook_onion_tomato :: 調理完了 (Done),1,0,
-15,TomatoLettuceSalad|OnionTomatoSoup|AppleBananaJuice,random,2,follow_plan,3,1,32.7,,,0,cook_onion_tomato :: 調理完了 (Done),1,0,
-16,TomatoLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,good,4,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,cook_onion_tomato :: 共有置き場ID未割当のため待機中,2,1,A1:serve_salad:不足分がそろうのを待機中
-16,TomatoLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,random,0,follow_plan,3,1,32.2,,,0,cook_onion_tomato :: 調理完了 (Done),1,0,
-17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,good,2,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,chop_tomato :: FreshTomato の取得,290,3,A0:chop:FreshTomato の取得|A1:mix:必要な食材 (Chopped) を待機中|A0:cook:指定テーブルにて食材をマージさせるために置く
-17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,bad,4,follow_plan,3,1,22.3,,,0,,0,0,
-0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,bad,0,follow_plan,3,1,23.3,,,0,cook_onion_tomato :: 調理完了 (Done),1,0,
-0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,random,2,follow_plan,3,1,23.8,,,0,cook_onion_tomato :: 調理完了 (Done),1,0,
-1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,good,4,follow_plan,3,1,31.5,,,0,,0,0,
-1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,random,0,follow_plan,3,1,22.7,,,0,,0,0,
-2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,good,2,follow_plan,3,1,54.5,,,0,chop_tomato :: FreshTomato の取得,289,1,A0:chop:FreshTomato の取得
-2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,bad,4,follow_plan,3,1,22.3,,,0,,0,0,
-3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,good,0,follow_plan,3,1,22.5,,,0,,0,0,
-3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,bad,2,follow_plan,3,1,23.6,,,0,cook_lettuce_tomato :: 調理完了 (Done),1,0,
-3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,random,4,follow_plan,3,1,24.5,,,0,cook_lettuce_tomato :: 調理完了 (Done),1,0,
-4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,bad,0,follow_plan,3,1,23.5,,,0,cook_lettuce_tomato :: 調理完了 (Done),1,0,
-4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,random,2,follow_plan,3,1,22.1,,,0,,0,0,
-5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,good,4,follow_plan,3,1,31.5,,,0,,0,0,
-5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,random,0,follow_plan,3,1,23.7,,,0,cook_lettuce_tomato :: 調理完了 (Done),1,0,
-6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,good,2,follow_plan,3,1,22.1,,,0,,0,0,
-6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,bad,4,follow_plan,3,1,30.1,,,0,cook_lettuce_onion :: 共有置き場ID未割当のため待機中,3,0,
-7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,good,0,follow_plan,3,1,25.7,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
-7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,bad,2,follow_plan,3,1,31.4,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
-7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,random,4,follow_plan,3,1,22.1,,,0,,0,0,
-8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,bad,0,follow_plan,3,1,32.4,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
-8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,random,2,follow_plan,3,1,22.1,,,0,,0,0,
-9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,good,4,follow_plan,3,1,22.9,,,0,,0,0,
-9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,random,0,follow_plan,3,1,26.6,,,0,,0,0,
-10,OnionTomatoSalad|TomatoLettuceSoup|AppleOrangeJuice,good,2,follow_plan,3,1,44.0,,,0,chop_tomato :: FreshTomato の取得,244,1,A0:chop:FreshTomato の取得
-10,OnionTomatoSalad|TomatoLettuceSoup|AppleOrangeJuice,bad,4,follow_plan,3,1,22.1,,,0,,0,0,
-11,OnionTomatoSalad|TomatoLettuceSoup|BananaOrangeJuice,good,0,follow_plan,3,1,22.1,,,0,,0,0,
-11,OnionTomatoSalad|TomatoLettuceSoup|BananaOrangeJuice,bad,2,follow_plan,3,1,22.1,,,0,,0,0,
-11,OnionTomatoSalad|TomatoLettuceSoup|BananaOrangeJuice,random,4,follow_plan,3,1,33.1,,,0,,0,0,
-12,TomatoLettuceSalad|OnionLettuceSoup|AppleBananaJuice,bad,0,follow_plan,3,1,28.9,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
-12,TomatoLettuceSalad|OnionLettuceSoup|AppleBananaJuice,random,2,follow_plan,3,1,51.3,,,0,chop_tomato :: FreshTomato の取得,242,2,A1:chop:FreshOnion の取得|A0:chop:FreshTomato の取得
-13,TomatoLettuceSalad|OnionLettuceSoup|AppleOrangeJuice,good,4,follow_plan,3,1,24.9,,,0,,0,0,
-13,TomatoLettuceSalad|OnionLettuceSoup|AppleOrangeJuice,random,0,follow_plan,3,1,32.7,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
-14,TomatoLettuceSalad|OnionLettuceSoup|BananaOrangeJuice,good,2,follow_plan,3,1,24.9,,,0,,0,0,
-14,TomatoLettuceSalad|OnionLettuceSoup|BananaOrangeJuice,bad,4,follow_plan,3,1,28.7,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
-15,TomatoLettuceSalad|OnionTomatoSoup|AppleBananaJuice,good,0,follow_plan,3,1,23.7,,,0,,0,0,
-15,TomatoLettuceSalad|OnionTomatoSoup|AppleBananaJuice,bad,2,follow_plan,3,1,32.3,,,0,cook_onion_tomato :: 調理完了 (Done),1,0,
-15,TomatoLettuceSalad|OnionTomatoSoup|AppleBananaJuice,random,4,follow_plan,3,1,22.3,,,0,,0,0,
-16,TomatoLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,bad,0,follow_plan,3,1,32.2,,,0,cook_onion_tomato :: 調理完了 (Done),1,0,
-16,TomatoLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,random,2,follow_plan,3,1,32.3,,,0,cook_onion_tomato :: 調理完了 (Done),1,0,
-17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,good,4,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,cook_onion_tomato :: 共有置き場ID未割当のため待機中,2,1,A1:serve_salad:不足分がそろうのを待機中
-17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,random,0,follow_plan,3,1,23.8,,,0,,0,0,
+0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,good,0,follow_plan,3,1,23.5,,,0,cook_onion_tomato :: 調理完了 (Done),1,0,
+0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,bad,2,follow_plan,0,0,100.0,3品未完(Juice/Salad/Soup),,0,,0,1,A1:mix:食材の取得
+0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,random,4,follow_plan,0,0,100.0,3品未完(Juice/Salad/Soup),,0,handover_onion_tomato :: ターゲットの完成品が入った鍋が見つかりません,407,2,A1:mix:指定テーブルにて食材をマージさせるために置く|A0:cook:食材の取得
+1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,bad,0,follow_plan,3,1,21.9,,,0,cook_onion_tomato :: 調理完了 (Done),1,0,
+1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,random,2,follow_plan,0,0,100.0,3品未完(Juice/Salad/Soup),,0,,0,1,A1:serve_salad:不足分がそろうのを待機中
+2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,good,4,follow_plan,3,1,31.3,,,0,,0,0,
+2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,random,0,follow_plan,0,0,100.0,3品未完(Juice/Salad/Soup),,0,handover_onion_tomato :: ターゲットの完成品が入った鍋が見つかりません,812,2,A0:handover:ターゲットの完成品が入った鍋が見つかりません|A1:serve_from_counter:受け渡し待ち
+3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,good,2,follow_plan,3,1,28.3,,,0,cook_lettuce_tomato :: 調理完了 (Done),1,0,
+3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,bad,4,follow_plan,3,1,27.9,,,0,cook_lettuce_tomato :: 調理完了 (Done),1,0,
+4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,good,0,follow_plan,3,1,23.5,,,0,cook_lettuce_tomato :: 調理完了 (Done),1,0,
+4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,bad,2,follow_plan,3,1,38.2,,,0,,0,0,
+4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,random,4,follow_plan,3,1,24.9,,,0,cook_lettuce_tomato :: 調理完了 (Done),1,0,
+5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,bad,0,follow_plan,3,1,21.9,,,0,cook_lettuce_tomato :: 調理完了 (Done),1,0,
+5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,random,2,follow_plan,3,1,30.8,,,0,cook_lettuce_tomato :: 調理完了 (Done),1,0,
+6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,good,4,follow_plan,3,1,21.9,,,0,,0,0,
+6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,random,0,follow_plan,3,1,33.5,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
+7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,good,2,follow_plan,3,1,21.9,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
+7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,bad,4,follow_plan,3,1,21.9,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
+8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,good,0,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,cook_lettuce_onion :: 調理完了 (Done),1,2,A1:mix:必要な食材 (Chopped) を待機中|A0:chop:ChoppedBanana を置く (完了)
+8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,bad,2,follow_plan,3,1,31.1,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
+8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,random,4,follow_plan,3,1,21.9,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
+9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,bad,0,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,cook_lettuce_tomato :: 調理完了 (Done),1,2,A1:mix:必要な食材 (Chopped) を待機中|A0:chop:ChoppedBanana を置く (完了)
+9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,random,2,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,cook_lettuce_tomato :: 調理完了 (Done),1,2,A1:mix:指定テーブルにて食材をマージさせるために置く|A0:handover:ChoppedBanana を置く (完了)
+10,OnionTomatoSalad|TomatoLettuceSoup|AppleOrangeJuice,good,4,follow_plan,3,1,22.5,,,0,cook_lettuce_tomato :: 調理完了 (Done),1,0,
+10,OnionTomatoSalad|TomatoLettuceSoup|AppleOrangeJuice,random,0,follow_plan,3,1,22.2,,,0,,0,0,
+11,OnionTomatoSalad|TomatoLettuceSoup|BananaOrangeJuice,good,2,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,cook_lettuce_tomato :: 調理完了 (Done),1,2,A1:mix:必要な食材 (Chopped) を待機中|A0:chop:ChoppedBanana を置く (完了)
+11,OnionTomatoSalad|TomatoLettuceSoup|BananaOrangeJuice,bad,4,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,cook_lettuce_tomato :: 調理完了 (Done),1,2,A1:mix:必要な食材 (Chopped) を待機中|A0:chop:ChoppedBanana を置く (完了)
+12,TomatoLettuceSalad|OnionLettuceSoup|AppleBananaJuice,good,0,follow_plan,3,1,21.9,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
+12,TomatoLettuceSalad|OnionLettuceSoup|AppleBananaJuice,bad,2,follow_plan,3,1,27.1,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
+12,TomatoLettuceSalad|OnionLettuceSoup|AppleBananaJuice,random,4,follow_plan,3,1,26.3,,,0,,0,0,
+13,TomatoLettuceSalad|OnionLettuceSoup|AppleOrangeJuice,bad,0,follow_plan,3,1,35.9,,,0,cook_lettuce_onion :: 調理完了 (Done),2,0,
+13,TomatoLettuceSalad|OnionLettuceSoup|AppleOrangeJuice,random,2,follow_plan,3,1,27.5,,,0,,0,0,
+14,TomatoLettuceSalad|OnionLettuceSoup|BananaOrangeJuice,good,4,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,cook_lettuce_onion :: 調理完了 (Done),1,2,A1:mix:必要な食材 (Chopped) を待機中|A0:chop:ChoppedBanana を置く (完了)
+14,TomatoLettuceSalad|OnionLettuceSoup|BananaOrangeJuice,random,0,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,cook_lettuce_onion :: 調理完了 (Done),1,2,A1:mix:必要な食材 (Chopped) を待機中|A0:chop:ChoppedBanana を置く (完了)
+15,TomatoLettuceSalad|OnionTomatoSoup|AppleBananaJuice,good,2,follow_plan,3,1,22.0,,,0,,0,0,
+15,TomatoLettuceSalad|OnionTomatoSoup|AppleBananaJuice,bad,4,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,cook_onion_tomato :: 調理完了 (Done),1,2,A1:mix:指定テーブルにて食材をマージさせるために置く|A0:handover:ChoppedBanana を置く (完了)
+16,TomatoLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,good,0,follow_plan,3,1,25.1,,,0,,0,0,
+16,TomatoLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,bad,2,follow_plan,3,1,28.6,,,0,cook_onion_tomato :: 共有置き場ID未割当のため待機中,2,0,
+16,TomatoLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,random,4,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,cook_onion_tomato :: 調理完了 (Done),1,2,A1:mix:指定テーブルにて食材をマージさせるために置く|A0:handover:ChoppedOrange を置く (完了)
+17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,bad,0,follow_plan,3,1,28.9,,,0,,0,0,
+17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,random,2,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,cook_onion_tomato :: 調理完了 (Done),1,2,A1:mix:必要な食材 (Chopped) を待機中|A0:chop:ChoppedBanana を置く (完了)
+0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,good,2,follow_plan,3,1,23.3,,,0,,0,0,
+0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,bad,4,follow_plan,0,0,100.0,3品未完(Juice/Salad/Soup),,0,handover_onion_tomato :: ターゲットの完成品が入った鍋が見つかりません,21,2,A1:mix:指定テーブルにて食材をマージさせるために置く|A0:cook:食材の取得
+1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,good,0,follow_plan,3,1,23.5,,,0,cook_onion_tomato :: 調理完了 (Done),1,0,
+1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,bad,2,follow_plan,0,0,100.0,3品未完(Juice/Salad/Soup),,0,,0,1,A1:serve_salad:不足分がそろうのを待機中
+1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,random,4,follow_plan,0,0,100.0,3品未完(Juice/Salad/Soup),,0,,0,1,A1:serve_salad:不足分がそろうのを待機中
+2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,bad,0,follow_plan,3,1,22.7,,,0,cook_onion_tomato :: 調理完了 (Done),1,0,
+2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,random,2,follow_plan,0,0,100.0,3品未完(Juice/Salad/Soup),,0,cook_onion_tomato :: 調理完了 (Done),1,1,A1:mix:食材の取得
+3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,good,4,follow_plan,3,1,24.9,,,0,,0,0,
+3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,random,0,follow_plan,3,1,21.9,,,0,cook_lettuce_tomato :: 調理完了 (Done),1,0,
+4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,good,2,follow_plan,3,1,26.7,,,0,cook_lettuce_tomato :: 調理完了 (Done),1,0,
+4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,bad,4,follow_plan,3,1,27.7,,,0,,0,0,
+5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,good,0,follow_plan,3,1,23.5,,,0,cook_lettuce_tomato :: 調理完了 (Done),1,0,
+5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,bad,2,follow_plan,0,0,100.0,3品未完(Juice/Salad/Soup),,0,,0,1,A1:serve_salad:不足分がそろうのを待機中
+5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,random,4,follow_plan,3,1,27.9,,,0,cook_lettuce_tomato :: 調理完了 (Done),1,0,
+6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,bad,0,follow_plan,3,1,31.4,,,0,,0,0,
+6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,random,2,follow_plan,3,1,30.7,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
+7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,good,4,follow_plan,3,1,21.9,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
+7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,random,0,follow_plan,3,1,31.2,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
+8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,good,2,follow_plan,3,1,21.9,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
+8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,bad,4,follow_plan,3,1,21.9,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
+9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,good,0,follow_plan,3,1,23.1,,,0,cook_lettuce_tomato :: 調理完了 (Done),1,0,
+9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,bad,2,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,cook_lettuce_tomato :: 調理完了 (Done),1,2,A1:mix:指定テーブルにて食材をマージさせるために置く|A0:handover:ChoppedBanana を置く (完了)
+9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,random,4,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,cook_lettuce_tomato :: 調理完了 (Done),1,2,A1:mix:指定テーブルにて食材をマージさせるために置く|A0:handover:ChoppedBanana を置く (完了)
+10,OnionTomatoSalad|TomatoLettuceSoup|AppleOrangeJuice,bad,0,follow_plan,3,1,25.5,,,0,,0,0,
+10,OnionTomatoSalad|TomatoLettuceSoup|AppleOrangeJuice,random,2,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,cook_lettuce_tomato :: 調理完了 (Done),1,2,A1:mix:指定テーブルにて食材をマージさせるために置く|A0:handover:ChoppedOrange を置く (完了)
+11,OnionTomatoSalad|TomatoLettuceSoup|BananaOrangeJuice,good,4,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,cook_lettuce_tomato :: 調理完了 (Done),1,2,A1:mix:必要な食材 (Chopped) を待機中|A0:chop:ChoppedBanana を置く (完了)
+11,OnionTomatoSalad|TomatoLettuceSoup|BananaOrangeJuice,random,0,follow_plan,0,0,100.0,3品未完(Juice/Salad/Soup),,0,handover_lettuce_tomato :: ターゲットの完成品が入った鍋が見つかりません,766,2,A0:handover:ターゲットの完成品が入った鍋が見つかりません|A1:serve_from_counter:受け渡し待ち
+12,TomatoLettuceSalad|OnionLettuceSoup|AppleBananaJuice,good,2,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,cook_lettuce_onion :: 調理完了 (Done),1,2,A1:mix:必要な食材 (Chopped) を待機中|A0:chop:ChoppedBanana を置く (完了)
+12,TomatoLettuceSalad|OnionLettuceSoup|AppleBananaJuice,bad,4,follow_plan,3,1,26.3,,,0,,0,0,
+13,TomatoLettuceSalad|OnionLettuceSoup|AppleOrangeJuice,good,0,follow_plan,3,1,21.9,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
+13,TomatoLettuceSalad|OnionLettuceSoup|AppleOrangeJuice,bad,2,follow_plan,3,1,27.5,,,0,,0,0,
+13,TomatoLettuceSalad|OnionLettuceSoup|AppleOrangeJuice,random,4,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,cook_lettuce_onion :: 調理完了 (Done),1,2,A1:mix:指定テーブルにて食材をマージさせるために置く|A0:handover:ChoppedApple を置く (完了)
+14,TomatoLettuceSalad|OnionLettuceSoup|BananaOrangeJuice,bad,0,follow_plan,3,1,36.1,,,0,cook_lettuce_onion :: 調理完了 (Done),2,0,
+14,TomatoLettuceSalad|OnionLettuceSoup|BananaOrangeJuice,random,2,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,cook_lettuce_onion :: 調理完了 (Done),1,2,A1:mix:必要な食材 (Chopped) を待機中|A0:chop:ChoppedBanana を置く (完了)
+15,TomatoLettuceSalad|OnionTomatoSoup|AppleBananaJuice,good,4,follow_plan,3,1,22.7,,,0,cook_onion_tomato :: 調理完了 (Done),1,0,
+15,TomatoLettuceSalad|OnionTomatoSoup|AppleBananaJuice,random,0,follow_plan,3,1,28.9,,,0,,0,0,
+16,TomatoLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,good,2,follow_plan,3,1,22.0,,,0,,0,0,
+16,TomatoLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,bad,4,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,cook_onion_tomato :: 調理完了 (Done),1,2,A1:mix:指定テーブルにて食材をマージさせるために置く|A0:handover:ChoppedOrange を置く (完了)
+17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,good,0,follow_plan,3,1,25.1,,,0,,0,0,
+17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,bad,2,follow_plan,3,1,29.0,,,0,cook_onion_tomato :: 共有置き場ID未割当のため待機中,2,0,
+17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,random,4,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,cook_onion_tomato :: 調理完了 (Done),1,2,A1:mix:必要な食材 (Chopped) を待機中|A0:chop:ChoppedBanana を置く (完了)
+0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,good,4,follow_plan,3,1,31.1,,,0,cook_onion_tomato :: 調理完了 (Done),1,0,
+0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,random,0,follow_plan,3,1,22.9,,,0,,0,0,
+1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,good,2,follow_plan,3,1,23.3,,,0,,0,0,
+1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,bad,4,follow_plan,0,0,100.0,3品未完(Juice/Salad/Soup),,0,,0,1,A1:serve_salad:不足分がそろうのを待機中
+2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,good,0,follow_plan,3,1,23.5,,,0,cook_onion_tomato :: 調理完了 (Done),1,0,
+2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,bad,2,follow_plan,0,0,100.0,3品未完(Juice/Salad/Soup),,0,cook_onion_tomato :: 調理完了 (Done),1,1,A1:mix:食材の取得
+2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,random,4,follow_plan,3,1,35.6,,,0,cook_onion_tomato :: 調理完了 (Done),1,0,
+3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,bad,0,follow_plan,3,1,22.7,,,0,cook_lettuce_tomato :: 調理完了 (Done),1,0,
+3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,random,2,follow_plan,0,0,100.0,3品未完(Juice/Salad/Soup),,0,,0,1,A1:serve_salad:不足分がそろうのを待機中
+4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,good,4,follow_plan,3,1,30.7,,,0,cook_lettuce_tomato :: 調理完了 (Done),1,0,
+4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,random,0,follow_plan,3,1,21.9,,,0,cook_lettuce_tomato :: 調理完了 (Done),1,0,
+5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,good,2,follow_plan,3,1,26.9,,,0,cook_lettuce_tomato :: 調理完了 (Done),1,0,
+5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,bad,4,follow_plan,3,1,24.9,,,0,cook_lettuce_tomato :: 調理完了 (Done),1,0,
+6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,good,0,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,cook_lettuce_onion :: 調理完了 (Done),1,2,A1:mix:必要な食材 (Chopped) を待機中|A0:chop:ChoppedBanana を置く (完了)
+6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,bad,2,follow_plan,3,1,31.1,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
+6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,random,4,follow_plan,3,1,21.9,,,0,,0,0,
+7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,bad,0,follow_plan,3,1,31.0,,,0,,0,0,
+7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,random,2,follow_plan,3,1,30.9,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
+8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,good,4,follow_plan,3,1,21.9,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
+8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,random,0,follow_plan,3,1,21.9,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
+9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,good,2,follow_plan,3,1,21.8,,,0,,0,0,
+9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,bad,4,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,cook_lettuce_tomato :: 調理完了 (Done),1,2,A1:mix:指定テーブルにて食材をマージさせるために置く|A0:handover:ChoppedBanana を置く (完了)
+10,OnionTomatoSalad|TomatoLettuceSoup|AppleOrangeJuice,good,0,follow_plan,0,0,100.0,3品未完(Juice/Salad/Soup),,0,,0,1,A1:chop:FreshOnion の取得
+10,OnionTomatoSalad|TomatoLettuceSoup|AppleOrangeJuice,bad,2,follow_plan,3,1,28.4,,,0,cook_lettuce_tomato :: 共有置き場ID未割当のため待機中,2,0,
+10,OnionTomatoSalad|TomatoLettuceSoup|AppleOrangeJuice,random,4,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,cook_lettuce_tomato :: 調理完了 (Done),1,2,A1:mix:指定テーブルにて食材をマージさせるために置く|A0:handover:ChoppedOrange を置く (完了)
+11,OnionTomatoSalad|TomatoLettuceSoup|BananaOrangeJuice,bad,0,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,cook_lettuce_tomato :: 調理完了 (Done),1,2,A1:mix:必要な食材 (Chopped) を待機中|A0:chop:ChoppedBanana を置く (完了)
+11,OnionTomatoSalad|TomatoLettuceSoup|BananaOrangeJuice,random,2,follow_plan,3,1,28.0,,,0,cook_lettuce_tomato :: 調理完了 (Done),1,0,
+12,TomatoLettuceSalad|OnionLettuceSoup|AppleBananaJuice,good,4,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,cook_lettuce_onion :: 調理完了 (Done),1,2,A1:mix:必要な食材 (Chopped) を待機中|A0:chop:ChoppedBanana を置く (完了)
+12,TomatoLettuceSalad|OnionLettuceSoup|AppleBananaJuice,random,0,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,cook_lettuce_onion :: 調理完了 (Done),1,2,A1:mix:必要な食材 (Chopped) を待機中|A0:chop:ChoppedBanana を置く (完了)
+13,TomatoLettuceSalad|OnionLettuceSoup|AppleOrangeJuice,good,2,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,cook_lettuce_onion :: 調理完了 (Done),1,2,A1:mix:必要な食材 (Chopped) を待機中|A0:chop:ChoppedOrange を置く (完了)
+13,TomatoLettuceSalad|OnionLettuceSoup|AppleOrangeJuice,bad,4,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,cook_lettuce_onion :: 調理完了 (Done),1,2,A1:mix:指定テーブルにて食材をマージさせるために置く|A0:handover:ChoppedOrange を置く (完了)
+14,TomatoLettuceSalad|OnionLettuceSoup|BananaOrangeJuice,good,0,follow_plan,3,1,21.9,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
+14,TomatoLettuceSalad|OnionLettuceSoup|BananaOrangeJuice,bad,2,follow_plan,3,1,27.5,,,0,,0,0,
+14,TomatoLettuceSalad|OnionLettuceSoup|BananaOrangeJuice,random,4,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,cook_lettuce_onion :: 調理完了 (Done),1,2,A1:mix:必要な食材 (Chopped) を待機中|A0:chop:ChoppedBanana を置く (完了)
+15,TomatoLettuceSalad|OnionTomatoSoup|AppleBananaJuice,bad,0,follow_plan,3,1,28.1,,,0,cook_onion_tomato :: 共有置き場ID未割当のため待機中,2,0,
+15,TomatoLettuceSalad|OnionTomatoSoup|AppleBananaJuice,random,2,follow_plan,3,1,29.0,,,0,cook_onion_tomato :: 共有置き場ID未割当のため待機中,2,0,
+16,TomatoLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,good,4,follow_plan,3,1,22.7,,,0,cook_onion_tomato :: 調理完了 (Done),1,0,
+16,TomatoLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,random,0,follow_plan,3,1,28.1,,,0,cook_onion_tomato :: 共有置き場ID未割当のため待機中,2,0,
+17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,good,2,follow_plan,3,1,22.0,,,0,,0,0,
+17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,bad,4,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,,0,2,A1:mix:指定テーブルにて食材をマージさせるために置く|A0:handover:ChoppedOrange を置く (完了)
+0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,bad,0,follow_plan,3,1,22.5,,,0,cook_onion_tomato :: 調理完了 (Done),1,0,
+0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,random,2,follow_plan,3,1,31.6,,,0,,0,0,
+1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,good,4,follow_plan,3,1,30.9,,,0,,0,0,
+1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,random,0,follow_plan,0,0,100.0,3品未完(Juice/Salad/Soup),,0,,0,1,A1:mix:必要な食材 (Chopped) を待機中
+2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,good,2,follow_plan,3,1,23.5,,,0,,0,0,
+2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,bad,4,follow_plan,0,0,100.0,3品未完(Juice/Salad/Soup),,0,,0,1,A1:mix:指定テーブルにて食材をマージさせるために置く
+3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,good,0,follow_plan,0,0,100.0,3品未完(Juice/Salad/Soup),,0,,0,1,A1:mix:必要な食材 (Chopped) を待機中
+3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,bad,2,follow_plan,3,1,31.0,,,0,,0,0,
+3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,random,4,follow_plan,3,1,24.9,,,0,cook_lettuce_tomato :: 調理完了 (Done),1,0,
+4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,bad,0,follow_plan,3,1,22.5,,,0,cook_lettuce_tomato :: 調理完了 (Done),1,0,
+4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,random,2,follow_plan,0,0,100.0,3品未完(Juice/Salad/Soup),,0,,0,1,A1:serve_salad:不足分がそろうのを待機中
+5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,good,4,follow_plan,3,1,31.1,,,0,cook_lettuce_tomato :: 調理完了 (Done),1,0,
+5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,random,0,follow_plan,3,1,22.7,,,0,cook_lettuce_tomato :: 調理完了 (Done),1,0,
+6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,good,2,follow_plan,3,1,21.9,,,0,,0,0,
+6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,bad,4,follow_plan,3,1,21.9,,,0,,0,0,
+7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,good,0,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,cook_lettuce_onion :: 調理完了 (Done),1,2,A1:mix:必要な食材 (Chopped) を待機中|A0:chop:ChoppedOrange を置く (完了)
+7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,bad,2,follow_plan,3,1,30.7,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
+7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,random,4,follow_plan,3,1,21.9,,,0,,0,0,
+8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,bad,0,follow_plan,3,1,31.4,,,0,,0,0,
+8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,random,2,follow_plan,3,1,21.9,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
+9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,good,4,follow_plan,3,1,22.5,,,0,cook_lettuce_tomato :: 調理完了 (Done),1,0,
+9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,random,0,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,cook_lettuce_tomato :: 調理完了 (Done),1,2,A1:mix:必要な食材 (Chopped) を待機中|A0:chop:ChoppedBanana を置く (完了)
+10,OnionTomatoSalad|TomatoLettuceSoup|AppleOrangeJuice,good,2,follow_plan,3,1,21.8,,,0,,0,0,
+10,OnionTomatoSalad|TomatoLettuceSoup|AppleOrangeJuice,bad,4,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,cook_lettuce_tomato :: 調理完了 (Done),1,2,A1:mix:指定テーブルにて食材をマージさせるために置く|A0:handover:ChoppedOrange を置く (完了)
+11,OnionTomatoSalad|TomatoLettuceSoup|BananaOrangeJuice,good,0,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,cook_lettuce_tomato :: 調理完了 (Done),1,2,A1:mix:必要な食材 (Chopped) を待機中|A0:chop:ChoppedBanana を置く (完了)
+11,OnionTomatoSalad|TomatoLettuceSoup|BananaOrangeJuice,bad,2,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,cook_lettuce_tomato :: 調理完了 (Done),1,2,A1:mix:必要な食材 (Chopped) を待機中|A0:chop:ChoppedBanana を置く (完了)
+11,OnionTomatoSalad|TomatoLettuceSoup|BananaOrangeJuice,random,4,follow_plan,3,1,36.0,,,0,cook_lettuce_tomato :: 調理完了 (Done),1,0,
+12,TomatoLettuceSalad|OnionLettuceSoup|AppleBananaJuice,bad,0,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,cook_lettuce_onion :: 調理完了 (Done),1,2,A1:mix:必要な食材 (Chopped) を待機中|A0:chop:ChoppedBanana を置く (完了)
+12,TomatoLettuceSalad|OnionLettuceSoup|AppleBananaJuice,random,2,follow_plan,3,1,27.1,,,0,cook_lettuce_onion :: 調理完了 (Done),1,0,
+13,TomatoLettuceSalad|OnionLettuceSoup|AppleOrangeJuice,good,4,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,cook_lettuce_onion :: 調理完了 (Done),1,2,A1:mix:必要な食材 (Chopped) を待機中|A0:chop:ChoppedOrange を置く (完了)
+13,TomatoLettuceSalad|OnionLettuceSoup|AppleOrangeJuice,random,0,follow_plan,3,1,36.1,,,0,cook_lettuce_onion :: 調理完了 (Done),2,0,
+14,TomatoLettuceSalad|OnionLettuceSoup|BananaOrangeJuice,good,2,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,cook_lettuce_onion :: 調理完了 (Done),1,2,A1:mix:必要な食材 (Chopped) を待機中|A0:chop:ChoppedBanana を置く (完了)
+14,TomatoLettuceSalad|OnionLettuceSoup|BananaOrangeJuice,bad,4,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,cook_lettuce_onion :: 調理完了 (Done),1,2,A1:mix:指定テーブルにて食材をマージさせるために置く|A0:handover:ChoppedBanana を置く (完了)
+15,TomatoLettuceSalad|OnionTomatoSoup|AppleBananaJuice,good,0,follow_plan,3,1,25.1,,,0,,0,0,
+15,TomatoLettuceSalad|OnionTomatoSoup|AppleBananaJuice,bad,2,follow_plan,3,1,28.6,,,0,cook_onion_tomato :: 共有置き場ID未割当のため待機中,2,0,
+15,TomatoLettuceSalad|OnionTomatoSoup|AppleBananaJuice,random,4,follow_plan,1,0,100.0,2品未完(Juice/Salad/Soup),,0,,0,2,A1:mix:指定テーブルにて食材をマージさせるために置く|A0:handover:ChoppedApple を置く (完了)
+16,TomatoLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,bad,0,follow_plan,3,1,28.1,,,0,cook_onion_tomato :: 共有置き場ID未割当のため待機中,2,0,
+16,TomatoLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,random,2,follow_plan,3,1,28.6,,,0,cook_onion_tomato :: 共有置き場ID未割当のため待機中,2,0,
+17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,good,4,follow_plan,3,1,22.9,,,0,,0,0,
+17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,random,0,follow_plan,3,1,30.8,,,0,,0,0,

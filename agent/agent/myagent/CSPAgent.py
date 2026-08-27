@@ -214,8 +214,12 @@ class CSPAgent:
         # 「AI に指示する」という行為の意味からは常に True が筋だが、いまの
         # 実装で有効にすると、相手が同じ食材を自分の側で刻んでしまい、その
         # 刻んだ物に AI が手を届かせられずに止まる(下の注記を参照)。
-        # 停滞の根本原因を潰したので有効にする。
-        self.force_instruction_to_ai = True
+        # 指示されたタスクを必ず AI 側の担当にするか。
+        # 「AI に指示する」という行為の意味からは True が筋だが、有効にすると
+        # 良い指示の一部で完走できなくなる(162試行中 2〜7件)。無効なら完走率は
+        # 100% だが、指示の 31% が AI 以外に割り当たり、AI は永久に着手しない。
+        # 測定の交絡と完走率のどちらを取るかの判断が要るため、既定は無効。
+        self.force_instruction_to_ai = False
         # 「いま即座に着手できる cook タスク」を (動詞, 対象) で保持する。
         # __call__ ごとに更新し、GamePlay の指示タイミング監視(enable_cook)が読む。
         self.ready_cook_actions = set()
@@ -2441,6 +2445,8 @@ class CSPAgent:
     @staticmethod
     def _order_ingredients_of(task):
         """そのタスクが属する注文の材料(小文字)。分からなければ None。"""
+        if isinstance(task, dict) and task.get('order_ingredients'):
+            return {str(i).lower() for i in task['order_ingredients']}
         order_obj = task.get('order_obj') if isinstance(task, dict) else None
         if isinstance(order_obj, dict) and order_obj.get('ingredients'):
             return {str(i).lower() for i in order_obj['ingredients']}
@@ -4254,10 +4260,10 @@ class CSPAgent:
         order_uids = self._refresh_active_order_uids(current_orders)
         # 合流地点は注文ごとに1枚へ固定する。途中で移動すると、前に置いた
         # 食材がその場に取り残され、別注文の山に混ざって使えなくなる。
-        if self._map_is_partitioned(env):
-            for uid in order_uids:
-                if uid is not None and uid not in self._fixed_counters:
-                    self._fixed_counters[uid] = self.fixed_shared_counter(env, uid)
+        # 注: 合流地点の固定は試したが取り消した。注文と鍋・提供口の距離を
+        # 無視して機械的に割り当てるため往復が伸び、完走率が 100% から 64% へ
+        # 落ちた。汚染は固定ではなく、注文外の食材を合流させないガードで防ぐ。
+        # (_fixed_counters は空のままにして、従来の動的な選定を使う)
         self.order_display_labels = [
             (order_uid + 1) if order_uid is not None else (order_idx + 1)
             for order_idx, order_uid in enumerate(order_uids)
@@ -4556,6 +4562,11 @@ class CSPAgent:
                     'assigned_counter': assigned_counter
                 })
 
+            # 注文の材料一覧を各タスクに持たせる。chop の obj は食材名なので
+            # そこからは注文全体の材料が分からず、「注文外の食材を混ぜない」
+            # 判定が正しく働かない。
+            for _t in tasks:
+                _t['order_ingredients'] = set(ings_lower)
             orders.append({'order': order_uid, 'display_order': display_order, 'name': dish_name, 'ingredients': ings_lower, 'tasks': tasks})
 
         self.assigned_counters_display_map = assigned_counters_display_map
