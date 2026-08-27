@@ -2,23 +2,23 @@ seed,orders,quality,skip_budget,human_model,served,completed,makespan_actual_s,u
 0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,good,0,greedy,3,1,22.8,,chop_onion :: FreshOnion の取得,83,handover_onion_tomato :: ターゲットの完成品が入った鍋が見つかりません,1
 0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,bad,2,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),chop_onion :: FreshOnion の取得,11,handover_onion_tomato :: ターゲットの完成品が入った鍋が見つかりません,865
 0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,random,4,greedy,3,1,22.8,,chop_onion :: FreshOnion の取得,83,handover_onion_tomato :: ターゲットの完成品が入った鍋が見つかりません,1
-1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,bad,0,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,887,,0
+1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,bad,0,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,888,,0
 1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,random,2,greedy,3,1,22.6,,chop_onion :: FreshOnion の取得,83,handover_onion_tomato :: ターゲットの完成品が入った鍋が見つかりません,1
 2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,good,4,greedy,3,1,22.8,,chop_onion :: FreshOnion の取得,83,handover_onion_tomato :: ターゲットの完成品が入った鍋が見つかりません,1
-2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,random,0,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,887,handover_onion_tomato :: ターゲットの完成品が入った鍋が見つかりません,1
-3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,good,2,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,289,,0
-3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,bad,4,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,887,,0
-4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,good,0,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,887,,0
-4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,bad,2,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,887,,0
-4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,random,4,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,887,,0
-5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,bad,0,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,887,,0
-5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,random,2,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,291,,0
+2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,random,0,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,888,handover_onion_tomato :: ターゲットの完成品が入った鍋が見つかりません,1
+3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,good,2,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,291,,0
+3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,bad,4,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,888,,0
+4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,good,0,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,888,,0
+4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,bad,2,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,888,,0
+4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,random,4,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,888,,0
+5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,bad,0,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,888,,0
+5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,random,2,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,293,,0
 6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,good,4,greedy,3,1,25.6,,mix_apple_banana :: 混ぜ完了 (Done),3,,0
 6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,random,0,greedy,3,1,24.8,,mix_apple_banana :: 混ぜ完了 (Done),3,handover_lettuce_onion :: ターゲットの完成品が入った鍋が見つかりません,1
 7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,good,2,greedy,3,1,26.7,,mix_apple_orange :: 混ぜ完了 (Done),3,,0
-7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,bad,4,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),mix_apple_orange :: 混ぜ完了 (Done),3,cook_lettuce_onion :: 食材の取得,877
+7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,bad,4,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),mix_apple_orange :: 混ぜ完了 (Done),3,handover_lettuce_onion :: ターゲットの完成品が入った鍋が見つかりません,867
 8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,good,0,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_onion_tomato :: 不足分がそろうのを待機中,7,handover_lettuce_onion :: ターゲットの完成品が入った鍋が見つかりません,847
-8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,bad,2,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),mix_orange_banana :: 混ぜ完了 (Done),3,cook_lettuce_onion :: 食材の取得,873
+8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,bad,2,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),mix_orange_banana :: 混ぜ完了 (Done),3,handover_lettuce_onion :: ターゲットの完成品が入った鍋が見つかりません,863
 8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,random,4,greedy,3,1,25.6,,mix_orange_banana :: 混ぜ完了 (Done),3,,0
 9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,bad,0,greedy,3,1,27.9,,chop_onion :: FreshOnion の取得,100,handover_lettuce_tomato :: ターゲットの完成品が入った鍋が見つかりません,2
 9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,random,2,greedy,3,1,27.5,,mix_apple_banana :: 混ぜ完了 (Done),3,handover_lettuce_tomato :: ターゲットの完成品が入った鍋が見つかりません,2
@@ -45,21 +45,21 @@ seed,orders,quality,skip_budget,human_model,served,completed,makespan_actual_s,u
 1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,good,0,greedy,3,1,22.6,,chop_onion :: FreshOnion の取得,83,handover_onion_tomato :: ターゲットの完成品が入った鍋が見つかりません,1
 1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,bad,2,greedy,3,1,29.7,,chop_onion :: FreshOnion の取得,100,,0
 1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,random,4,greedy,3,1,22.6,,chop_onion :: FreshOnion の取得,83,handover_onion_tomato :: ターゲットの完成品が入った鍋が見つかりません,1
-2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,bad,0,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,887,handover_onion_tomato :: ターゲットの完成品が入った鍋が見つかりません,1
+2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,bad,0,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,888,handover_onion_tomato :: ターゲットの完成品が入った鍋が見つかりません,1
 2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,random,2,greedy,3,1,30.8,,chop_onion :: FreshOnion の取得,100,,0
-3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,good,4,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,887,,0
+3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,good,4,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,888,,0
 3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,random,0,greedy,0,0,100.0,3品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,744,handover_lettuce_tomato :: ターゲットの完成品が入った鍋が見つかりません,925
-4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,good,2,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,887,,0
-4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,bad,4,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,887,,0
-5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,good,0,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,887,,0
-5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,bad,2,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,887,,0
-5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,random,4,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,887,,0
+4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,good,2,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,888,,0
+4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,bad,4,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,888,,0
+5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,good,0,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,888,,0
+5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,bad,2,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,888,,0
+5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,random,4,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,888,,0
 6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,bad,0,greedy,3,1,30.9,,mix_apple_banana :: 混ぜ完了 (Done),3,,0
-6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,random,2,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),mix_apple_banana :: 混ぜ完了 (Done),3,cook_lettuce_onion :: 食材の取得,875
+6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,random,2,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),mix_apple_banana :: 混ぜ完了 (Done),3,handover_lettuce_onion :: ターゲットの完成品が入った鍋が見つかりません,865
 7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,good,4,greedy,3,1,25.6,,mix_apple_orange :: 混ぜ完了 (Done),3,,0
-7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,random,0,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),mix_apple_orange :: 混ぜ完了 (Done),3,cook_lettuce_onion :: 食材の取得,877
+7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,random,0,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),mix_apple_orange :: 混ぜ完了 (Done),3,handover_lettuce_onion :: ターゲットの完成品が入った鍋が見つかりません,867
 8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,good,2,greedy,1,0,100.0,2品未完(Juice/Salad/Soup),,0,,0
-8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,bad,4,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),mix_orange_banana :: 混ぜ完了 (Done),3,cook_lettuce_onion :: 食材の取得,873
+8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,bad,4,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),mix_orange_banana :: 混ぜ完了 (Done),3,handover_lettuce_onion :: ターゲットの完成品が入った鍋が見つかりません,863
 9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,good,0,greedy,3,1,27.5,,mix_apple_banana :: 混ぜ完了 (Done),3,handover_lettuce_tomato :: ターゲットの完成品が入った鍋が見つかりません,2
 9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,bad,2,greedy,3,1,27.5,,mix_apple_banana :: 混ぜ完了 (Done),3,handover_lettuce_tomato :: ターゲットの完成品が入った鍋が見つかりません,2
 9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,random,4,greedy,3,1,27.5,,mix_apple_banana :: 混ぜ完了 (Done),3,handover_lettuce_tomato :: ターゲットの完成品が入った鍋が見つかりません,2
@@ -79,7 +79,7 @@ seed,orders,quality,skip_budget,human_model,served,completed,makespan_actual_s,u
 16,TomatoLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,good,2,greedy,3,1,27.0,,mix_apple_orange :: 混ぜ完了 (Done),3,,0
 16,TomatoLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,bad,4,greedy,3,1,27.0,,mix_apple_orange :: 混ぜ完了 (Done),3,,0
 17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,good,0,greedy,3,1,26.7,,mix_orange_banana :: 混ぜ完了 (Done),3,,0
-17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,bad,2,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),mix_orange_banana :: 混ぜ完了 (Done),8,cook_onion_tomato :: 食材の取得,900
+17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,bad,2,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),mix_orange_banana :: 混ぜ完了 (Done),3,cook_onion_tomato :: 指定テーブルにて食材をマージさせるために置く,899
 17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,random,4,greedy,3,1,26.7,,mix_orange_banana :: 混ぜ完了 (Done),3,,0
 0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,good,4,greedy,3,1,22.8,,chop_onion :: FreshOnion の取得,83,handover_onion_tomato :: ターゲットの完成品が入った鍋が見つかりません,1
 0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,random,0,greedy,3,1,22.8,,chop_onion :: FreshOnion の取得,83,handover_onion_tomato :: ターゲットの完成品が入った鍋が見つかりません,1
@@ -88,17 +88,17 @@ seed,orders,quality,skip_budget,human_model,served,completed,makespan_actual_s,u
 2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,good,0,greedy,3,1,22.8,,chop_onion :: FreshOnion の取得,83,handover_onion_tomato :: ターゲットの完成品が入った鍋が見つかりません,1
 2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,bad,2,greedy,3,1,30.8,,chop_onion :: FreshOnion の取得,100,,0
 2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,random,4,greedy,3,1,22.6,,chop_onion :: FreshOnion の取得,83,handover_onion_tomato :: ターゲットの完成品が入った鍋が見つかりません,1
-3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,bad,0,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,887,handover_lettuce_tomato :: ターゲットの完成品が入った鍋が見つかりません,1
-3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,random,2,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,887,,0
-4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,good,4,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,887,,0
-4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,random,0,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,887,,0
-5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,good,2,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,887,,0
-5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,bad,4,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,887,,0
+3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,bad,0,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,888,handover_lettuce_tomato :: ターゲットの完成品が入った鍋が見つかりません,1
+3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,random,2,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,888,,0
+4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,good,4,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,888,,0
+4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,random,0,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,888,,0
+5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,good,2,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,888,,0
+5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,bad,4,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,888,,0
 6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,good,0,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_onion_tomato :: 不足分がそろうのを待機中,7,handover_lettuce_onion :: ターゲットの完成品が入った鍋が見つかりません,849
 6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,bad,2,greedy,1,0,100.0,2品未完(Juice/Salad/Soup),,0,handover_lettuce_onion :: ターゲットの完成品が入った鍋が見つかりません,921
-6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,random,4,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),mix_apple_banana :: 混ぜ完了 (Done),3,cook_lettuce_onion :: 食材の取得,875
+6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,random,4,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),mix_apple_banana :: 混ぜ完了 (Done),3,handover_lettuce_onion :: ターゲットの完成品が入った鍋が見つかりません,865
 7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,bad,0,greedy,3,1,24.8,,mix_apple_orange :: 混ぜ完了 (Done),3,handover_lettuce_onion :: ターゲットの完成品が入った鍋が見つかりません,1
-7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,random,2,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),mix_apple_orange :: 混ぜ完了 (Done),3,cook_lettuce_onion :: 食材の取得,877
+7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,random,2,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),mix_apple_orange :: 混ぜ完了 (Done),3,handover_lettuce_onion :: ターゲットの完成品が入った鍋が見つかりません,867
 8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,good,4,greedy,3,1,25.6,,mix_orange_banana :: 混ぜ完了 (Done),3,,0
 8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,random,0,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_onion_tomato :: 不足分がそろうのを待機中,7,handover_lettuce_onion :: ターゲットの完成品が入った鍋が見つかりません,847
 9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,good,2,greedy,3,1,27.5,,mix_apple_banana :: 混ぜ完了 (Done),3,handover_lettuce_tomato :: ターゲットの完成品が入った鍋が見つかりません,2
@@ -121,24 +121,24 @@ seed,orders,quality,skip_budget,human_model,served,completed,makespan_actual_s,u
 16,TomatoLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,random,0,greedy,3,1,27.0,,mix_apple_orange :: 混ぜ完了 (Done),3,,0
 17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,good,2,greedy,3,1,26.7,,mix_orange_banana :: 混ぜ完了 (Done),3,,0
 17,TomatoLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,bad,4,greedy,3,1,29.9,,mix_orange_banana :: 混ぜ完了 (Done),3,,0
-0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,bad,0,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,887,,0
+0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,bad,0,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,888,,0
 0,OnionLettuceSalad|OnionTomatoSoup|AppleBananaJuice,random,2,greedy,3,1,22.8,,chop_onion :: FreshOnion の取得,83,handover_onion_tomato :: ターゲットの完成品が入った鍋が見つかりません,1
 1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,good,4,greedy,3,1,22.6,,chop_onion :: FreshOnion の取得,83,handover_onion_tomato :: ターゲットの完成品が入った鍋が見つかりません,1
 1,OnionLettuceSalad|OnionTomatoSoup|AppleOrangeJuice,random,0,greedy,3,1,22.6,,chop_onion :: FreshOnion の取得,83,handover_onion_tomato :: ターゲットの完成品が入った鍋が見つかりません,1
 2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,good,2,greedy,3,1,22.8,,chop_onion :: FreshOnion の取得,83,handover_onion_tomato :: ターゲットの完成品が入った鍋が見つかりません,1
 2,OnionLettuceSalad|OnionTomatoSoup|BananaOrangeJuice,bad,4,greedy,3,1,22.6,,chop_onion :: FreshOnion の取得,83,handover_onion_tomato :: ターゲットの完成品が入った鍋が見つかりません,1
-3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,good,0,greedy,3,1,22.8,,chop_onion :: FreshOnion の取得,87,,0
-3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,bad,2,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,887,,0
-3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,random,4,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,887,,0
-4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,bad,0,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,887,,0
-4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,random,2,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,887,,0
-5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,good,4,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,887,,0
+3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,good,0,greedy,3,1,23.2,,chop_onion :: FreshOnion の取得,87,handover_lettuce_tomato :: ターゲットの完成品が入った鍋が見つかりません,1
+3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,bad,2,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,888,,0
+3,OnionLettuceSalad|TomatoLettuceSoup|AppleBananaJuice,random,4,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,888,,0
+4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,bad,0,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,888,,0
+4,OnionLettuceSalad|TomatoLettuceSoup|AppleOrangeJuice,random,2,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,888,,0
+5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,good,4,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_lettuce_onion :: 不足分がそろうのを待機中,888,,0
 5,OnionLettuceSalad|TomatoLettuceSoup|BananaOrangeJuice,random,0,greedy,3,1,23.2,,chop_onion :: FreshOnion の取得,87,handover_lettuce_tomato :: ターゲットの完成品が入った鍋が見つかりません,1
 6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,good,2,greedy,3,1,26.7,,mix_apple_banana :: 混ぜ完了 (Done),3,,0
-6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,bad,4,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),mix_apple_banana :: 混ぜ完了 (Done),3,cook_lettuce_onion :: 食材の取得,875
+6,OnionTomatoSalad|OnionLettuceSoup|AppleBananaJuice,bad,4,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),mix_apple_banana :: 混ぜ完了 (Done),3,handover_lettuce_onion :: ターゲットの完成品が入った鍋が見つかりません,865
 7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,good,0,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),serve_salad_onion_tomato :: 不足分がそろうのを待機中,7,handover_lettuce_onion :: ターゲットの完成品が入った鍋が見つかりません,851
-7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,bad,2,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),mix_apple_orange :: 混ぜ完了 (Done),3,cook_lettuce_onion :: 食材の取得,877
-7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,random,4,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),mix_apple_orange :: 混ぜ完了 (Done),3,cook_lettuce_onion :: 食材の取得,877
+7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,bad,2,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),mix_apple_orange :: 混ぜ完了 (Done),3,handover_lettuce_onion :: ターゲットの完成品が入った鍋が見つかりません,867
+7,OnionTomatoSalad|OnionLettuceSoup|AppleOrangeJuice,random,4,greedy,2,0,100.0,1品未完(Juice/Salad/Soup),mix_apple_orange :: 混ぜ完了 (Done),3,handover_lettuce_onion :: ターゲットの完成品が入った鍋が見つかりません,867
 8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,bad,0,greedy,3,1,31.6,,mix_orange_banana :: 混ぜ完了 (Done),3,,0
 8,OnionTomatoSalad|OnionLettuceSoup|BananaOrangeJuice,random,2,greedy,1,0,100.0,2品未完(Juice/Salad/Soup),,0,,0
 9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,good,4,greedy,3,1,27.5,,mix_apple_banana :: 混ぜ完了 (Done),3,handover_lettuce_tomato :: ターゲットの完成品が入った鍋が見つかりません,2

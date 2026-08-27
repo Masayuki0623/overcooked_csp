@@ -155,6 +155,20 @@ class CSPAgent:
         self._min_reschedule_interval_seconds = 0.3
         self._last_reschedule_time = None
         self.stall_threshold = 8
+        # --- 進捗監視 -------------------------------------------------
+        # 同じタスクで、これだけの間まったく世界を動かせなければ、その
+        # タスクは「いまのこの人には無理」とみなして一時的に諦める。
+        # 鍋の調理は 15 秒(150フレーム)かかり、その間じっと待つのは正常な
+        # 動作。誤って中断しないよう、それより長く取る。
+        # 「同じタスクを抱えたまま何秒経ったか」で測る。位置や持ち物は細かく
+        # 変わるので、それを見ても止まっていることに気づけない。
+        # 調理 15 秒を含む工程でも 20 秒あれば終わるため、25 秒を超えたら
+        # そのタスクは今のこの人には進められないと判断する。
+        self.progress_stall_seconds = 25.0
+        self.blocked_cooldown_frames = 300    # 30秒だけ避ける
+        self.blocked_tasks = {0: {}, 1: {}}   # agent -> {task_id: 残りフレーム}
+        self._progress_watch = {0: [None, 0], 1: [None, 0]}
+        self.progress_stall_events = 0        # 発動回数(観測用)
         self.stall_counts = {0: 0, 1: 0} if self.sc_2agent else 0
         self.active_order_entries = []
         self.next_order_uid = 0
@@ -975,8 +989,57 @@ class CSPAgent:
             return (dx, dy)
         return None
 
+    def decay_blocked_tasks(self):
+        """一時的に諦めたタスクを、時間が経ったら候補に戻す。"""
+        for agent_idx, blocked in self.blocked_tasks.items():
+            for tid in list(blocked):
+                blocked[tid] -= 1
+                if blocked[tid] <= 0:
+                    del blocked[tid]
+
+    def _watch_progress(self, agent_idx, action, reason):
+        """同じタスクで動けない状態が続いていないかを見張る。
+
+        再計画を促すだけでは、同じ計画がまた出てくるので何も変わらない。
+        「この人にはこのタスクが今できない」という事実を残し、計画側が
+        別の割り当てを選べるようにする。
+        """
+        sched = (self.schedule_per_agent or {}).get(agent_idx) or []
+        idx = self.current_task_idx
+        idx = idx.get(agent_idx, 0) if isinstance(idx, dict) else (idx or 0)
+        tid = sched[idx].get('id') if 0 <= idx < len(sched) else None
+        # 「行動が (0,0) か」では足りない。壁に向かって歩き続けたり、器具の
+        # 前で同じ方向を押し続けたりすると、行動は毎フレーム非ゼロなのに
+        # 何も起きない。自分の位置と持ち物が変わったかで進捗を測る。
+        agents = getattr(self._last_env, 'agents', None) if hasattr(self, '_last_env') else None
+        me = agents[agent_idx] if agents and agent_idx < len(agents) else None
+        holding = getattr(getattr(me, 'holding', None), 'full_name', None)
+        # 位置や持ち物は含めない(細かく動くだけで進んでいない場合を捉えるため)
+        signature = tid
+        env_now = getattr(self._last_env, 'time', None)
+        if env_now is None:
+            env_now = getattr(self._last_env, 'current_time', 0.0) or 0.0
+
+        watch = self._progress_watch[agent_idx]
+        if tid is None:
+            watch[0], watch[1] = None, env_now
+            return
+        if watch[0] != signature:
+            watch[0], watch[1] = signature, env_now
+            return
+        if env_now - watch[1] >= self.progress_stall_seconds:
+            watch[0], watch[1] = None, env_now
+            self.blocked_tasks[agent_idx][tid] = self.blocked_cooldown_frames
+            self.progress_stall_events += 1
+            self._emit_counter_debug(
+                f"[進捗監視] AI{agent_idx} は {tid} を "
+                f"{self.progress_stall_seconds} 秒進められなかったので一旦諦める "
+                f"(理由: {reason})")
+            self._mark_reschedule_needed(f"no_progress_agent_{agent_idx}")
+
     def _update_stall_state(self, agent_idx, action, reason):
         if self.sc_2agent:
+            self._watch_progress(agent_idx, action, reason)
             if action == (0, 0) and reason not in ("待機(相手のターン)", "AI0:Idle", "AI1:Idle"):
                 self.stall_counts[agent_idx] += 1
                 if self.stall_counts[agent_idx] >= self.stall_threshold:
@@ -1670,6 +1733,8 @@ class CSPAgent:
         """
         環境から呼ばれるメイン関数
         """
+        self._last_env = env
+        self.decay_blocked_tasks()
         # 常にタスクリストを構築して変化をチェック
         current_orders = self._build_order_tasks(env)
         current_task_ids = set()
@@ -1987,6 +2052,13 @@ class CSPAgent:
 
                 sc = self.schedule_per_agent.get(agent_idx, [])
                 t_idx = self.current_task_idx[agent_idx]
+                # 進められないと分かったタスクは飛ばして、次の作業を試す。
+                # (諦め期間が切れれば、また順番が回ってくる)
+                blocked = self.blocked_tasks.get(agent_idx, {})
+                while (t_idx < len(sc) and sc[t_idx].get('id') in blocked
+                       and any(sc[j].get('id') not in blocked for j in range(t_idx + 1, len(sc)))):
+                    t_idx += 1
+                self.current_task_idx[agent_idx] = t_idx
                 if t_idx >= len(sc):
                     # 自分の担当が尽きたら、人間スロットに置いたタスクを引き受ける。
                     # 人間がいま手をつけていると推測して人間スロットへ回したタスクは、
@@ -4143,8 +4215,13 @@ class CSPAgent:
 
             # この注文を仕上げる器具・提供口がある側。刻んだ食材はそこから
             # 取りに行ける場所に無ければ使えない。
+            # 注意: ここで「使う側から届く物だけ」に絞ると、AI が自分の側で
+            # 刻んだ物まで無効になり、同じ食材を延々と刻み直して切りかけを
+            # まな板に置き去りにする。どちら側の物でも共有台まで運べば使える
+            # ので、絞り込みは行わない。到達できない物を実行側が掴みに行く
+            # 問題は、実行側の到達判定(can_use_position)で防ぐ。
             use_component = None
-            if self._map_is_partitioned(env):
+            if False and self._map_is_partitioned(env):
                 if dish_kind == KIND_SOUP:
                     anchors = env.get_pos_by_obj_gs(gs='Pot')
                 elif is_juice:
@@ -5475,9 +5552,16 @@ class CSPAgent:
         工程(end_pos)へ行ける側に寄せておけば、少なくとも仕上げはできる。
         """
         allowed = self._task_allowed_agents(env, task)
-        if allowed:
-            return allowed
-        return self._agents_reaching(env, task.get('end_pos'))
+        if not allowed:
+            allowed = self._agents_reaching(env, task.get('end_pos'))
+        # いま進められないと分かっている人は、しばらく候補から外す。
+        # ただし全員外れるなら意味がないので、その場合は元に戻す。
+        tid = task.get('id')
+        if tid is not None:
+            free = {a for a in allowed if tid not in self.blocked_tasks.get(a, {})}
+            if free:
+                return free
+        return allowed
 
     def astar_distance(self, env, start, goal):
         import heapq

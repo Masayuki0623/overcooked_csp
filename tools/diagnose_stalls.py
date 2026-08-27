@@ -31,7 +31,8 @@ SKIP_BUDGETS = (0, 2, 4)
 
 FIELDS = ['seed', 'orders', 'quality', 'skip_budget', 'human_model',
           'served', 'completed', 'makespan_actual_s', 'unfinished_dish',
-          'human_stall', 'human_stall_count', 'ai_stall', 'ai_stall_count']
+          'human_stall', 'human_stall_count', 'ai_stall', 'ai_stall_count',
+          'progress_stall_events', 'progress_stall_detail']
 
 # 人間役の実体を掴むために生成を見張る
 _human_ref = []
@@ -45,6 +46,7 @@ def _init(self, *a, **k):
 
 human_models.HumanModel.__init__ = _init
 
+_progress_events = []
 _human_stalls = collections.Counter()
 _ai_stalls = collections.Counter()
 _orig_call = TaskAgent.__call__
@@ -95,8 +97,21 @@ def main():
         i, n = (int(x) for x in args.shard.split('/'))
         combos = [c for k, c in enumerate(combos) if k % n == i]
 
+    from agent.myagent.CSPAgent import CSPAgent
+    _orig_watch = CSPAgent._watch_progress
+
+    def _watch(self, agent_idx, action, reason):
+        before = dict(self.blocked_tasks[agent_idx])
+        _orig_watch(self, agent_idx, action, reason)
+        for tid in self.blocked_tasks[agent_idx]:
+            if tid not in before:
+                _progress_events.append(f'A{agent_idx}:{tid[0]}:{reason}')
+
+    CSPAgent._watch_progress = _watch
+
     rows = []
     for k, (case, quality, budget) in enumerate(combos, 1):
+        _progress_events.clear()
         _human_stalls.clear()
         _ai_stalls.clear()
         _human_ref.clear()
@@ -110,6 +125,8 @@ def main():
             'makespan_actual_s': r.get('makespan_actual_s'),
             'unfinished_dish': unfinished_dish(r),
             'human_stall': h[0][0] if h else '', 'human_stall_count': h[0][1] if h else 0,
+            'progress_stall_events': len(_progress_events),
+            'progress_stall_detail': '|'.join(_progress_events[:6]),
             'ai_stall': a[0][0] if a else '', 'ai_stall_count': a[0][1] if a else 0,
         })
         print(f'  {k}/{len(combos)} 件', flush=True)

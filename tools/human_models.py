@@ -134,8 +134,10 @@ class HumanModel:
 
         return min(tasks, key=finish_cost) if tasks else None
 
-    BLOCKED_LIMIT = 30      # これだけ動けなければ、そのタスクは今できないとみなす
-    COOLDOWN_FRAMES = 150   # 避けておく長さ
+    # 鍋の調理は 15 秒(150フレーム)かかり、その間じっと待つのは正常な動作。
+    # 誤って中断しないよう、それより長く取る。
+    BLOCKED_LIMIT = 200     # これだけ動けなければ、そのタスクは今できないとみなす
+    COOLDOWN_FRAMES = 300   # 避けておく長さ
 
     def note_progress(self, task_id, action):
         """同じタスクで動けない状態が続いていないかを見る。"""
