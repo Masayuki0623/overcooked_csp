@@ -1160,6 +1160,16 @@ class TaskAgent:
         #    (皿を持っていれば拾い上げてそのまま盛り付けになり、
         #     皿を持っていなければ一旦テーブルに置いて合流させる)
         if holding_name:
+            # 指定テーブルに料理が既に全部そろっているなら、いま持っている
+            # ものは余り。同じ食材は重ねられないので、置きに行っても何も
+            # 起きず永久に固まる。手放して、完成した山を取りに行く。
+            # (別の注文がその食材を待っていることも多い)
+            if self._counter_covers(env, assigned_counter, target_ing_names):
+                return self.drop_unwanted_item(
+                    env, holding,
+                    reason=f"指定テーブルにサラダの材料が揃っているため",
+                    dynamic_obstacles=dynamic_obstacles, allow_strict_override=True)
+
             target_merge_loc, blocked_details = self._resolve_assigned_counter_target(
                 env,
                 holding,
