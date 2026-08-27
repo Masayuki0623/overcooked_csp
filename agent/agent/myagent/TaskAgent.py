@@ -21,6 +21,8 @@ class TaskAgent:
         self.assigned_cup = None
         # 受け渡し系のタスクは、料理の種類が分からないと完成品を判別できない。
         self.dish_kind = None
+        # いま取り組んでいる注文の材料。ここに無い食材を合流させない。
+        self.order_ingredients = None
         self.assigned_counter = None 
         self.assigned_task_id = None
         self.protected_counters = set()
@@ -67,6 +69,8 @@ class TaskAgent:
             return None
         return getattr(counter_obj, 'full_name', None)
 
+    ALL_INGREDIENT_NAMES = {'lettuce', 'onion', 'tomato', 'apple', 'orange', 'banana'}
+
     def _resolve_assigned_counter_target(self, env, holding, assigned_counter, blocked_reason):
         if not assigned_counter:
             return None, None
@@ -90,7 +94,7 @@ class TaskAgent:
                     if normalized.startswith(prefix):
                         normalized = normalized[len(prefix):]
                         break
-                if normalized in ('lettuce', 'onion', 'tomato'):
+                if normalized in self.ALL_INGREDIENT_NAMES:
                     candidates.append(normalized)
             return set(candidates)
 
@@ -100,8 +104,16 @@ class TaskAgent:
         # assigned counter はその注文専用の保持場所とみなすが、
         # 「必要な食材が既に counter 上にある」か「same ingredient overlap がある」場合は
         # 安全な partial state とみなし、再割り当てや待機を起こさない。
+        # その注文に使わない食材を混ぜてしまうと、二度と外せない。
+        # (レタス+トマトのサラダの山に玉ねぎが入ると、サラダとして成立
+        #  しなくなり、その材料を待つ他の注文もろとも進まなくなる)
+        allowed = self.order_ingredients
+        if allowed and not ((holding_ings | counter_ings) <= allowed):
+            content_name = self._get_counter_content_name(env, assigned_counter)
+            return None, f"{blocked_reason}: 注文外の食材が混ざるため content='{content_name}'"
+
         if holding_ings or counter_ings:
-            valid_ingredients = {'lettuce', 'onion', 'tomato'}
+            valid_ingredients = self.ALL_INGREDIENT_NAMES
             if holding_ings <= valid_ingredients and counter_ings <= valid_ingredients:
                 if holding_ings & counter_ings or holding_ings or counter_ings:
                     return assigned_counter, None

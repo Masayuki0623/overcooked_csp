@@ -167,6 +167,8 @@ class CSPAgent:
         self.progress_stall_seconds = 25.0
         self.blocked_cooldown_frames = 300    # 30秒だけ避ける
         self.blocked_tasks = {0: {}, 1: {}}   # agent -> {task_id: 残りフレーム}
+        # 注文ごとに固定した合流地点(仕切りのある地図のみ)
+        self._fixed_counters = {}
         self._progress_watch = {0: [None, 0], 1: [None, 0]}
         self.progress_stall_events = 0        # 発動回数(観測用)
         self.stall_counts = {0: 0, 1: 0} if self.sc_2agent else 0
@@ -2021,6 +2023,7 @@ class CSPAgent:
             if task_name:
                 self.task_agent.task_name = task_name
                 self.task_agent.assigned_task_id = tid
+                self.task_agent.order_ingredients = self._order_ingredients_of(task)
                 # 「切らずに運ぶだけ」の指定(既に切られた物が別テーブルにある場合)
                 self.task_agent.carry_from = task.get('carry_from') if verb == 'chop' else None
                 action, reason = self.task_agent(env)
@@ -2247,6 +2250,7 @@ class CSPAgent:
                 if getattr(ta, 'assigned_task_id', None) != tid or getattr(ta, 'assigned_counter', None) is None:
                     ta.assigned_counter = task.get('assigned_counter')
                 ta.assigned_task_id = tid
+                ta.order_ingredients = self._order_ingredients_of(task)
                 # 「切らずに運ぶだけ」の指定(既に切られた物が別テーブルにある場合)
                 ta.carry_from = task.get('carry_from') if verb == 'chop' else None
 
@@ -2433,6 +2437,19 @@ class CSPAgent:
             'plates': plates,
             'counters': counters,
         }
+
+    @staticmethod
+    def _order_ingredients_of(task):
+        """そのタスクが属する注文の材料(小文字)。分からなければ None。"""
+        order_obj = task.get('order_obj') if isinstance(task, dict) else None
+        if isinstance(order_obj, dict) and order_obj.get('ingredients'):
+            return {str(i).lower() for i in order_obj['ingredients']}
+        obj = task.get('obj') if isinstance(task, dict) else None
+        if obj:
+            parts = dish_ingredients(obj)
+            if parts:
+                return {str(i).lower() for i in parts}
+        return None
 
     def _usable_counters(self, env, counters):
         """隣に立てる床マスがあるカウンターだけを返す。
@@ -3270,7 +3287,29 @@ class CSPAgent:
         })
 
     def _get_assigned_counter(self, order_uid):
+        # 固定した合流地点があるなら、解除・追従の影響を受けずそれを使う。
+        fixed = self._fixed_counters.get(order_uid) if hasattr(self, '_fixed_counters') else None
+        if fixed is not None:
+            return fixed
         return self._get_counter_policy_entry(order_uid)['counter']
+
+    def fixed_shared_counter(self, env, order_uid):
+        """仕切りのある地図で、その注文が使う合流地点を1つに固定する。
+
+        合流地点が途中で移動すると、前に置いた食材がその場に取り残される。
+        取り残された玉ねぎが別注文の山に混ざると、その山は二度と使えず、
+        材料を待っている注文もろとも止まる。共有テーブルは注文の数より
+        多いので、最初から注文ごとに1枚ずつ固定してしまえばよい。
+        """
+        if not self._map_is_partitioned(env):
+            return None
+        all_comps = set(range(len(self._walkable_components(env))))
+        shared = sorted(
+            c for c in env.get_pos_by_obj_gs(gs='Counter')
+            if self._components_touching(env, tuple(c)) >= all_comps)
+        if not shared:
+            return None
+        return tuple(shared[int(order_uid) % len(shared)])
 
     def _set_assigned_counter(self, order_uid, counter_pos):
         entry = self._get_counter_policy_entry(order_uid)
@@ -4213,6 +4252,12 @@ class CSPAgent:
         orders = []
         current_orders = env.order.current_orders if hasattr(env, 'order') and hasattr(env.order, 'current_orders') else []
         order_uids = self._refresh_active_order_uids(current_orders)
+        # 合流地点は注文ごとに1枚へ固定する。途中で移動すると、前に置いた
+        # 食材がその場に取り残され、別注文の山に混ざって使えなくなる。
+        if self._map_is_partitioned(env):
+            for uid in order_uids:
+                if uid is not None and uid not in self._fixed_counters:
+                    self._fixed_counters[uid] = self.fixed_shared_counter(env, uid)
         self.order_display_labels = [
             (order_uid + 1) if order_uid is not None else (order_idx + 1)
             for order_idx, order_uid in enumerate(order_uids)
