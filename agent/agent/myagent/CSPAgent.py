@@ -3708,6 +3708,11 @@ class CSPAgent:
         見つからなければ None。呼び出し側はこれを新しい assigned_counter として
         採用することで、人間がどこに置いても次のパスで正しい置き場に追従できる。
         """
+        # 仕切りのある地図では、片側のテーブルへ追従してしまうと反対側の人が
+        # 材料を届けられなくなる。両側から触れる場所にだけ追従する。
+        shared_only = self._map_is_partitioned(env)
+        all_comps = set(range(len(self._walkable_components(env)))) if shared_only else set()
+
         expected = {
             self._normalize_ingredient_name(name)
             for name in ings_lower
@@ -3722,6 +3727,8 @@ class CSPAgent:
         candidates = []
         for pos in counters:
             if pos in reserved_counters or pos in used_counters:
+                continue
+            if shared_only and not (self._components_touching(env, tuple(pos)) >= all_comps):
                 continue
             foods = self._get_counter_food_names(env, pos)
             if not foods:
@@ -3773,6 +3780,16 @@ class CSPAgent:
         pot = pots[order_idx % len(pots)] if pots else (0, 0)
 
         counters = resources.get('counters', [])
+
+        # 仕切りのある地図では、両側から触れるテーブルでないと合流できない。
+        # 片側のテーブルを合流地点にすると、反対側の人は材料を届けられず、
+        # 「不足分がそろうのを待つ」まま永久に止まる。
+        if self._map_is_partitioned(env):
+            all_comps = set(range(len(self._walkable_components(env))))
+            shared = [c for c in counters
+                      if self._components_touching(env, tuple(c)) >= all_comps]
+            if shared:
+                counters = shared
 
         # 置き場は2人で材料を持ち寄る場所なので、隣接して立てる床マスが1つしか
         # ないテーブルを選ぶと、片方が居座っている間もう片方が近づけず詰む。

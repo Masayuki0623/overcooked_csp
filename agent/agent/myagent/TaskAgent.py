@@ -1233,9 +1233,17 @@ class TaskAgent:
             target_ing_loc = assigned_counter_candidate
 
         # 指定テーブルの物を拾い上げても、置き先は同じテーブルなので
-        # 置き直すだけの往復になる。不足分が届くまで手を出さない。
+        # 置き直すだけの往復になる。ただしそこで待つだけでは永久に進まない
+        # ので、まず「まだテーブルに無い分」を他所へ取りに行く。
         if (target_ing_loc == assigned_counter
                 and not self._counter_covers(env, assigned_counter, missing_ings)):
+            on_counter = getattr(env.pos_obj.get(assigned_counter), 'full_name', '') or ''
+            still_missing = [n for n in missing_ings if n not in on_counter.split('-')]
+            elsewhere, _, _, _ = self._find_chopped_pickup_target(
+                env, ingredients, still_missing, assigned_counter, False)
+            if elsewhere is not None and elsewhere != assigned_counter:
+                return (self.move_to(env, elsewhere, dynamic_obstacles=dynamic_obstacles),
+                        "不足分を取りに行く")
             return (0, 0), "不足分がそろうのを待機中"
 
         if target_ing_loc:
