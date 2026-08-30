@@ -2505,6 +2505,42 @@ class CSPAgent:
             return None
         return int(best + 8 + 2)
 
+    def _carried_units(self, env, ing_lower):
+        """刻む人の手の届く範囲に、その材料がいくつ届いているか。
+
+        「1つでもあるか」で判定すると、同じ材料を使う注文が2つある
+        ときに1つ運んだだけで2つ目の運搬が省かれ、刻む人が永久に
+        材料を探し続ける。数えて、注文ごとに1つずつ使う。
+        """
+        cap = ing_lower.capitalize()
+        names = (f"Fresh{cap}", f"Chopping{cap}", f"Chopped{cap}")
+
+        def units(obj):
+            n = getattr(obj, 'full_name', '') or ''
+            return sum(n.count(x) for x in names)
+
+        boards = env.get_pos_by_obj_gs(gs='Cutboard')
+        board_comps = set()
+        for b in boards:
+            board_comps |= self._components_touching(env, tuple(b))
+        if not board_comps:
+            return 0
+
+        # まな板の上や誰かの手の中にある物は、既にどれかの注文のために
+        # 使われている最中なので、まだ使える在庫には数えない。数えると、
+        # 別の注文がその1つを当てにして運搬を省き、材料の来ない工程を
+        # 待ち続けることになる。
+        boards_set = {tuple(b) for b in boards}
+        total = 0
+        for pos, obj in env.pos_obj.items():
+            if obj is None or getattr(obj, 'is_held', False):
+                continue
+            if tuple(pos) in boards_set:
+                continue
+            if self._components_touching(env, tuple(pos)) & board_comps:
+                total += units(obj)
+        return total
+
     def _already_carried(self, env, ing_lower):
         """その材料が、刻む人の手の届く範囲に届いているか。
 
@@ -4449,6 +4485,8 @@ class CSPAgent:
 
         resources = self._get_resources(env)
         orders = []
+        # 既に刻む側へ届いている材料の在庫。注文ごとに1つずつ引いていく。
+        carried_budget = {}
         current_orders = env.order.current_orders if hasattr(env, 'order') and hasattr(env.order, 'current_orders') else []
         order_uids = self._refresh_active_order_uids(current_orders)
         # 合流地点は注文ごとに1枚へ固定する。途中で移動すると、前に置いた
@@ -4649,7 +4687,16 @@ class CSPAgent:
                 # 「運搬を介する食材か」は地図で決まる(運び終わっても変わらない)。
                 # 運搬タスク自体は、まだ運ばれていないときだけ出す。
                 via_counter = self._chop_needs_carry(env, ing.lower(), assigned_counter)
-                carry_needed = via_counter and not self._already_carried(env, ing.lower())
+                # 既に届いている分は注文ごとに1つずつ使う。同じ材料を使う
+                # 注文が複数あるとき、1つ届いただけで残りの運搬を省くと、
+                # 刻む人が届かない材料を探し続けて止まる。
+                ing_key = ing.lower()
+                if ing_key not in carried_budget:
+                    carried_budget[ing_key] = self._carried_units(env, ing_key)
+                carry_needed = via_counter
+                if via_counter and carried_budget[ing_key] > 0:
+                    carried_budget[ing_key] -= 1
+                    carry_needed = False
                 if via_counter:
                     dur = self._chop_duration_from(env, assigned_counter)
                 else:

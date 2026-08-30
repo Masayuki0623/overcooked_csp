@@ -159,22 +159,19 @@ class TaskAgent:
             content_name = self._get_counter_content_name(env, assigned_counter)
             return None, f"{blocked_reason}: どの注文にもならない組み合わせ content='{content_name}'"
 
-        if holding_ings or counter_ings:
-            valid_ingredients = self.ALL_INGREDIENT_NAMES
-            if holding_ings <= valid_ingredients and counter_ings <= valid_ingredients:
-                if holding_ings & counter_ings or holding_ings or counter_ings:
-                    return assigned_counter, None
-
-        if holding_ings and counter_ings:
-            shared = holding_ings & counter_ings
-            if shared:
-                return assigned_counter, None
-
+        # ここから先は「実際に重ねられるか」の話。材料名だけで判断すると、
+        # 切った玉ねぎを生の玉ねぎに重ねられると誤り、置けないのに毎フレーム
+        # 「置いた」と報告し続けて双方が止まる。世界の判定を使う。
         if mergeable(holding, counter_obj):
             return assigned_counter, None
 
+        # 重ねられないなら、空いている別の台へ回す。待っても状況は変わらない。
+        alt = self._free_counter_near(env, assigned_counter)
+        if alt is not None:
+            return alt, None
+
         content_name = self._get_counter_content_name(env, assigned_counter)
-        return None, f"{blocked_reason}: {assigned_counter} content='{content_name}'"
+        return None, f"{blocked_reason}: 重ねられない {assigned_counter} content='{content_name}'"
 
     def _handle_counter_fallback(self, wait_reason, fallback_func):
         if self.strict_counter_management:
@@ -1546,7 +1543,16 @@ class TaskAgent:
                         dynamic_obstacles=dynamic_obstacles,
                         allow_strict_override=True,
                     )
-                # print(f"[DEBUG] chop: assigned_counter={assigned_counter} がブロック holding='{holding_name}'")
+                # 指定の台が別の物でふさがっていて合体もできないなら、待っても
+                # 状況は変わらない(相手はこちらが置くのを待っている)。空いて
+                # いる共有台へ回す。置き場が散ることより、双方が手を止めたまま
+                # 終わることのほうが害が大きい。計画側は台に置かれた物を
+                # 拾い直せる。
+                alt = self._free_shared_counter(env, self_pos)
+                if alt is not None:
+                    self._log_chop_debug(env, ing_name, holding_name, assigned_cutboard,
+                                         assigned_counter, "divert", target=alt)
+                    return self.move_to(env, alt, dynamic_obstacles=dynamic_obstacles),                         f"{chopped_ing_name} を空いている台({alt})へ置く"
                 self._log_chop_debug(env, ing_name, holding_name, assigned_cutboard, assigned_counter, "wait_blocked", reason=blocked_details or "assigned_counter_blocked")
                 return (0, 0), blocked_details or "指定テーブルが使用中(マージ不可)のため待機"
             
