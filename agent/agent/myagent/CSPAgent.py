@@ -4140,6 +4140,10 @@ class CSPAgent:
         available_chopped = {}
         available_chopped_by_pos = {}
         pot_states = []
+        # 鍋から出して皿に盛った後のスープ。鍋の中身だけを見ていると、
+        # 盛りつけた瞬間に「まだ煮ていない」に戻り、鍋へ入れる工程が
+        # 作り直されてしまう。
+        cooked_dish_states = []
         # ミキサーの中身(ジュースの作りかけ/完成品)。鍋と同じ扱い。
         blender_states = []
         # 皿の上に食材が乗っている状態(サラダの完成品/作りかけ)。
@@ -4437,6 +4441,10 @@ class CSPAgent:
                         plated_names = plated_food_names(obj)
                         if plated_names is not None:
                             plate_states.append({'names': plated_names, 'obj': obj, 'used': False})
+                            full = getattr(obj, 'full_name', '') or ''
+                            if 'Cooked' in full or 'Charred' in full:
+                                cooked_dish_states.append(
+                                    {'names': plated_names, 'obj': obj, 'used': False})
                         register_chopped_item(obj, obj.location)
 
         resources = self._get_resources(env)
@@ -4512,7 +4520,9 @@ class CSPAgent:
             mixing_unfinished = True
             #   ジュース: ミキサーにこのレシピが入っていれば集め終わり
             states = (blender_states if is_juice
-                      else plate_states if is_salad else pot_states)
+                      else plate_states if is_salad
+                      # スープは、鍋の中だけでなく盛りつけ済みの分も数える。
+                      else pot_states + cooked_dish_states)
             for ps in states:
                 if not ps['used'] and ps['names'] == sorted_ings:
                     ps['used'] = True
