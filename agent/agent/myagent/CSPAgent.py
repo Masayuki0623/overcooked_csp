@@ -1253,6 +1253,10 @@ class CSPAgent:
             # tids構築
             for ing in final_needs_chop:
                 raw_ing = ing.replace('Chopped', '').lower()
+                # 材料とまな板が別の側にあるなら、刻む前に運ぶ工程が要る。
+                # 指示の候補にも出さないと、参加者は「先に運んで」と頼めない。
+                if self._chop_needs_carry(env, raw_ing, None):
+                    remaining_tids.add(('carry', raw_ing, order_uid))
                 remaining_tids.add(('chop', raw_ing, order_uid))
 
             base_name = "-".join([
