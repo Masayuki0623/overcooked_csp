@@ -779,10 +779,14 @@ class TaskAgent:
                 env, holding, reason=f"{ing_name} を運ぶので {holding_name} を置く",
                 dynamic_obstacles=dynamic_obstacles, allow_strict_override=True)
 
-        # 手ぶら -> 材料を取りに行く(置かれている物があればそれを、無ければ供給口へ)
+        # 手ぶら -> 材料を取りに行く(置かれている物があればそれを、無ければ供給口へ)。
+        # ただし両側から使える台に載っている物は「運び終えた分」なので拾わない。
+        # 拾うと、届けた物を隣の台へ置き直すだけの往復を延々と繰り返し、
+        # 2つ目を供給口から取りに行かなくなる。
         for pos, obj in env.pos_obj.items():
             if (self._is_available_object(obj) and fresh in getattr(obj, 'full_name', '')
-                    and self.can_use_position(env, pos)):
+                    and self.can_use_position(env, pos)
+                    and not self._touches_both_sides(env, pos)):
                 return (self.move_to(env, pos, dynamic_obstacles=dynamic_obstacles),
                         f"{ing_name} の取得")
         tiles = self.reachable_positions(

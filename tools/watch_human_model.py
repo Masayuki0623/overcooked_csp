@@ -89,8 +89,9 @@ def main():
         pending = {'id': float(args.case), 'task': payload, 'target_idx': 0,
                    'accepted_env_time': 0.0, 'status': 'pending',
                    'skip_budget': args.d, 'remaining_skip_budget': args.d}
-        env._pending_instructions = [dcopy(pending)]
-        ai._pending_instructions = [dcopy(pending)]
+        shared = [pending]
+        env._pending_instructions = shared
+        ai._pending_instructions = shared
 
     print(f'注文: ' + ' | '.join(recipes))
     print(f'人間役: {args.model} / skip_budget: {args.d} / 指示: {target_label} ({args.quality})')

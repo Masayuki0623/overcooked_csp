@@ -737,12 +737,14 @@ class CSPAgent:
         return None
 
     def _get_instruction_preempt_target(self, env):
-        pending_instr = list(getattr(env, '_pending_instructions', []))
-        agent_pending = getattr(self, '_pending_instructions', [])
-        if agent_pending:
-            for pending in agent_pending:
-                if not any(existing.get('id') == pending.get('id') for existing in pending_instr):
-                    pending_instr.append(pending)
+        # 進み具合(status)を書き込んでいるのは自分の側の記録。環境側の記録を
+        # 先に見ると、同じ指示の古い複製を渡された場合に永久に「まだ未処理」と
+        # 読み続け、毎フレーム割り込んで同じ物を置いては拾うことになる。
+        # 同じ id なら自分の記録を採る。
+        pending_instr = list(getattr(self, '_pending_instructions', []) or [])
+        for pending in (getattr(env, '_pending_instructions', []) or []):
+            if not any(existing.get('id') == pending.get('id') for existing in pending_instr):
+                pending_instr.append(pending)
 
         if not pending_instr:
             return None

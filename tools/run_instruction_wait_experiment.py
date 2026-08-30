@@ -137,8 +137,11 @@ def run_trial(case, recipes, quality, skip_budget, human_model='greedy'):
         'accepted_env_time': 0.0, 'status': 'pending',
         'skip_budget': skip_budget, 'remaining_skip_budget': skip_budget,
     }
-    env._pending_instructions = [dcopy(pending)]
-    ai._pending_instructions = [dcopy(pending)]
+    # 同じ物を共有させる。別々に複製すると、AI が自分の側だけ「済んだ」に
+    # 更新しても環境側は「未処理」のまま残り、指示が永久に割り込み続ける。
+    shared = [pending]
+    env._pending_instructions = shared
+    ai._pending_instructions = shared
 
     # --- 観測 -----------------------------------------------------------
     wait_seconds = None            # 指示 -> AI が着手 までの経過時間
