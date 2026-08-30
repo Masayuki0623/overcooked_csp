@@ -10,6 +10,7 @@ import collections
 import csv
 import os
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -110,6 +111,7 @@ def main():
     CSPAgent._watch_progress = _watch
 
     rows = []
+    t0 = time.time()
     for k, (case, quality, budget) in enumerate(combos, 1):
         _progress_events.clear()
         _human_stalls.clear()
@@ -129,7 +131,9 @@ def main():
             'progress_stall_detail': '|'.join(_progress_events[:6]),
             'ai_stall': a[0][0] if a else '', 'ai_stall_count': a[0][1] if a else 0,
         })
-        print(f'  {k}/{len(combos)} 件', flush=True)
+        el = time.time() - t0
+        print(f'  {k}/{len(combos)} 件 ({el:.0f}秒経過, '
+              f'残り約{el / k * (len(combos) - k):.0f}秒)', flush=True)
 
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
