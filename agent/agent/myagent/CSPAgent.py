@@ -2513,6 +2513,9 @@ class CSPAgent:
         材料を探し続ける。数えて、注文ごとに1つずつ使う。
         """
         cap = ing_lower.capitalize()
+        # 数える状態は実測で選んだ。Chopped を外すと(既に別の注文の成果物
+        # なので理屈は通るが)完走率は下がった: 貪欲 18/18 -> 16/18、
+        # 最適な相方 14/18 -> 13/18。切り終えた物も在庫に数える。
         names = (f"Fresh{cap}", f"Chopping{cap}", f"Chopped{cap}")
 
         def units(obj):
