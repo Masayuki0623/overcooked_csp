@@ -1675,8 +1675,10 @@ class TaskAgent:
                     target_loc = pos
         
         if not target_loc:
-            dispenser_name = f"{target_ing_name}Tile" 
-            dispensers = env.get_pos_by_obj_gs(gs=dispenser_name)
+            dispenser_name = f"{target_ing_name}Tile"
+            # 仕切りの向こうの供給口は使えない。運んでもらうのを待つ。
+            dispensers = [d for d in env.get_pos_by_obj_gs(gs=dispenser_name)
+                          if self.can_use_position(env, d)]
             if dispensers:
                 for d_pos in dispensers:
                     dist = abs(self_pos[0]-d_pos[0]) + abs(self_pos[1]-d_pos[1])

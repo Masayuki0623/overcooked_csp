@@ -1255,7 +1255,8 @@ class CSPAgent:
                 raw_ing = ing.replace('Chopped', '').lower()
                 # 材料とまな板が別の側にあるなら、刻む前に運ぶ工程が要る。
                 # 指示の候補にも出さないと、参加者は「先に運んで」と頼めない。
-                if self._chop_needs_carry(env, raw_ing, None):
+                if (self._chop_needs_carry(env, raw_ing, None)
+                        and not self._already_carried(env, raw_ing)):
                     remaining_tids.add(('carry', raw_ing, order_uid))
                 remaining_tids.add(('chop', raw_ing, order_uid))
 
@@ -2499,6 +2500,42 @@ class CSPAgent:
         if best is None:
             return None
         return int(best + 8 + 2)
+
+    def _already_carried(self, env, ing_lower):
+        """その材料が、刻む人の手の届く範囲に届いているか。
+
+        共有テーブルの上だけを見ると、まな板へ移した瞬間に「まだ運ばれて
+        いない」に戻り、carry タスクが復活して chop が再びブロックされる。
+        切りかけの物がまな板に残ったまま誰も進めなくなるので、刻む側から
+        届く場所にあれば(台でも、まな板でも、手の中でも)運搬は済みとみなす。
+        """
+        cap = ing_lower.capitalize()
+        names = (f"Fresh{cap}", f"Chopping{cap}", f"Chopped{cap}")
+
+        def matches(obj):
+            n = getattr(obj, 'full_name', '') or ''
+            return any(x in n for x in names)
+
+        # 刻める側(まな板に手が届く側)の連結成分
+        boards = env.get_pos_by_obj_gs(gs='Cutboard')
+        board_comps = set()
+        for b in boards:
+            board_comps |= self._components_touching(env, tuple(b))
+        if not board_comps:
+            return False
+
+        for pos, obj in env.pos_obj.items():
+            if obj is None or not matches(obj):
+                continue
+            if self._components_touching(env, tuple(pos)) & board_comps:
+                return True
+
+        # 刻む側の人が手に持っている分も済みとみなす
+        for idx, agent in enumerate(getattr(env, 'agents', []) or []):
+            if self._agent_component(env, idx) in board_comps and matches(
+                    getattr(agent, 'holding', None)):
+                return True
+        return False
 
     def _chop_needs_carry(self, env, ing_lower, assigned_counter):
         """材料とまな板が別の側にあって、1人では刻めないか。
@@ -4561,8 +4598,11 @@ class CSPAgent:
                     continue
                 # 材料とまな板が別の側にあるなら、共有テーブルまで運んでから刻む。
                 # その場合、刻む工程の起点は材料の供給口ではなく共有テーブル。
-                carry_needed = self._chop_needs_carry(env, ing.lower(), assigned_counter)
-                if carry_needed:
+                # 「運搬を介する食材か」は地図で決まる(運び終わっても変わらない)。
+                # 運搬タスク自体は、まだ運ばれていないときだけ出す。
+                via_counter = self._chop_needs_carry(env, ing.lower(), assigned_counter)
+                carry_needed = via_counter and not self._already_carried(env, ing.lower())
+                if via_counter:
                     dur = self._chop_duration_from(env, assigned_counter)
                 else:
                     dur = self._task_duration_frames(
@@ -4586,8 +4626,10 @@ class CSPAgent:
                 # 「材料を共有テーブルまで運ぶ」工程を先に挟む。地図を見て
                 # 必要なときだけ分割するので、配置を変えてもそのまま動く。
                 # (提供口が向こう側のときに handover を挟むのと同じ考え方)
-                if carry_needed:
+                if via_counter:
+                    # 刻む人は共有テーブルから材料を取る(供給口は要らない)
                     chop_task['from_counter'] = True
+                if carry_needed:
                     dur_c = self._task_duration_frames(
                         env, 'carry', ing.lower(), order_idx, assigned_counter)
                     if dur_c is not None:
