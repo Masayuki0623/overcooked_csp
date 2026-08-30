@@ -238,6 +238,10 @@ class HumanModel:
                 # 注文外の食材を合流させないための材料一覧。渡し忘れると
                 # 判定が素通りし、別注文の山に混ぜてしまう。
                 self.ta.order_ingredients = self.ai._order_ingredients_of(carry)
+                # 既に切られた物が別の台にあるなら、切り直さず取りに行く。
+                # これを渡し忘れると、供給口に無い材料を探し続けて止まる。
+                self.ta.carry_from = (carry.get('carry_from')
+                                      if carry['id'][0] == 'chop' else None)
                 action, _reason = self.ta(env, dynamic_obstacles={tuple(other_pos)})
                 planned = self.planned_for_me()
                 if planned is not None:
@@ -293,6 +297,10 @@ class HumanModel:
         self.ta.task_name = task_name_of(keep)
         self.ta.assigned_counter = keep.get('assigned_counter')
         self.ta.order_ingredients = self.ai._order_ingredients_of(keep)
+        # 既に切られた物が別の台にあるなら、切り直さず取りに行く。
+        # これを渡し忘れると、供給口に無い材料を探し続けて止まる。
+        self.ta.carry_from = (keep.get('carry_from')
+                              if keep['id'][0] == 'chop' else None)
         action, _reason = self.ta(env, dynamic_obstacles={tuple(other_pos)})
         self.note_progress(keep['id'], action)
         return action, keep['id']
