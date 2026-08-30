@@ -2118,9 +2118,15 @@ class CSPAgent:
                 # 書き戻すと、再計画で計画が短くなったときに末尾を超えたまま
                 # 戻れなくなり、以後ずっと手待ちになる。飛ばすのはこの回だけ。
                 blocked = self.blocked_tasks.get(agent_idx, {})
-                while (t_idx < len(sc) and sc[t_idx].get('id') in blocked
-                       and any(sc[j].get('id') not in blocked for j in range(t_idx + 1, len(sc)))):
-                    t_idx += 1
+                if t_idx < len(sc) and sc[t_idx].get('id') in blocked:
+                    # 後ろだけを探すと、計画の手前に残っている作業へ戻れない。
+                    # 例: 材料を運ぶ前に受け渡しへ進んでしまうと、以降ずっと
+                    # 来ない鍋を待ち続け、手前の運搬も調理も実行されない。
+                    # 封鎖されていない作業を、計画の先頭から探し直す。
+                    nxt = next((j for j in range(len(sc))
+                                if sc[j].get('id') not in blocked), None)
+                    if nxt is not None:
+                        t_idx = nxt
                 if t_idx >= len(sc):
                     # 自分の担当が尽きたら、人間スロットに置いたタスクを引き受ける。
                     # 人間がいま手をつけていると推測して人間スロットへ回したタスクは、
