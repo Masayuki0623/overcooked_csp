@@ -4687,6 +4687,19 @@ class CSPAgent:
             for ing in ings_cap:
                 if not assembly_needed:
                     continue
+                # 在庫は、切る工程がまだ残っているかに関わらず、その材料を
+                # 使う注文ごとに1つずつ引く。切り終えた注文の分を引かないと、
+                # 同じ1つを二つの注文が当てにして、2回目の運搬が省かれる。
+                #   運ぶべき数 = 注文全体で要る数 - 既にその側にある数
+                ing_key = ing.lower()
+                needs_carry_route = self._chop_needs_carry(env, ing_key, assigned_counter)
+                got_unit = False
+                if needs_carry_route:
+                    if ing_key not in carried_budget:
+                        carried_budget[ing_key] = self._carried_units(env, ing_key)
+                    if carried_budget[ing_key] > 0:
+                        carried_budget[ing_key] -= 1
+                        got_unit = True
                 reserved_other_counters = {
                     counter for counter in used_counters
                     if counter is not None and counter != assigned_counter
@@ -4698,17 +4711,8 @@ class CSPAgent:
                 # その場合、刻む工程の起点は材料の供給口ではなく共有テーブル。
                 # 「運搬を介する食材か」は地図で決まる(運び終わっても変わらない)。
                 # 運搬タスク自体は、まだ運ばれていないときだけ出す。
-                via_counter = self._chop_needs_carry(env, ing.lower(), assigned_counter)
-                # 既に届いている分は注文ごとに1つずつ使う。同じ材料を使う
-                # 注文が複数あるとき、1つ届いただけで残りの運搬を省くと、
-                # 刻む人が届かない材料を探し続けて止まる。
-                ing_key = ing.lower()
-                if ing_key not in carried_budget:
-                    carried_budget[ing_key] = self._carried_units(env, ing_key)
-                carry_needed = via_counter
-                if via_counter and carried_budget[ing_key] > 0:
-                    carried_budget[ing_key] -= 1
-                    carry_needed = False
+                via_counter = needs_carry_route
+                carry_needed = via_counter and not got_unit
                 if via_counter:
                     dur = self._chop_duration_from(env, assigned_counter)
                 else:
@@ -5517,6 +5521,11 @@ class CSPAgent:
                         'assigned_counter': t.get('assigned_counter'),
                         'display_order': t.get('display_order', t.get('slot_idx', t['order'])),
                         'agent_idx': agent_idx,
+                        # 実行側が要る指定は、ここで落とすと届かない。
+                        # carry_from: 切り直さず、別の台にある切った物を取りに行く
+                        # from_counter: 供給口ではなく共有台から材料を取る
+                        'carry_from': t.get('carry_from'),
+                        'from_counter': t.get('from_counter'),
                         'fixed_task_id': self._make_fixed_task_id(t['verb'], t['obj'], t['order'])
                     })
                 # 各エージェントのタスクを開始時刻順に並べる
