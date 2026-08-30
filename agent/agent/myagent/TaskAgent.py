@@ -1473,15 +1473,20 @@ class TaskAgent:
 
         # 通路が分断された地図では、近くても反対側のカウンターには置けない。
         counters = self.reachable_positions(env, env.get_pos_by_obj_gs(gs='Counter'))
+        # 自分の側の端に置くと、相手はそれを取りに来られない。刻んだ食材が
+        # そこで死蔵され、それを待つ工程が永久に進まなくなる。両側から
+        # 取れる台を優先する(無ければ従来どおり最寄りに置く)。
+        empty = [c for c in counters if env.pos_obj.get(c) is None]
+        shared = [c for c in empty if self._touches_both_sides(env, c)]
+        pool = shared or empty
         best_dist = float('inf')
         best_c = None
 
-        for c_pos in counters:
-            if env.pos_obj.get(c_pos) is None:  # 空いているカウンター
-                dist = abs(env.self_pos[0] - c_pos[0]) + abs(env.self_pos[1] - c_pos[1])
-                if dist < best_dist:
-                    best_dist = dist
-                    best_c = c_pos
+        for c_pos in pool:
+            dist = abs(env.self_pos[0] - c_pos[0]) + abs(env.self_pos[1] - c_pos[1])
+            if dist < best_dist:
+                best_dist = dist
+                best_c = c_pos
                     
         if best_c:
             return self.move_to(env, best_c, dynamic_obstacles=dynamic_obstacles), f"不要アイテム放棄: {reason}"
