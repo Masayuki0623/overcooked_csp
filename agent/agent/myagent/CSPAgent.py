@@ -5396,6 +5396,11 @@ class CSPAgent:
             model.Minimize(makespan * weight_makespan + end_sum)
 
         solver = cp_model.CpSolver()
+        # 既定では複数の worker が並列に探索するため、同点の解が複数ある
+        # ときにどれが返るかが実行のたびに変わる。同じ条件の試行が毎回
+        # 同じ結果になることは、実験としても不具合を追う上でも欠かせない。
+        solver.parameters.num_search_workers = 1
+        solver.parameters.random_seed = 0
         status = solver.Solve(model)
         status_name = solver.StatusName(status)
         self._emit_counter_debug(f"[CSPAgent] ソルバー状態: {status_name}")
