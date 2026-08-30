@@ -1847,7 +1847,11 @@ class CSPAgent:
         if reschedule_reason is not None:
             self._log_reschedule_event(reschedule_reason, env, added=added, removed=removed)
             if removed and self.initialized:
-                physically_done = {t for t in removed if t[0] == 'cook'}
+                # 計画から消えた理由は「終わったから」とは限らない。鍋に
+                # 実物があるかを世界の側で確かめる。確かめずに完了印を
+                # 付けると、一瞬消えただけの工程が永久に作られなくなる。
+                physically_done = {t for t in removed
+                                   if t[0] == 'cook' and self._cook_is_really_done(env, t[1])}
                 if physically_done:
                     self._emit_counter_debug(f"  [完了検知] 物理完了タスク: {physically_done}")
                     self.completed_task_ids |= physically_done
@@ -3188,6 +3192,24 @@ class CSPAgent:
         return predicted
 
     def _task_duration_frames(self, env, verb, obj, order_idx, assigned_counter=None):
+        """工程の所要フレーム数。測れなければ直前に測れた値を使う。
+
+        所要時間は「経路が引けるか」に依存するので、相手が通路に立った、
+        置き場が一瞬ふさがった、といった理由で測れなくなる。呼び出し元は
+        「測れない工程は計画に載せない」ので、そのままだと必須の工程が
+        1フレームだけ計画から消える。消えている間に担当は別の工程へ
+        乗り移り、二度と戻らない。見積もりが少し古いことより、工程が
+        消えることのほうがはるかに害が大きい。
+        """
+        value = self._task_duration_frames_raw(env, verb, obj, order_idx, assigned_counter)
+        memo = self.__dict__.setdefault('_duration_memo', {})
+        key = (verb, obj, order_idx, tuple(assigned_counter) if assigned_counter else None)
+        if value is not None:
+            memo[key] = value
+            return value
+        return memo.get(key)
+
+    def _task_duration_frames_raw(self, env, verb, obj, order_idx, assigned_counter=None):
         resources = self._get_resources(env)
 
         def raw_base_name(item):
@@ -5717,6 +5739,30 @@ class CSPAgent:
     def _map_is_partitioned(self, env):
         """歩ける領域が2つ以上に分かれているか(仕切りのあるマップか)。"""
         return len(self._walkable_components(env)) > 1
+
+    def _cook_is_really_done(self, env, dish_name):
+        """その料理の材料が、実際に鍋に入った(または入り終えた)か。
+
+        cook 工程は「刻んだ材料を鍋に入れる」ところまで。入れた瞬間に
+        材料は Cooking* に変わり、以降 Cooked*/Charred* へ進む。皿に
+        盛ってからも名前は残るので、盤面か手持ちにその形跡があるかを
+        見れば、工程が本当に済んだかを世界の側で確かめられる。
+        """
+        needed = dish_ingredients(dish_name)
+        if not needed:
+            return False
+        names = []
+        for world_obj in env.pos_obj.values():
+            if world_obj is not None:
+                names.append(getattr(world_obj, 'full_name', '') or '')
+        for agent in getattr(env, 'agents', []) or []:
+            held = getattr(agent, 'holding', None)
+            if held is not None:
+                names.append(getattr(held, 'full_name', '') or '')
+        blob = '|'.join(names)
+        return all(any(f'{stage}{ing.capitalize()}' in blob
+                       for stage in ('Cooking', 'Cooked', 'Charred'))
+                   for ing in needed)
 
     def _pick_plate(self, env, resources, near_pos):
         """near_pos と同じ側にある皿置き場を選ぶ。
