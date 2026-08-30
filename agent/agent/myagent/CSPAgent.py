@@ -2122,9 +2122,20 @@ class CSPAgent:
                     # 後ろだけを探すと、計画の手前に残っている作業へ戻れない。
                     # 例: 材料を運ぶ前に受け渡しへ進んでしまうと、以降ずっと
                     # 来ない鍋を待ち続け、手前の運搬も調理も実行されない。
-                    # 封鎖されていない作業を、計画の先頭から探し直す。
-                    nxt = next((j for j in range(len(sc))
-                                if sc[j].get('id') not in blocked), None)
+                    # 計画の先頭から探し直す。ただし選ぶのは「その注文で
+                    # 一番手前に残っている作業」だけにする。同じ注文の後続
+                    # (切る前に混ぜる等)へ飛ぶと、前提が揃わないまま
+                    # 取りに行く・置くを往復して動けなくなる。
+                    seen_orders = set()
+                    nxt = None
+                    for j in range(len(sc)):
+                        order_key = sc[j].get('id', (None, None, None))[2]
+                        if order_key in seen_orders:
+                            continue
+                        seen_orders.add(order_key)
+                        if sc[j].get('id') not in blocked:
+                            nxt = j
+                            break
                     if nxt is not None:
                         t_idx = nxt
                 if t_idx >= len(sc):
