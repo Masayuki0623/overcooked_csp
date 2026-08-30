@@ -2530,15 +2530,18 @@ class CSPAgent:
         # 使われている最中なので、まだ使える在庫には数えない。数えると、
         # 別の注文がその1つを当てにして運搬を省き、材料の来ない工程を
         # 待ち続けることになる。
-        boards_set = {tuple(b) for b in boards}
         total = 0
         for pos, obj in env.pos_obj.items():
+            # 持ち上げられた物は盤面の一覧にも残るので、手持ちと二重に
+            # 数えないようここでは除く。
             if obj is None or getattr(obj, 'is_held', False):
-                continue
-            if tuple(pos) in boards_set:
                 continue
             if self._components_touching(env, tuple(pos)) & board_comps:
                 total += units(obj)
+        for idx, agent in enumerate(getattr(env, 'agents', []) or []):
+            held = getattr(agent, 'holding', None)
+            if held is not None and self._agent_component(env, idx) in board_comps:
+                total += units(held)
         return total
 
     def _already_carried(self, env, ing_lower):
