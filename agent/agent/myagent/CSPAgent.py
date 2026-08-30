@@ -3222,6 +3222,21 @@ class CSPAgent:
             if not start_pos: return candidates[0]
             return min(candidates, key=lambda p: abs(p[0]-start_pos[0]) + abs(p[1]-start_pos[1]))
 
+        def get_nearest_reachable(start_pos, candidates):
+            """start_pos と同じ側にある候補のうち、一番近いもの。
+
+            仕切りのある盤面では、直線距離が近くても向こう側にある候補は
+            使えない。マンハッタン距離だけで選ぶと経路が引けず、所要時間が
+            測れないという理由で工程そのものが計画から消えてしまう。
+            連結成分の判定はキャッシュが効くので、毎フレーム呼んでも軽い。
+            """
+            if not candidates: return None
+            if not start_pos: return candidates[0]
+            side = self._components_touching(env, tuple(start_pos))
+            same = [c for c in candidates
+                    if self._components_touching(env, tuple(c)) & side] if side else []
+            return get_nearest(start_pos, same or candidates)
+
         if verb == 'chop':
             tile_map = INGREDIENT_TILE
             ing_pos_list = env.get_pos_by_obj_gs(gs=tile_map.get(obj, ""))
@@ -3321,12 +3336,14 @@ class CSPAgent:
                     if base_name is not None and base_name.lower() in needed_ings:
                         start_candidates.append(pos)
 
-                if start_candidates:
-                    start_pos = get_nearest(pot_pos, start_candidates)
-                else:
+                # 鍋から歩いて行ける材料だけを出発点にする。向こう側に
+                # 置かれた材料を選ぶと経路が引けず、cook 工程ごと計画から
+                # 消えてしまう。
+                start_pos = get_nearest_reachable(pot_pos, start_candidates)
+                if start_pos is None:
                     counters = self._usable_counters(env, env.get_pos_by_obj_gs(gs="Counter"))
-                    if not counters: return None
-                    start_pos = get_nearest(pot_pos, counters)
+                    start_pos = get_nearest_reachable(pot_pos, counters)
+                    if start_pos is None: return None
 
             d = self.astar_distance(env, start_pos, pot_pos)
             if d is None: return None
@@ -3347,12 +3364,11 @@ class CSPAgent:
                     base_name = chopped_base_name(world_obj)
                     if base_name is not None and base_name.lower() in needed_ings:
                         start_candidates.append(pos)
-                if start_candidates:
-                    start_pos = get_nearest(plate_pos, start_candidates)
-                else:
+                start_pos = get_nearest_reachable(plate_pos, start_candidates)
+                if start_pos is None:
                     counters = self._usable_counters(env, env.get_pos_by_obj_gs(gs="Counter"))
-                    if not counters: return None
-                    start_pos = get_nearest(plate_pos, counters)
+                    start_pos = get_nearest_reachable(plate_pos, counters)
+                    if start_pos is None: return None
 
             d1 = self.astar_distance(env, start_pos, plate_pos)
             d2 = self.astar_distance(env, plate_pos, delivery_pos)

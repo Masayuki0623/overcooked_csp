@@ -14,6 +14,8 @@ import time
 from datetime import datetime, timedelta
 
 COUNT = re.compile(r'(\d+)/(\d+) 件')
+# 「(123秒経過, 残り約45秒)」が付いていれば、そちらが正確。
+ELAPSED = re.compile(r'\((\d+)秒経過, 残り約(\d+)秒\)')
 
 
 def main():
@@ -28,13 +30,14 @@ def main():
     slowest = 0.0
     rows = []
     for path in paths:
-        last = None
+        last = last_elapsed = None
         try:
             with open(path, encoding='utf-8', errors='ignore') as f:
                 for line in f:
                     m = COUNT.search(line)
                     if m:
                         last = m
+                        last_elapsed = ELAPSED.search(line)
         except OSError:
             continue
         name = os.path.basename(path)
@@ -45,9 +48,16 @@ def main():
         n, m_total = int(last.group(1)), int(last.group(2))
         done += n
         total += m_total
-        elapsed = max(1.0, now - started)
+        if last_elapsed is not None:
+            # ログ自身が持つ経過時間を使う(ファイルの作成時刻は当てにならない。
+            # Windows は同名で作り直すと作成時刻を引き継ぐことがある)
+            elapsed = float(last_elapsed.group(1))
+            remain = float(last_elapsed.group(2))
+            remain = max(0.0, remain - max(0.0, now - _mtime(path)))
+        else:
+            elapsed = max(1.0, now - started)
+            remain = elapsed / max(1, n) * (m_total - n)
         per = elapsed / max(1, n)
-        remain = per * (m_total - n)
         slowest = max(slowest, remain)
         rows.append(f'  {name}: {n}/{m_total} 件  1件{per:.0f}秒  残り約{remain / 60:.1f}分')
 
@@ -58,6 +68,13 @@ def main():
         eta = datetime.now() + timedelta(seconds=slowest)
         print(f'  --- 合計 {done}/{total} 件 ({pct}%) ---')
         print(f'  完了予定 {eta.strftime("%H:%M")}（最も遅いシャードで約{slowest / 60:.1f}分）')
+
+
+def _mtime(path):
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return time.time()
 
 
 def _started(path):
