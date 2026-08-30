@@ -112,8 +112,9 @@ class CSPAgent:
     #   serve_juice : ミキサーで混ぜた中身をコップに注いで提供する(ジュース)
     SERVE_VERBS = ('serve', 'serve_salad', 'serve_juice', 'serve_from_counter')
     # 同一注文内の実行順序。提供系はどれも「最後の工程」。
-    VERB_PRIORITY = {'chop': 0, 'cook': 1, 'mix': 1, 'serve': 2, 'serve_salad': 2,
-                     'serve_juice': 2, 'handover': 2, 'serve_from_counter': 3}
+    VERB_PRIORITY = {'carry': -1, 'chop': 0, 'cook': 1, 'mix': 1, 'serve': 2,
+                     'serve_salad': 2, 'serve_juice': 2, 'handover': 2,
+                     'serve_from_counter': 3}
 
     def __init__(self, speed=2.5, replay=None, no_reschedule=False, sc_2agent=False, deadline_seconds: float | None = None, skip_budget: int | None = None):
         self.speed = speed
@@ -1634,6 +1635,20 @@ class CSPAgent:
                 assigned_counter = carry_task.get('assigned_counter')
             if assigned_counter is None and scheduled_task:
                 assigned_counter = scheduled_task.get('assigned_counter')
+            # 生の材料を持っている = 刻む人なら「これから刻む」だが、
+            # まな板に手が届かない人なら「共有テーブルまで運ぶ」が正しい。
+            # 運搬役に chop を渡すと、置けないまま永久に固まる。
+            boards = env.get_pos_by_obj_gs(gs='Cutboard')
+            comp = self._agent_component(env, agent_idx)
+            can_chop = comp is None or any(
+                comp in self._components_touching(env, tuple(b)) for b in boards)
+            if not can_chop:
+                return {
+                    'id': ('carry', carried_ing, -1),
+                    'res': ('delivery', None),
+                    'assigned_counter': (assigned_counter
+                                         or self._find_shared_counter(env, env.self_pos)),
+                }
             return {
                 'id': ('chop', carried_ing, -1),
                 'res': ('cutboard', None),
@@ -2009,6 +2024,9 @@ class CSPAgent:
                 parts = dish_ingredients(obj)
                 task_name = f"serve_juice_{'_'.join(parts)}"
                 self.task_agent.assigned_counter = None
+            elif verb == 'carry':
+                task_name = f"carry_{obj}"
+                self.task_agent.assigned_counter = task.get('assigned_counter')
             elif verb == 'handover':
                 parts = dish_ingredients(obj)
                 task_name = f"handover_{'_'.join(parts)}"
@@ -2280,6 +2298,9 @@ class CSPAgent:
                 elif verb == 'serve_juice':
                     parts = dish_ingredients(obj)
                     task_name = f"serve_juice_{'_'.join(parts)}"
+                elif verb == 'carry':
+                    task_name = f"carry_{obj}"
+                    ta.assigned_counter = task.get('assigned_counter')
                 elif verb == 'handover':
                     parts = dish_ingredients(obj)
                     task_name = f"handover_{'_'.join(parts)}"
@@ -2457,6 +2478,46 @@ class CSPAgent:
                 return {str(i).lower() for i in parts}
         return None
 
+    def _chop_duration_from(self, env, start):
+        """共有テーブルに置かれた材料を、まな板まで往復して刻む所要時間。"""
+        if start is None:
+            return None
+        boards = env.get_pos_by_obj_gs(gs='Cutboard')
+        best = None
+        for b in boards:
+            d1 = self.astar_distance(env, start, b)
+            d2 = self.astar_distance(env, b, start)
+            if d1 is None or d2 is None:
+                continue
+            tot = d1 + d2
+            if best is None or tot < best:
+                best = tot
+        if best is None:
+            return None
+        return int(best + 8 + 2)
+
+    def _chop_needs_carry(self, env, ing_lower, assigned_counter):
+        """材料とまな板が別の側にあって、1人では刻めないか。
+
+        材料の供給口に手が届く人と、まな板に手が届く人が別なら、
+        誰かが共有テーブルまで運ばないと刻めない。
+        """
+        if not self._map_is_partitioned(env):
+            return False
+        tiles = env.get_pos_by_obj_gs(gs=INGREDIENT_TILE.get(ing_lower, ""))
+        boards = env.get_pos_by_obj_gs(gs='Cutboard')
+        if not tiles or not boards:
+            return False
+        for a in (0, 1):
+            comp = self._agent_component(env, a)
+            if comp is None:
+                continue
+            has_ing = any(comp in self._components_touching(env, tuple(t)) for t in tiles)
+            has_board = any(comp in self._components_touching(env, tuple(b)) for b in boards)
+            if has_ing and has_board:
+                return False       # この人だけで刻める
+        return True
+
     def _usable_counters(self, env, counters):
         """隣に立てる床マスがあるカウンターだけを返す。
 
@@ -2531,6 +2592,14 @@ class CSPAgent:
         kind = dish_kind_of(obj) if obj else None
 
         need = []
+        if verb == 'carry':
+            # 材料の供給口が自分の側にあれば運べる。まな板は要らない。
+            comp = resources.get('component')
+            if comp is not None:
+                tiles = env.get_pos_by_obj_gs(gs=INGREDIENT_TILE.get(obj, ""))
+                if not any(comp in self._components_touching(env, tuple(q)) for q in tiles):
+                    return False
+            return True
         if verb == 'chop':
             need = ['cutboards']
         elif verb == 'cook':
@@ -2553,8 +2622,9 @@ class CSPAgent:
             if not resources.get(key):
                 return False
 
-        if verb == 'chop':
+        if verb == 'chop' and not task.get('from_counter'):
             # その側にその食材があるか(供給口でも、置いてある物でもよい)。
+            # 運んでもらう場合は共有テーブルから取るので、供給口は要らない。
             comp = resources.get('component')
             if comp is not None:
                 tiles = env.get_pos_by_obj_gs(gs=INGREDIENT_TILE.get(obj, ""))
@@ -2669,7 +2739,15 @@ class CSPAgent:
             if order_idx is None:
                 order_idx = (tid[2] if tid and isinstance(tid[2], int) and tid[2] >= 0 else 0)
 
-            if verb == 'chop':
+            if verb == 'chop' and t.get('from_counter') and t.get('assigned_counter'):
+                # 運んでもらった材料を共有テーブルから取って刻む。
+                board = get_nearest(tuple(t['assigned_counter']),
+                                    resources['cutboards'] or [default_start_pos])
+                t['start_pos'] = tuple(t['assigned_counter'])
+                t['end_pos'] = tuple(t['assigned_counter'])
+                t['fixed_res'] = ('cutboard', board)
+
+            elif verb == 'chop':
                 tile_map = INGREDIENT_TILE
                 ing_pos_list = env.get_pos_by_obj_gs(gs=tile_map.get(obj, ""))
                 comp = resources.get('component')
@@ -2702,6 +2780,14 @@ class CSPAgent:
                 t['start_pos'] = ing_pos
                 t['end_pos'] = target
                 t['fixed_res'] = ('cutboard', best_cb)
+
+            elif verb == 'carry':
+                tiles = env.get_pos_by_obj_gs(gs=INGREDIENT_TILE.get(obj, ""))
+                src = tiles[0] if tiles else default_start_pos
+                dest = t.get('assigned_counter') or self._find_shared_counter(env, src)
+                t['start_pos'] = src
+                t['end_pos'] = dest or src
+                t['fixed_res'] = None
 
             elif verb == 'cook':
                 pots = resources['pots']
@@ -2805,8 +2891,11 @@ class CSPAgent:
         工程を増やしたらここにも足すこと。
         """
         verb, obj, order_uid = task['id']
-        if verb == 'chop':
+        if verb == 'carry':
             return True
+        if verb == 'chop':
+            # 材料を運ぶ工程があるなら、それが済むまで刻めない。
+            return ('carry', obj, order_uid) not in remaining_task_ids
         if verb in ('cook', 'mix', 'serve_salad'):
             # 材料を全部刻み終えていること。mix(ミキサー)は cook と同じ位置づけ。
             needed_ings = dish_ingredients(obj)
@@ -3153,6 +3242,23 @@ class CSPAgent:
             if min_total is None:
                 return None
             return int(min_total + 8 + pickup_cost + 1 + 1)
+
+        elif verb == 'carry':
+            # 材料を取って共有テーブルまで運ぶ。
+            tiles = env.get_pos_by_obj_gs(gs=INGREDIENT_TILE.get(obj, ""))
+            if not tiles:
+                return None
+            dest = assigned_counter or self._find_shared_counter(env, tiles[0])
+            if dest is None:
+                return None
+            best = None
+            for t in tiles:
+                d = self.astar_distance(env, t, dest)
+                if d is not None and (best is None or d < best):
+                    best = d
+            if best is None:
+                return None
+            return int(best + 2)
 
         elif verb == 'cook':
             pot_pos_list = resources['pots']
@@ -4449,12 +4555,19 @@ class CSPAgent:
                 if consume_chopped(ing, assigned_counter, reserved_other_counters,
                                    order_uid=order_uid, use_component=use_component):
                     continue
-                dur = self._task_duration_frames(env, 'chop', ing.lower(), order_idx, assigned_counter)
+                # 材料とまな板が別の側にあるなら、共有テーブルまで運んでから刻む。
+                # その場合、刻む工程の起点は材料の供給口ではなく共有テーブル。
+                carry_needed = self._chop_needs_carry(env, ing.lower(), assigned_counter)
+                if carry_needed:
+                    dur = self._chop_duration_from(env, assigned_counter)
+                else:
+                    dur = self._task_duration_frames(
+                        env, 'chop', ing.lower(), order_idx, assigned_counter)
                 if dur is None:
                     continue
                 # 既に切られた物が別のテーブルにあるなら、切らずに運ぶだけでよい
                 carry_from = carry_sources.pop(ing, None)
-                tasks.append({
+                chop_task = {
                     'carry_from': carry_from,
                     'id': ('chop', ing.lower(), order_uid),
                     'verb': 'chop', 'obj': ing.lower(), 'order': order_uid,
@@ -4463,7 +4576,27 @@ class CSPAgent:
                     'dur': dur,
                     'res_candidates': [('cutboard', r) for r in resources['cutboards']],
                     'assigned_counter': assigned_counter
-                })
+                }
+
+                # 材料とまな板が別の側にあると、1人では刻めない。その場合は
+                # 「材料を共有テーブルまで運ぶ」工程を先に挟む。地図を見て
+                # 必要なときだけ分割するので、配置を変えてもそのまま動く。
+                # (提供口が向こう側のときに handover を挟むのと同じ考え方)
+                if carry_needed:
+                    chop_task['from_counter'] = True
+                    dur_c = self._task_duration_frames(
+                        env, 'carry', ing.lower(), order_idx, assigned_counter)
+                    if dur_c is not None:
+                        tasks.append({
+                            'id': ('carry', ing.lower(), order_uid),
+                            'verb': 'carry', 'obj': ing.lower(), 'order': order_uid,
+                            'slot_idx': order_idx,
+                            'display_order': display_order,
+                            'dur': dur_c,
+                            'res_candidates': [],
+                            'assigned_counter': assigned_counter,
+                        })
+                tasks.append(chop_task)
 
             if mix_needed:
                 # ジュース: 刻んだフルーツをミキサーへ入れて混ぜる。

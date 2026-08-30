@@ -93,27 +93,37 @@ def state_for(env, idx):
 def pick_instruction(ai, state, orders, quality, rng):
     """指示の質に応じて対象タスクを選ぶ。
 
-    どの注文がスープ/ジュースかは、候補一覧そのものから決める。
-    _build_order_tasks は呼ぶたびに置き場の割り当てなど内部状態が進むため、
-    別々に呼んだ結果を突き合わせると食い違うことがある(実際、1回目には
-    cook タスクが出ず、スープの判定が空になっていた)。
+    良い指示 = スープを進める作業。スープは「運ぶ→刻む→煮る(15秒)→受け渡し」
+              と工程が長く、早く着手しないと間に合わない。
+    悪い指示 = ジュースを進める作業。人間側で完結しやすく、急ぐ必要がない。
+
+    候補は AI が実際に実行できる作業だけ(get_instruction_candidates が絞る)。
+    どの注文がスープ/ジュースかは、渡された注文一覧から判定する。
     """
     candidates = ai.get_instruction_candidates(dcopy(state))
     if not candidates:
         return None
-    soup = {u for _d, p in candidates if p['verb'] == 'cook' for u in p['order_uids']}
-    juice = {u for _d, p in candidates if p['verb'] == 'mix' for u in p['order_uids']}
+    soup = {o['order'] for o in orders if str(o.get('name', '')).endswith('soup')}
+    juice = {o['order'] for o in orders if str(o.get('name', '')).endswith('juice')}
+
     if quality == 'random':
         return rng.choice(candidates)
-    chops = [c for c in candidates if c[1]['verb'] == 'chop']
-    if quality == 'good':
-        pool = [c for c in chops if soup & set(c[1]['order_uids'])]
-    else:
-        pool = [c for c in chops
-                if (juice & set(c[1]['order_uids'])) and not (soup & set(c[1]['order_uids']))]
-        if not pool:
-            pool = [c for c in chops if not (soup & set(c[1]['order_uids']))]
-    return rng.choice(pool) if pool else None
+
+    def belongs(c, uids):
+        return bool(uids & set(c[1]['order_uids']))
+
+    # 下ごしらえ(運ぶ/刻む)を優先して選ぶ。無ければその注文の作業なら何でもよい。
+    prep = [c for c in candidates if c[1]['verb'] in ('carry', 'chop')]
+    want, avoid = (soup, juice) if quality == 'good' else (juice, soup)
+
+    for pool_src in (prep, candidates):
+        pool = [c for c in pool_src if belongs(c, want) and not belongs(c, avoid)]
+        if pool:
+            return rng.choice(pool)
+        pool = [c for c in pool_src if belongs(c, want)]
+        if pool:
+            return rng.choice(pool)
+    return rng.choice(candidates)
 
 
 def run_trial(map_name, preset, seed, human_model, quality, skip_budget, recipes=None):

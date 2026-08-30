@@ -568,6 +568,10 @@ class TaskAgent:
                 env, ingredients, assigned_counter=self.assigned_counter,
                 assigned_serve_loc=self.assigned_serve_loc,
                 dish_kind=self.dish_kind, dynamic_obstacles=dynamic_obstacles)
+        elif self.task_name.startswith('carry'):
+            ing = self.task_name.split('_', 1)[1] if '_' in self.task_name else None
+            return self.process_carry_task(env, ing, assigned_counter=self.assigned_counter,
+                                           dynamic_obstacles=dynamic_obstacles)
         elif self.task_name.startswith('handover'):
             parts = self.task_name.split('_')
             ingredients = [p.capitalize() for p in parts[1:]]
@@ -702,6 +706,94 @@ class TaskAgent:
             done_state='Mixed', mid_states=('Mixing',),
             container='Cup', container_tile='CupTile', appliance='Blender',
             appliance_label='ミキサー')
+
+    @classmethod
+    def _free_shared_counter(cls, env, near_pos):
+        """空いていて、相手も取りに来られるカウンター。
+
+        運んだ材料は相手が取りに来る。自分だけが届く台に置いても意味がない
+        ので、両側から触れる台を優先する。
+        """
+        counters = env.get_pos_by_obj_gs(gs='Counter')
+        mine = set(cls.reachable_positions(env, counters))
+        shared, own = [], []
+        for pos in counters:
+            if pos not in mine or env.pos_obj.get(pos) is not None:
+                continue
+            if not cls.can_use_position(env, pos):
+                continue
+            (shared if cls._touches_both_sides(env, pos) else own).append(pos)
+        pool = shared or own
+        if not pool:
+            return None
+        return min(pool, key=lambda p: abs(p[0] - near_pos[0]) + abs(p[1] - near_pos[1]))
+
+    @staticmethod
+    def _touches_both_sides(env, pos):
+        """その台が、歩ける領域の複数側から触れるか(共有テーブルか)。"""
+        w, h = env.world_width, env.world_height
+        grid = env.to_grid
+        seen = 0
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nx, ny = pos[0] + dx, pos[1] + dy
+            if 0 <= nx < w and 0 <= ny < h and grid[nx][ny] == 1:
+                seen += 1
+        return seen >= 2
+
+    def process_carry_task(self, env, ing_name=None, assigned_counter=None,
+                           dynamic_obstacles=None):
+        """材料を取って、相手も手が届く共有テーブルまで運ぶ。
+
+        仕切りのある地図では、材料の供給口とまな板が別の側にあることがある。
+        そのままでは誰も刻めないので、材料側の人が共有テーブルまで運び、
+        まな板側の人がそこから取って刻む。
+        """
+        if not ing_name:
+            return (0, 0), "運ぶ材料が指定されていません"
+        fresh = f"Fresh{ing_name.capitalize()}"
+        holding = env.hold
+        holding_name = getattr(holding, 'full_name', None) if holding is not None else None
+
+        if assigned_counter is None:
+            return (0, 0), "運び先のテーブルが割り当てられていません"
+
+        # 既に運び終わっている(共有テーブルに載っている)なら、この工程は終わり。
+        placed = env.pos_obj.get(assigned_counter)
+        placed_name = getattr(placed, 'full_name', '') if placed is not None else ''
+        if fresh in (placed_name or ''):
+            return (0, 0), f"{ing_name} を運び終えた (完了)"
+
+        if holding_name and fresh in holding_name:
+            # 生の材料は既にある山に重ねられない。指定の台が塞がっていたら
+            # 空いている台へ置く(相手が取りに来られる場所であればよい)。
+            dest = assigned_counter
+            occupied = env.pos_obj.get(dest)
+            if occupied is not None and fresh not in (getattr(occupied, 'full_name', '') or ''):
+                alt = self._free_shared_counter(env, dest)
+                if alt is not None:
+                    dest = alt
+            dist = (abs(env.self_pos[0] - dest[0]) + abs(env.self_pos[1] - dest[1]))
+            action = self.move_to(env, dest, dynamic_obstacles=dynamic_obstacles)
+            return action, (f"{ing_name} を置く (完了)" if dist == 1
+                            else f"{ing_name} をテーブルへ運ぶ")
+
+        if holding is not None:
+            return self.drop_unwanted_item(
+                env, holding, reason=f"{ing_name} を運ぶので {holding_name} を置く",
+                dynamic_obstacles=dynamic_obstacles, allow_strict_override=True)
+
+        # 手ぶら -> 材料を取りに行く(置かれている物があればそれを、無ければ供給口へ)
+        for pos, obj in env.pos_obj.items():
+            if (self._is_available_object(obj) and fresh in getattr(obj, 'full_name', '')
+                    and self.can_use_position(env, pos)):
+                return (self.move_to(env, pos, dynamic_obstacles=dynamic_obstacles),
+                        f"{ing_name} の取得")
+        tiles = self.reachable_positions(
+            env, env.get_pos_by_obj_gs(gs=f"Fresh{ing_name.capitalize()}Tile"))
+        if not tiles:
+            return (0, 0), f"{ing_name} の供給口が見つかりません"
+        target = min(tiles, key=lambda p: abs(env.self_pos[0] - p[0]) + abs(env.self_pos[1] - p[1]))
+        return self.move_to(env, target, dynamic_obstacles=dynamic_obstacles), f"{ing_name} の取得"
 
     def process_handover_task(self, env, ingredients=None, assigned_counter=None,
                               assigned_plate=None, assigned_pot=None,
