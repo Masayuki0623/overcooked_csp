@@ -5942,6 +5942,11 @@ class CSPAgent:
             return pool[0]
         return min(pool, key=lambda c: abs(c[0] - near_pos[0]) + abs(c[1] - near_pos[1]))
 
+    # 工程ごとに、どうしても要る器具。座標の分からないタスクの判定に使う。
+    VERB_EQUIPMENT = {'cook': 'Pot', 'mix': 'Blender', 'chop': 'Cutboard',
+                      'serve': 'Delivery', 'serve_salad': 'Delivery',
+                      'serve_juice': 'Delivery', 'serve_from_counter': 'Delivery'}
+
     def _task_components(self, env, task):
         """そのタスクを単独でこなせる連結成分の集合。
 
@@ -5956,14 +5961,30 @@ class CSPAgent:
         res = task.get('fixed_res')
         if res and len(res) > 1 and res[1] is not None:
             positions.append(tuple(res[1]))
+        # その工程にどうしても要る器具。鍋は AI 側にしかないので、
+        # 置き場が両側から使えても「自分にも煮られる」ことにはならない。
+        # 器具が複数ある(まな板が両側にある等)ときは、どれか1つ使えれば
+        # よいので和を取り、他の条件と積を取る。
+        gs = self.VERB_EQUIPMENT.get(task.get('verb') or (task.get('id') or (None,))[0])
+        equip_comps = None
+        if gs:
+            equip_comps = set()
+            for pos in env.get_pos_by_obj_gs(gs=gs):
+                equip_comps |= self._components_touching(env, tuple(pos))
+
         if not positions:
+            if equip_comps:
+                return equip_comps
             return set(range(len(self._walkable_components(env))))
 
         comps = None
         for pos in positions:
             touching = self._components_touching(env, pos)
             comps = touching if comps is None else (comps & touching)
-        return comps or set()
+        comps = comps or set()
+        if equip_comps is not None:
+            comps &= equip_comps
+        return comps
 
     def _task_allowed_agents(self, env, task):
         """そのタスクを実行できるエージェント番号の集合。

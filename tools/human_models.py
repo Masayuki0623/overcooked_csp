@@ -246,6 +246,19 @@ class HumanModel:
         # 人間なら誰でもする最低限の行動なので、既存の判定をそのまま借りる。
         if env.hold is not None:
             carry = self.ai._get_carry_override_task(env, self.human_idx, None)
+            # 持ち物の使い道が自分にできない作業だと、いつまでも持ったまま
+            # 立ち尽くす。鍋は相手側にあるので、スープの材料一式を抱えても
+            # 自分では煮られない。人なら共有台に置いて相手に渡すので、
+            # そうする。
+            if carry is not None and self.human_idx not in self.ai._task_allowed_agents(env, carry):
+                self.current_id = None
+                self.ta.task_name = None
+                action, _reason = self.ta.drop_unwanted_item(
+                    env, env.hold,
+                    reason='自分ではできない作業の材料なので、共有台に置く',
+                    dynamic_obstacles={tuple(other_pos)},
+                    allow_strict_override=True)
+                return action, None
             if carry is not None:
                 self.current_id = carry['id']
                 self.ta.task_name = task_name_of(carry)
