@@ -148,14 +148,16 @@ def main():
             pygame.display.flip()
 
         # 画面だけだと動いているか分かりにくいので、1秒ごとに状況を出す。
+        # 指示した作業に AI がいつ着手したかは毎フレーム見る。1秒ごとの
+        # 抜き取りだと短い作業を取りこぼし、測定値と食い違う。
+        if picked is not None and started_at is None:
+            want = f"{payload.get('verb')}:{payload.get('obj')}"
+            if task_label(ai, 0) == want:
+                started_at = env.current_time
+
         if step % 10 == 0:
-            # 指示した作業に AI がいつ着手したかを、その場で分かるようにする。
             mark = ''
             if picked is not None:
-                want = (payload.get('verb'), payload.get('obj'))
-                cur = task_label(ai, 0)
-                if started_at is None and cur == f'{want[0]}:{want[1]}':
-                    started_at = env.current_time
                 mark = (f'  [指示に着手 t={started_at:.1f}秒]' if started_at is not None
                         else '  [指示はまだ]')
             print(f'  t={env.current_time:5.1f}秒  提供={env.order_scheduler.successful_orders}'
