@@ -43,7 +43,10 @@ FIELDS = [
     # 3-1 待たされる時間
     'wait_seconds', 'wait_censored',
     # 3-2 待っている間に AI がしていたこと
+    # tasks_before      : 着手前にこなした他タスクの全件数
+    # tasks_before_paid : そのうち skip_budget が数える分(前提工程を除く)
     'tasks_before', 'verbs_before', 'durations_before',
+    'tasks_before_paid', 'verbs_before_paid',
     'ai_idle_seconds_while_waiting', 'ai_idle_pct_while_waiting',
     # 3-3 実行順位
     'exec_rank', 'natural_rank', 'rank_gain',
@@ -52,6 +55,23 @@ FIELDS = [
     # 参考
     'served', 'completed', 'makespan_actual_s', 'human_idle_pct', 'wall_seconds',
 ]
+
+
+# 猶予(skip_budget)は「前提でない作業を何個まで挟んでよいか」なので、
+# 指示対象の前提工程は数えない。CSPAgent._get_dep_indices_for_target と
+# 同じ規則(同じ注文で、動詞の優先度が対象より低いもの)を使う。
+VERB_PRIORITY = {'carry': -1, 'chop': 0, 'cook': 1, 'mix': 1, 'serve': 2,
+                 'serve_salad': 2, 'serve_juice': 2, 'handover': 2,
+                 'serve_from_counter': 3}
+
+
+def is_dependency_of(task_id, verb, order_uids):
+    """その作業が、指示対象の前提工程か。"""
+    if not task_id:
+        return False
+    if task_id[2] not in (order_uids or ()):
+        return False
+    return VERB_PRIORITY.get(task_id[0], 9) < VERB_PRIORITY.get(verb, 9)
 
 
 def target_matches(task_id, verb, obj):
@@ -197,6 +217,10 @@ def run_trial(case, recipes, quality, skip_budget, human_model='greedy'):
         if not env.order_scheduler.current_orders:
             break
 
+    order_uids = tuple(payload.get('order_uids') or ())
+    paid_before = [t for t in finished_before
+                   if not is_dependency_of(t[0], verb, order_uids)]
+
     sched = env.order_scheduler
     row.update({
         'wait_seconds': wait_seconds if wait_seconds is not None else round(env.current_time, 1),
@@ -204,6 +228,8 @@ def run_trial(case, recipes, quality, skip_budget, human_model='greedy'):
         'tasks_before': len(finished_before),
         'verbs_before': '|'.join(t[0][0] for t in finished_before),
         'durations_before': '|'.join(str(t[1]) for t in finished_before),
+        'tasks_before_paid': len(paid_before),
+        'verbs_before_paid': '|'.join(t[0][0] for t in paid_before),
         'ai_idle_seconds_while_waiting': round(ai_idle_ticks * STEP_SECONDS, 1),
         'ai_idle_pct_while_waiting': (round(100 * ai_idle_ticks / ticks_while_waiting, 1)
                                       if ticks_while_waiting else None),
