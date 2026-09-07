@@ -26,7 +26,8 @@ sys.path.insert(0, str(ROOT / 'tools'))
 os.environ.setdefault('SDL_VIDEODRIVER', 'dummy')
 os.environ.setdefault('SDL_AUDIODRIVER', 'dummy')
 
-from gym_cooking.utils.order_preset import enumerate_order_recipes  # noqa: E402
+from gym_cooking.utils.order_preset import (  # noqa: E402
+    enumerate_order_recipes, experiment_case_indices)
 from gym_cooking.utils.replay import Replay  # noqa: E402
 
 import run_human_model_experiment as H  # noqa: E402
@@ -255,7 +256,12 @@ def run_trial(case, recipes, quality, skip_budget, human_model='greedy'):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--human-model', default='greedy')
-    ap.add_argument('--cases', type=int, default=None, help='先頭から何通りだけ使うか(下見用)')
+    ap.add_argument('--cases', default='experiment',
+                    choices=['experiment', 'all'],
+                    help="'experiment'(既定)は良い指示が一意に定まる構成だけ。"
+                         "'all' は全部")
+    ap.add_argument('--limit-cases', type=int, default=None,
+                    help='先頭から何通りだけ使うか(下見用)')
     ap.add_argument('--qualities', default=','.join(QUALITIES))
     ap.add_argument('--budgets', default=','.join(str(d) for d in SKIP_BUDGETS))
     ap.add_argument('--shard', default=None, help='"i/n" 形式')
@@ -273,12 +279,17 @@ def main():
     print('様子を目で見たいときは tools/watch_human_model.py を使ってください。')
 
     sets = enumerate_order_recipes('experiment2')
-    if args.cases:
-        sets = sets[:args.cases]
+    # 本実験で使うのは「良い指示が一意に定まる」構成だけ。サラダとスープが
+    # AI 側の具材を共有すると、その指示が「スープを優先させた」と言い切れない。
+    cases = (experiment_case_indices('experiment2') if args.cases == 'experiment'
+             else list(range(len(sets))))
+    if args.limit_cases:
+        cases = cases[:args.limit_cases]
+    print('注文構成: %d 通り (%s)' % (len(cases), args.cases))
     qualities = [q.strip() for q in args.qualities.split(',') if q.strip()]
     budgets = [int(d) for d in args.budgets.split(',') if d.strip()]
 
-    combos = [(c, q, d) for c in range(len(sets)) for q in qualities for d in budgets]
+    combos = [(c, q, d) for c in cases for q in qualities for d in budgets]
     if args.shard:
         i, n = (int(x) for x in args.shard.split('/'))
         combos = [c for k, c in enumerate(combos) if k % n == i]

@@ -96,10 +96,41 @@ def _by_category(recipe_names):
     return out
 
 
+# 実験マップ(experiment.txt)で、それぞれの側にしか無い具材。
+# 具材は料理別ではなく、野菜3種・フルーツ3種をそれぞれ 2:1 で左右に分けている。
+# AI 側の具材だけが「運ぶ(carry)」工程を必要とするので、指示の対象になりうる。
+AI_SIDE_INGREDIENTS = frozenset({'lettuce', 'onion', 'apple', 'orange'})
+HUMAN_SIDE_INGREDIENTS = frozenset({'tomato', 'banana'})
+
+
+def has_exclusive_ai_side_soup_ingredient(recipe_names):
+    """スープにしか使わない具材が、AI 側に1つ以上あるか。
+
+    指示は開始直後に出すので、そのとき着手できるのは AI 側の具材を運ぶ
+    工程だけ。「良い指示(スープを進める)」が一意に定まるには、スープ専用の
+    具材が AI 側にある必要がある。スープ専用の具材がトマト(人間側)しか
+    無い構成では、運ばせる具材がサラダとも重なり、「スープを優先させた」
+    と言い切れなくなる。
+    """
+    cat = _by_category(recipe_names)
+    soup_only = cat[SOUP] - cat[SALAD]
+    return bool({i.lower() for i in soup_only} & AI_SIDE_INGREDIENTS)
+
+
+def experiment_case_indices(preset_name):
+    """本実験で使う注文構成の番号。
+
+    enumerate_order_recipes() が返す一覧のうち、良い指示が一意に定まる
+    ものだけを選ぶ。番号は一覧の添字なので、絞っても他の道具と食い違わない。
+    """
+    sets = enumerate_order_recipes(preset_name)
+    return [i for i, recipes in enumerate(sets)
+            if has_exclusive_ai_side_soup_ingredient(recipes)]
+
+
 def has_exclusive_side_ingredients(recipe_names):
     """AI側にしかない材料と人間側にしかない材料が、それぞれ存在するか。
 
-    実験マップでは スープの野菜とフルーツがAI側、サラダの野菜が人間側にある。
     どちらか一方でも「その系統でしか使わない材料」が無いと、指示の質
     (良い=スープの下ごしらえ / 悪い=ジュースの下ごしらえ)が判別できない
     シードになってしまうため、生成の時点で保証する。

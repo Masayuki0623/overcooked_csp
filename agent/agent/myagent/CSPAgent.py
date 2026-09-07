@@ -165,7 +165,10 @@ class CSPAgent:
         # 変わるので、それを見ても止まっていることに気づけない。
         # 調理 15 秒を含む工程でも 20 秒あれば終わるため、25 秒を超えたら
         # そのタスクは今のこの人には進められないと判断する。
-        self.progress_stall_seconds = 25.0
+        # 正当な待機で最も長いのは調理待ち(COOKING_TIME_SECONDS)。
+        # それを確実に上回る値にしないと、煮えるのを待っているだけの
+        # エージェントを「進んでいない」と誤って諦めさせてしまう。
+        self.progress_stall_seconds = COOKING_TIME_SECONDS + 10.0
         self.blocked_cooldown_frames = 300    # 30秒だけ避ける
         self.blocked_tasks = {0: {}, 1: {}}   # agent -> {task_id: 残りフレーム}
         # 注文ごとに固定した合流地点(仕切りのある地図のみ)

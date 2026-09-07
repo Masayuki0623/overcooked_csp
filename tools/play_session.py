@@ -8,9 +8,8 @@
 操作: 矢印キーで移動、スペースで持つ/置く/使う。
 指示: 開始直後に1回だけ選ぶ(見送り不可)。着手できる工程だけが候補に出る。
 
-本実験で使う注文構成は 9〜17 の9通り。この9通りでは「良い指示」が
-スープ専属になる(サラダと具材を共有しない)。それ以外を使うときは
---any-case を付ける。
+本実験で使う注文構成は、良い指示がスープ専属になるものだけ
+(experiment_case_indices が返す一覧)。それ以外を使うときは --any-case。
 
 結果は results/play_sessions.csv に1行ずつ足していく。
 """
@@ -31,7 +30,8 @@ for _var in ('SDL_VIDEODRIVER', 'SDL_AUDIODRIVER'):
     if os.environ.get(_var) == 'dummy':
         os.environ.pop(_var)
 
-from gym_cooking.utils.order_preset import enumerate_order_recipes  # noqa: E402
+from gym_cooking.utils.order_preset import (  # noqa: E402
+    enumerate_order_recipes, experiment_case_indices)
 from gym_cooking.utils.replay import Replay  # noqa: E402
 from agent.mind.agent import AgentSetting  # noqa: E402
 from agent.gameplay import GamePlay, INSTRUCTION_TIMING_ONCE_AT_START  # noqa: E402
@@ -40,7 +40,7 @@ import run_human_model_experiment as H  # noqa: E402
 
 # 「良い指示」がスープ専属になる注文構成。サラダとスープが AI 側の具材を
 # 共有すると、その指示が「スープを優先させた」と言い切れなくなる。
-EXPERIMENT_CASES = tuple(range(9, 18))
+EXPERIMENT_CASES = tuple(experiment_case_indices('experiment2'))
 
 FIELDS = ['participant', 'session', 'case', 'orders', 'skip_budget',
           'instruction', 'instruction_verb', 'instruction_obj', 'quality',
@@ -78,7 +78,7 @@ def natural_rank_of(state, verb, obj, skip_budget):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--participant', required=True, help='参加者ID')
-    ap.add_argument('--case', type=int, required=True, help='注文構成 (9〜17)')
+    ap.add_argument('--case', type=int, required=True, help='注文構成の番号')
     ap.add_argument('--skip-budget', type=int, required=True, choices=[0, 2, 4])
     ap.add_argument('--session', type=int, default=None, help='何回目か(1〜3)')
     ap.add_argument('--any-case', action='store_true',

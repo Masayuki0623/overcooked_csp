@@ -112,17 +112,27 @@ def pick_instruction(ai, state, orders, quality, rng):
     def belongs(c, uids):
         return bool(uids & set(c[1]['order_uids']))
 
+    def only(c, uids):
+        """その料理にしか使わない作業か。
+
+        指示は (動詞, 対象) 単位でまとめられるので、同じ具材が複数の注文で
+        使われると1つの候補が両方に属する。サラダとスープは同じ野菜プールを
+        共有するため、これを避けないと「スープを優先させた」と言い切れない
+        指示を良い指示として選んでしまう。
+        """
+        return set(c[1]['order_uids']) <= uids
+
     # 下ごしらえ(運ぶ/刻む)を優先して選ぶ。無ければその注文の作業なら何でもよい。
     prep = [c for c in candidates if c[1]['verb'] in ('carry', 'chop')]
     want, avoid = (soup, juice) if quality == 'good' else (juice, soup)
 
     for pool_src in (prep, candidates):
-        pool = [c for c in pool_src if belongs(c, want) and not belongs(c, avoid)]
-        if pool:
-            return rng.choice(pool)
-        pool = [c for c in pool_src if belongs(c, want)]
-        if pool:
-            return rng.choice(pool)
+        # その料理専属のものを最優先。次に「避けたい料理には属さない」もの。
+        for pool in ([c for c in pool_src if only(c, want)],
+                     [c for c in pool_src if belongs(c, want) and not belongs(c, avoid)],
+                     [c for c in pool_src if belongs(c, want)]):
+            if pool:
+                return rng.choice(pool)
     return rng.choice(candidates)
 
 
