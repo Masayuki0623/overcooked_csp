@@ -2268,6 +2268,12 @@ class CSPAgent:
                         tid = task['id']
                         verb, obj, order_uid = tid
                     else:
+                        # 前提が揃うまでこの作業は進められない。計画に他の
+                        # 手をつけられる作業が残っているかもしれないので、
+                        # 短い間だけ候補から外し、次のフレームで選び直す。
+                        # そうしないと、やることがあるのに突っ立ったままになる。
+                        self.blocked_tasks[agent_idx].setdefault(tid, 10)
+
                         # じゃまにならない場所に移動する
                         # 他エージェントが現在実行中のタスクを取得（避けるべきリソースを特定）
                         other_idx = 1 - agent_idx
@@ -2532,10 +2538,11 @@ class CSPAgent:
         材料を探し続ける。数えて、注文ごとに1つずつ使う。
         """
         cap = ing_lower.capitalize()
-        # 数える状態は実測で選んだ。Chopped を外すと(既に別の注文の成果物
-        # なので理屈は通るが)完走率は下がった: 貪欲 18/18 -> 16/18、
-        # 最適な相方 14/18 -> 13/18。切り終えた物も在庫に数える。
-        names = (f"Fresh{cap}", f"Chopping{cap}", f"Chopped{cap}")
+        # 切り終えた物(Chopped)は数えない。切り終えた分は consume_chopped が
+        # 注文へ配る担当なので、ここでも数えると同じ1個を二つの仕組みが
+        # 別々の注文に渡してしまい、足りていないのに運搬が出なくなる。
+        # ここが受け持つのは「これから切る材料」の在庫だけ。
+        names = (f"Fresh{cap}", f"Chopping{cap}")
 
         def units(obj):
             n = getattr(obj, 'full_name', '') or ''
@@ -4700,19 +4707,8 @@ class CSPAgent:
             for ing in ings_cap:
                 if not assembly_needed:
                     continue
-                # 在庫は、切る工程がまだ残っているかに関わらず、その材料を
-                # 使う注文ごとに1つずつ引く。切り終えた注文の分を引かないと、
-                # 同じ1つを二つの注文が当てにして、2回目の運搬が省かれる。
-                #   運ぶべき数 = 注文全体で要る数 - 既にその側にある数
                 ing_key = ing.lower()
                 needs_carry_route = self._chop_needs_carry(env, ing_key, assigned_counter)
-                got_unit = False
-                if needs_carry_route:
-                    if ing_key not in carried_budget:
-                        carried_budget[ing_key] = self._carried_units(env, ing_key)
-                    if carried_budget[ing_key] > 0:
-                        carried_budget[ing_key] -= 1
-                        got_unit = True
                 reserved_other_counters = {
                     counter for counter in used_counters
                     if counter is not None and counter != assigned_counter
@@ -4724,7 +4720,17 @@ class CSPAgent:
                 # その場合、刻む工程の起点は材料の供給口ではなく共有テーブル。
                 # 「運搬を介する食材か」は地図で決まる(運び終わっても変わらない)。
                 # 運搬タスク自体は、まだ運ばれていないときだけ出す。
+                # ここに来た = この注文はまだ自分で切る必要がある。
+                # 切る材料の在庫を1つ引き、足りなければ運搬を出す。
+                #   運ぶべき数 = まだ切る必要のある注文の数 - まだ切っていない在庫
                 via_counter = needs_carry_route
+                got_unit = False
+                if via_counter:
+                    if ing_key not in carried_budget:
+                        carried_budget[ing_key] = self._carried_units(env, ing_key)
+                    if carried_budget[ing_key] > 0:
+                        carried_budget[ing_key] -= 1
+                        got_unit = True
                 carry_needed = via_counter and not got_unit
                 if via_counter:
                     dur = self._chop_duration_from(env, assigned_counter)

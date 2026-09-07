@@ -82,6 +82,7 @@ class HumanModel:
         # 人は「これは今できない」と分かれば別の仕事に移る。
         self._blocked_since = {}
         self._cooldown = {}
+        self._last_progress_state = None
         self._prev_pos = None
         self._prev_task = None
 
@@ -136,14 +137,28 @@ class HumanModel:
 
     # 鍋の調理は 15 秒(150フレーム)かかり、その間じっと待つのは正常な動作。
     # 誤って中断しないよう、それより長く取る。
-    BLOCKED_LIMIT = 200     # これだけ動けなければ、そのタスクは今できないとみなす
-    COOLDOWN_FRAMES = 300   # 避けておく長さ
+    # 20秒(200フレーム)動けるまで粘る設定にしていたが、実際の参加者が
+    # 見つからない材料を20秒も探し続けることはない。手が止まったら
+    # 数秒で別の作業に移る方が人の振る舞いに近く、二人とも止まったまま
+    # という状況も生まれにくい。
+    BLOCKED_LIMIT = 20      # これだけ動けなければ、そのタスクは今できないとみなす
+    COOLDOWN_FRAMES = 60    # 避けておく長さ
 
-    def note_progress(self, task_id, action):
-        """同じタスクで動けない状態が続いていないかを見る。"""
+    def note_progress(self, task_id, env=None):
+        """同じタスクで進めていない状態が続いていないかを見る。
+
+        「行動が (0,0) か」では足りない。壁や相手に向かって歩き続けると、
+        行動は毎フレーム非ゼロなのに位置は変わらない。自分の位置と持ち物が
+        変わったかで進捗を測る。
+        """
         if task_id is None:
             return
-        if action and tuple(action) != (0, 0):
+        held = getattr(env, 'hold', None) if env is not None else None
+        now = (tuple(env.self_pos) if env is not None else None,
+               getattr(held, 'full_name', None))
+        moved = now != getattr(self, '_last_progress_state', None)
+        self._last_progress_state = now
+        if moved:
             self._blocked_since.pop(task_id, None)
             return
         n = self._blocked_since.get(task_id, 0) + 1
@@ -302,7 +317,7 @@ class HumanModel:
         self.ta.carry_from = (keep.get('carry_from')
                               if keep['id'][0] == 'chop' else None)
         action, _reason = self.ta(env, dynamic_obstacles={tuple(other_pos)})
-        self.note_progress(keep['id'], action)
+        self.note_progress(keep['id'], env)
         return action, keep['id']
 
     def observe_plan_match(self, task_id):
