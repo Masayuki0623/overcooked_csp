@@ -8,7 +8,7 @@
 操作: 矢印キーで移動、スペースで持つ/置く/使う。
 指示: 開始直後に1回だけ選ぶ(見送り不可)。着手できる工程だけが候補に出る。
 
-本実験で使う注文構成は、良い指示がスープ専属になるものだけ
+本実験で使う注文構成は、整合な指示がスープ専属になるものだけ
 (experiment_case_indices が返す一覧)。それ以外を使うときは --any-case。
 
 結果は results/play_sessions.csv に1行ずつ足していく。
@@ -38,7 +38,7 @@ from agent.gameplay import GamePlay, INSTRUCTION_TIMING_ONCE_AT_START  # noqa: E
 from agent.myagent.CSPAgent import CSPAgent  # noqa: E402
 import run_human_model_experiment as H  # noqa: E402
 
-# 「良い指示」がスープ専属になる注文構成。サラダとスープが AI 側の具材を
+# 「整合な指示」がスープ専属になる注文構成。サラダとスープが AI 側の具材を
 # 共有すると、その指示が「スープを優先させた」と言い切れなくなる。
 EXPERIMENT_CASES = tuple(experiment_case_indices('experiment2'))
 

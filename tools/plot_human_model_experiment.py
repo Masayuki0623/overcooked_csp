@@ -22,7 +22,9 @@ MODELS = ('follow_plan', 'greedy', 'random')
 MODEL_JA = {'follow_plan': '計画どおり(上限)', 'greedy': '貪欲', 'random': 'ランダム'}
 MODEL_COLOR = {'follow_plan': '#2f7fd4', 'greedy': '#d4552f', 'random': '#8a8f98'}
 QUALITIES = ('good', 'bad', 'random')
-QUALITY_JA = {'good': '良い指示', 'bad': '悪い指示', 'random': 'ランダム'}
+# 表示だけの対応表。CSV の値や引数は既存データとの互換のため good/bad の
+# まま。論文・報告では「整合 / 非整合」に統一しているので、図もそれに揃える。
+QUALITY_JA = {'good': '整合な指示', 'bad': '非整合な指示', 'random': '無作為'}
 QUALITY_COLOR = {'good': '#2f7fd4', 'bad': '#d4552f', 'random': '#8a8f98'}
 BUDGETS = (0, 2, 4)
 

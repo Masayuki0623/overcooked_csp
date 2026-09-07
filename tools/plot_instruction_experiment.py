@@ -23,7 +23,9 @@ for _f in ('Yu Gothic', 'Meiryo', 'MS Gothic', 'Noto Sans CJK JP'):
 plt.rcParams['axes.unicode_minus'] = False
 
 QUALITIES = ('good', 'bad', 'random')
-QUALITY_JA = {'good': '良い指示', 'bad': '悪い指示', 'random': 'ランダム'}
+# 表示だけの対応表。CSV の値や引数は既存データとの互換のため good/bad の
+# まま。論文・報告では「整合 / 非整合」に統一しているので、図もそれに揃える。
+QUALITY_JA = {'good': '整合な指示', 'bad': '非整合な指示', 'random': '無作為'}
 COLORS = {'good': '#2f7fd4', 'bad': '#d4552f', 'random': '#8a8f98'}
 SKIP_BUDGETS = (0, 2, 4)
 

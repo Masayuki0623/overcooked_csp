@@ -258,7 +258,7 @@ def main():
     ap.add_argument('--human-model', default='greedy')
     ap.add_argument('--cases', default='experiment',
                     choices=['experiment', 'all'],
-                    help="'experiment'(既定)は良い指示が一意に定まる構成だけ。"
+                    help="'experiment'(既定)は整合な指示が一意に定まる構成だけ。"
                          "'all' は全部")
     ap.add_argument('--limit-cases', type=int, default=None,
                     help='先頭から何通りだけ使うか(下見用)')
@@ -279,7 +279,7 @@ def main():
     print('様子を目で見たいときは tools/watch_human_model.py を使ってください。')
 
     sets = enumerate_order_recipes('experiment2')
-    # 本実験で使うのは「良い指示が一意に定まる」構成だけ。サラダとスープが
+    # 本実験で使うのは「整合な指示が一意に定まる」構成だけ。サラダとスープが
     # AI 側の具材を共有すると、その指示が「スープを優先させた」と言い切れない。
     cases = (experiment_case_indices('experiment2') if args.cases == 'experiment'
              else list(range(len(sets))))
