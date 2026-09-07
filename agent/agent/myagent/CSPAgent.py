@@ -2120,24 +2120,24 @@ class CSPAgent:
                 # 書き戻すと、再計画で計画が短くなったときに末尾を超えたまま
                 # 戻れなくなり、以後ずっと手待ちになる。飛ばすのはこの回だけ。
                 blocked = self.blocked_tasks.get(agent_idx, {})
-                if t_idx < len(sc) and sc[t_idx].get('id') in blocked:
-                    # 後ろだけを探すと、計画の手前に残っている作業へ戻れない。
-                    # 例: 材料を運ぶ前に受け渡しへ進んでしまうと、以降ずっと
-                    # 来ない鍋を待ち続け、手前の運搬も調理も実行されない。
-                    # 計画の先頭から探し直す。ただし選ぶのは「その注文で
-                    # 一番手前に残っている作業」だけにする。同じ注文の後続
-                    # (切る前に混ぜる等)へ飛ぶと、前提が揃わないまま
-                    # 取りに行く・置くを往復して動けなくなる。
-                    seen_orders = set()
-                    nxt = None
-                    for j in range(len(sc)):
-                        order_key = sc[j].get('id', (None, None, None))[2]
-                        if order_key in seen_orders:
-                            continue
-                        seen_orders.add(order_key)
-                        if sc[j].get('id') not in blocked:
-                            nxt = j
-                            break
+
+                # 手をつけてよいのは「その注文で計画に残っている一番手前の
+                # 作業」だけ。材料を運ぶ前に受け渡しへ進むと、来ない鍋を
+                # 延々と待ち、その材料を待っている相手もろとも止まる。
+                # 進行位置は配列の添字なので、再計画で計画の形が変わると
+                # 簡単に後続を指してしまう。毎回ここで正す。
+                first_of_order = {}
+                for j, t in enumerate(sc):
+                    key = t.get('id', (None, None, None))[2]
+                    if key not in first_of_order:
+                        first_of_order[key] = j
+
+                def _is_ready(j):
+                    tid_j = sc[j].get('id', (None, None, None))
+                    return first_of_order.get(tid_j[2]) == j and tid_j not in blocked
+
+                if not (t_idx < len(sc) and _is_ready(t_idx)):
+                    nxt = next((j for j in range(len(sc)) if _is_ready(j)), None)
                     if nxt is not None:
                         t_idx = nxt
                 if t_idx >= len(sc):
