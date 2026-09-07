@@ -22,7 +22,8 @@ for _p in ('.', 'agent', 'testbed-cooking', 'tools'):
 os.environ.setdefault('SDL_VIDEODRIVER', 'dummy')
 os.environ.setdefault('SDL_AUDIODRIVER', 'dummy')
 
-from gym_cooking.utils.order_preset import enumerate_order_recipes  # noqa: E402
+from gym_cooking.utils.order_preset import (  # noqa: E402
+    enumerate_order_recipes, experiment_case_indices)
 from gym_cooking.utils.replay import Replay  # noqa: E402
 import run_human_model_experiment as H  # noqa: E402
 from human_models import HumanModel  # noqa: E402
@@ -79,6 +80,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--model', default=None, help='省略すると両方')
     ap.add_argument('--shard', default=None, help='"i/n" 形式')
+    ap.add_argument('--cases', default='all', choices=['experiment', 'all'],
+                    help="'experiment' は本実験で使う構成だけ")
     ap.add_argument('--max-seconds', type=float, default=100.0)
     ap.add_argument('--min-freeze', type=float, default=3.0)
     args = ap.parse_args()
@@ -86,7 +89,8 @@ def main():
     H.MAX_SECONDS_OVERRIDE = args.max_seconds
     models = [args.model] if args.model else ['greedy', 'follow_plan']
     sets = enumerate_order_recipes('experiment2')
-    cases = list(range(len(sets)))
+    cases = (experiment_case_indices('experiment2') if args.cases == 'experiment'
+             else list(range(len(sets))))
     if args.shard:
         i, n = (int(x) for x in args.shard.split('/'))
         cases = [c for c in cases if c % n == i]
