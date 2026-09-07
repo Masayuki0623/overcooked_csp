@@ -65,7 +65,7 @@ class PartialComboTests(unittest.TestCase):
     def test_helper_finds_smallest_superset(self):
         env = make_env(['CookedLettuce-CookedOnion-CookedTomato-Plate',
                         'CookedLettuce-CookedOnion-Plate'], None)
-        parts, _counter = self.agent._find_order_recipe_for_partial(env, ['lettuce'])
+        parts, _counter, _kind = self.agent._find_order_recipe_for_partial(env, ['lettuce'])
         self.assertEqual(parts, ['lettuce', 'onion'])
 
 

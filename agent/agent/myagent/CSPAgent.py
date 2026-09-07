@@ -1326,9 +1326,24 @@ class CSPAgent:
         # そもそも指示できないようにしておく。
         doable = self._instructable_actions(env, current_orders)
 
+        # 前提の済んでいない作業も候補に出さない。材料がまだ切れていないのに
+        # 「煮て」と指示できると、AI は物理的に着手できず、参加者から見れば
+        # 無視されたのと同じに見える。だがその待ちは依存関係によるもので、
+        # 指示の効き方(skip_budget)とは無関係な別の原因が混ざってしまう。
+        ready = set()
+        for order in current_orders:
+            for task in order.get('tasks', []):
+                tid = task.get('id')
+                if not tid:
+                    continue
+                if self._task_is_available_in_virtual_state(task, remaining_tids):
+                    ready.add((tid[0], tid[1]))
+
         candidates = []
         for (verb, obj), order_uids in grouped.items():
             if doable is not None and (verb, obj) not in doable:
+                continue
+            if ready and (verb, obj) not in ready:
                 continue
             display = f"{verb}_{obj.replace(' ', '').replace('-', '_')}"
             payload = {
