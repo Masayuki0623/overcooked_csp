@@ -119,6 +119,7 @@ def main():
           f'  [描画ドライバ: {driver}]')
     clock = pygame.time.Clock()
     frames = []
+    started_at = None   # 指示した作業に AI が着手した時刻
 
     for step in range(1, MAX_STEPS + 1):
         for event in pygame.event.get():
@@ -142,12 +143,23 @@ def main():
 
         env.step(actions, passed_time=0.1)
         game.on_render()
-        pygame.display.flip()
+        # 画面を持たないとき(--headless)は表示面が無いので、描くだけで送らない。
+        if visible:
+            pygame.display.flip()
 
         # 画面だけだと動いているか分かりにくいので、1秒ごとに状況を出す。
         if step % 10 == 0:
+            # 指示した作業に AI がいつ着手したかを、その場で分かるようにする。
+            mark = ''
+            if picked is not None:
+                want = (payload.get('verb'), payload.get('obj'))
+                cur = task_label(ai, 0)
+                if started_at is None and cur == f'{want[0]}:{want[1]}':
+                    started_at = env.current_time
+                mark = (f'  [指示に着手 t={started_at:.1f}秒]' if started_at is not None
+                        else '  [指示はまだ]')
             print(f'  t={env.current_time:5.1f}秒  提供={env.order_scheduler.successful_orders}'
-                  f'  AI={task_label(ai, 0)}  人間役={task_label(ai, 1, human)}', flush=True)
+                  f'  AI={task_label(ai, 0)}  人間役={task_label(ai, 1, human)}{mark}', flush=True)
 
         if args.gif:
             buf = pygame.surfarray.array3d(game.screen)
