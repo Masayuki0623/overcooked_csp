@@ -173,8 +173,15 @@ class TaskAgent:
         content_name = self._get_counter_content_name(env, assigned_counter)
         return None, f"{blocked_reason}: 重ねられない {assigned_counter} content='{content_name}'"
 
-    def _handle_counter_fallback(self, wait_reason, fallback_func):
-        if self.strict_counter_management:
+    def _handle_counter_fallback(self, wait_reason, fallback_func, unassigned=False):
+        """置き場が使えないときの逃げ道。
+
+        strict_counter_management は「割り当てられた台を守る」ための設定
+        なので、そもそも割り当てが無いとき(unassigned)は守るものが無い。
+        それでも待たせると、置き場が解除されたまま再割り当てされない場面で
+        永久に手が止まる。
+        """
+        if self.strict_counter_management and not unassigned:
             return (0, 0), wait_reason
         return fallback_func()
 
@@ -1161,7 +1168,7 @@ class TaskAgent:
                         return self.move_to(env, local_target_merge_loc, dynamic_obstacles=dynamic_obstacles), "離れた食材とマージさせるために置く"
                     return self.move_to(env, target_pot_loc, dynamic_obstacles=dynamic_obstacles), "マージ対象がないため今の分を鍋に入れる"
 
-                return self._handle_counter_fallback("共有置き場ID未割当のため待機中", fallback_func)
+                return self._handle_counter_fallback("共有置き場ID未割当のため待機中", fallback_func, unassigned=True)
                 
         # 5. 手が空の場合 -> 足りない食材のいずれかを探すが、すでにマージが進んでいるものを優先する
         def find_best_ingredient_target(only_assigned_counter):
@@ -1364,7 +1371,7 @@ class TaskAgent:
                             "離れた食材とマージさせるために置く")
                 return (0, 0), "マージ対象の食材を待機中"
 
-            return self._handle_counter_fallback("共有置き場ID未割当のため待機中", fallback_func)
+            return self._handle_counter_fallback("共有置き場ID未割当のため待機中", fallback_func, unassigned=True)
 
         # 4. 手が空 -> 足りない食材を探す(マージが進んでいるものを優先)
         target_ing_loc = None
@@ -1585,7 +1592,7 @@ class TaskAgent:
                     self._log_chop_debug(env, ing_name, holding_name, assigned_cutboard, assigned_counter, "fallback_wait", reason="no_empty_counter")
                     return (0,0), "適切なテーブルが見つかりません"
 
-                return self._handle_counter_fallback("共有置き場ID未割当のため待機中", fallback_func)
+                return self._handle_counter_fallback("共有置き場ID未割当のため待機中", fallback_func, unassigned=True)
             
             if target_table:
                 #print(f"  -> {chopped_ing_name} を {target_table} に置きます")
