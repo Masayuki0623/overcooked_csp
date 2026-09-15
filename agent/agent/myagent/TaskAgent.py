@@ -1498,15 +1498,25 @@ class TaskAgent:
         empty = [c for c in counters if env.pos_obj.get(c) is None]
         shared = [c for c in empty if self._touches_both_sides(env, c)]
         pool = shared or empty
-        best_dist = float('inf')
-        best_c = None
 
-        for c_pos in pool:
-            dist = abs(env.self_pos[0] - c_pos[0]) + abs(env.self_pos[1] - c_pos[1])
-            if dist < best_dist:
-                best_dist = dist
-                best_c = c_pos
-                    
+        # 一度決めた置き先は、空いている限り変えない。毎フレーム最寄りを選び
+        # 直すと、一歩動くたびに別の台が最寄りになり、二つの台の間を行ったり
+        # 来たりして永久に置けない(実測: (7,2)と(7,3)を往復し、目標が
+        # (6,5)と(6,2)で毎フレーム入れ替わっていた)。
+        held_key = id(holding)
+        sticky = getattr(self, '_drop_target', None)
+        if sticky is not None and sticky[0] == held_key and sticky[1] in pool:
+            best_c = sticky[1]
+        else:
+            best_dist = float('inf')
+            best_c = None
+            for c_pos in pool:
+                dist = abs(env.self_pos[0] - c_pos[0]) + abs(env.self_pos[1] - c_pos[1])
+                if dist < best_dist:
+                    best_dist = dist
+                    best_c = c_pos
+            self._drop_target = (held_key, best_c) if best_c else None
+
         if best_c:
             return self.move_to(env, best_c, dynamic_obstacles=dynamic_obstacles), f"不要アイテム放棄: {reason}"
             
