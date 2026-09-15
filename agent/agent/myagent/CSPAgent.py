@@ -4533,6 +4533,32 @@ class CSPAgent:
                                     {'names': plated_names, 'obj': obj, 'used': False})
                         register_chopped_item(obj, obj.location)
 
+        # 手に持っている完成品も数える。上の走査は持ち物を飛ばしているので、
+        # 皿に盛ったスープや注いだジュースを人が運んでいる間、「まだ煮て
+        # いない / 混ぜていない」に戻って cook / mix を作り直していた。
+        # 相手が完成品を抱えたまま少し歩くだけで、AI は存在しない料理の
+        # 材料を集めに行く。刻んだ食材の持ち分は別に数えているので、ここで
+        # 足すのは容器に入った完成品だけ。
+        for agent in getattr(env, 'agents', []) or []:
+            held = getattr(agent, 'holding', None)
+            if held is None:
+                continue
+            full = getattr(held, 'full_name', '') or ''
+            contents = getattr(held, 'contents', []) or []
+            names = sorted(c.name for c in contents
+                           if getattr(c, 'name', '') and c.name not in ('Plate', 'Cup'))
+            if not names:
+                continue
+            if any(k in full for k in ('Cooked', 'Cooking', 'Charred')):
+                cooked_dish_states.append({'names': names, 'obj': held, 'used': False})
+            elif 'Mixed' in full or 'Mixing' in full:
+                is_mixed = getattr(held, 'is_mixed', None)
+                blender_states.append({
+                    'names': names, 'obj': held, 'used': False,
+                    'mixed': bool(is_mixed()) if callable(is_mixed) else ('Mixing' not in full)})
+            elif any(getattr(c, 'name', '') == 'Plate' for c in contents):
+                plate_states.append({'names': names, 'obj': held, 'used': False})
+
         resources = self._get_resources(env)
         orders = []
         # 既に刻む側へ届いている材料の在庫。注文ごとに1つずつ引いていく。

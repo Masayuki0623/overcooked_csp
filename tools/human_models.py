@@ -28,7 +28,13 @@ import random
 from agent.myagent.CSPAgent import dish_ingredients
 from agent.myagent.TaskAgent import TaskAgent
 
-MODELS = ('follow_plan', 'greedy', 'random')
+MODELS = ('follow_plan', 'greedy', 'random', 'messy')
+# messy: 実際の参加者に近い「乱雑な相方」。判断は貪欲と同じだが、
+#   ・切った物を指定の台ではなく、手近な空いている台に置く(多くは自分側)
+#   ・持ち上げた物を、たまに数秒持ったまま歩き回る
+#   ・たまに気まぐれで別の作業に手を出す
+# CSP が「指定どおりに置かれる」「持ち物は無い」と決めつけていると、
+# ここで壊れる。壊れ方を再現するための相方であって、上手な相方ではない。
 
 # 選び直すのは「タスクが終わった/不要になった」ときだけ。ただし何らかの
 # 理由で永久に進めなくなると計測が潰れるので、安全網として、まったく状況が
@@ -85,6 +91,9 @@ class HumanModel:
         self._last_progress_state = None
         self._prev_pos = None
         self._prev_task = None
+        # messy 用: 持ち歩きの残りフレームと、タスクごとに決めた置き場
+        self._hold_left = None
+        self._messy_counter_by_task = {}
 
     # ------------------------------------------------------------------
     def available_tasks(self, env, tasks):
@@ -125,6 +134,8 @@ class HumanModel:
 
         if self.model == 'random':
             return self.rng.choice(tasks) if tasks else None
+        if self.model == 'messy' and tasks and self.rng.random() < 0.1:
+            return self.rng.choice(tasks)
 
         # greedy: 完了までが最短のタスクを選ぶ(そこまでの移動 + 作業時間)。
         # 先読みはせず、いまの自分の位置だけから見た短さで決める。
@@ -213,7 +224,41 @@ class HumanModel:
             self._cache_age += 1
         return self._tasks_cache
 
+    def _messy_counter(self, env, task):
+        """乱雑な相方が切った物を置く台。指定の台は無視する。
+
+        7割は自分側だけの台(相手から取れない)、3割は共有台。
+        同じタスクの間は同じ台に決めておく(毎フレーム変えると往復する)。
+        """
+        tid = task['id']
+        if tid in self._messy_counter_by_task:
+            return self._messy_counter_by_task[tid]
+        counters = self.ta.reachable_positions(env, env.get_pos_by_obj_gs(gs='Counter'))
+        free = [c for c in counters if env.pos_obj.get(c) is None
+                and self.ta.can_use_position(env, c)]
+        own = [c for c in free if not self.ta._touches_both_sides(env, c)]
+        shared = [c for c in free if self.ta._touches_both_sides(env, c)]
+        pool = own if (own and self.rng.random() < 0.7) else (shared or own or free)
+        choice = self.rng.choice(pool) if pool else task.get('assigned_counter')
+        self._messy_counter_by_task[tid] = choice
+        return choice
+
     def act(self, env, other_pos):
+        if self.model == 'messy':
+            # 持ち上げた直後に、1/3 の確率で3秒ほど持ったまま歩き回る。
+            # 人は考えたり迷ったりするので、持ち物が一時的に盤面から消える。
+            if env.hold is not None:
+                if self._hold_left is None:
+                    self._hold_left = self.rng.choice([0, 0, 30])
+                if self._hold_left > 0:
+                    self._hold_left -= 1
+                    self.record_noop = True
+                    return self.rng.choice([(1, 0), (-1, 0), (0, 1), (0, -1)]), self.current_id
+            else:
+                self._hold_left = None
+        return self._act(env, other_pos)
+
+    def _act(self, env, other_pos):
         """1フレーム分の行動を返す。"""
         # 進んでいないなら手詰まりとみなす。
         previous = self.last_signature
@@ -324,6 +369,12 @@ class HumanModel:
 
         self.ta.task_name = task_name_of(keep)
         self.ta.assigned_counter = keep.get('assigned_counter')
+        # 付け替え(別の台から取って指定の台へ置き直す)は、指定の台に置かないと
+        # 意味がない。それまで乱すと、計画が正しくても永久に届かなくなり、
+        # CSP の欠陥と区別がつかなくなる。乱すのは新しく切るときだけ。
+        if (self.model == 'messy' and keep['id'][0] == 'chop'
+                and keep.get('carry_from') is None):
+            self.ta.assigned_counter = self._messy_counter(env, keep)
         self.ta.order_ingredients = self.ai._order_ingredients_of(keep)
         # 既に切られた物が別の台にあるなら、切り直さず取りに行く。
         # これを渡し忘れると、供給口に無い材料を探し続けて止まる。
