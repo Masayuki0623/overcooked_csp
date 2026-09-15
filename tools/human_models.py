@@ -368,6 +368,16 @@ class HumanModel:
             keep = self.pick(env, options)
         if keep is None:
             self.current_id = None
+            # やることが無いのに何かを持っているなら、共有台に置く。持ったまま
+            # 立ち尽くすと、それを待っている相手の工程が止まる(実測: 切った
+            # レタスを持ったまま61秒、AI はそのレタスを待ち続けた)。人なら
+            # 手が空くまで置くし、計画側もそこに置かれれば拾い直せる。
+            if env.hold is not None:
+                self.ta.task_name = None
+                action, _reason = self.ta.drop_unwanted_item(
+                    env, env.hold, reason='やることが無いので共有台に置く',
+                    dynamic_obstacles={tuple(other_pos)}, allow_strict_override=True)
+                return action, None
             return (0, 0), None
 
         self.current_id = keep['id']

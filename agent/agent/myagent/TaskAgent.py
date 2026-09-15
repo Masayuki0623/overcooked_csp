@@ -1507,7 +1507,9 @@ class TaskAgent:
         # 直すと、一歩動くたびに別の台が最寄りになり、二つの台の間を行ったり
         # 来たりして永久に置けない(実測: (7,2)と(7,3)を往復し、目標が
         # (6,5)と(6,2)で毎フレーム入れ替わっていた)。
-        held_key = id(holding)
+        # 実行側に渡る状態は毎フレーム複製されるので、持ち物のオブジェクト
+        # の id は毎回変わる。id で覚えると固定が一度も効かない。名前で覚える。
+        held_key = getattr(holding, 'full_name', None) or id(holding)
         sticky = getattr(self, '_drop_target', None)
         if sticky is not None and sticky[0] == held_key and sticky[1] in pool:
             best_c = sticky[1]
