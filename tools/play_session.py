@@ -82,7 +82,7 @@ def main():
     ap.add_argument('--skip-budget', type=int, required=True, choices=[0, 2, 4])
     ap.add_argument('--session', type=int, default=None, help='何回目か(1〜3)')
     ap.add_argument('--any-case', action='store_true',
-                    help='9〜17 以外の構成も許す(練習用)')
+                    help='本実験で使う構成以外も許す(練習用)')
     ap.add_argument('--max-seconds', type=float, default=100.0)
     ap.add_argument('--out', default=str(ROOT / 'results' / 'play_sessions.csv'))
     args = ap.parse_args()
