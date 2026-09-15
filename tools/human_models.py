@@ -252,8 +252,17 @@ class HumanModel:
                     self._hold_left = self.rng.choice([0, 0, 30])
                 if self._hold_left > 0:
                     self._hold_left -= 1
-                    self.record_noop = True
-                    return self.rng.choice([(1, 0), (-1, 0), (0, 1), (0, -1)]), self.current_id
+                    # 器具(鍋・ミキサー・提供口)のマスに向かう一歩は避ける。この
+                    # 環境では「ぶつかる = 入れる」なので、持ち物が1種だけの状態で
+                    # 器具に触れると、その注文は環境の規則上もう完成できない。
+                    # 台に向かう一歩は残す(そこに置いてしまうのが乱雑さの本体)。
+                    pos = tuple(env.self_pos)
+                    avoid = set()
+                    for gs in ('Pot', 'Blender', 'Delivery'):
+                        avoid |= {tuple(q) for q in env.get_pos_by_obj_gs(gs=gs)}
+                    moves = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+                    safe = [m for m in moves if (pos[0] + m[0], pos[1] + m[1]) not in avoid]
+                    return self.rng.choice(safe or moves), self.current_id
             else:
                 self._hold_left = None
         return self._act(env, other_pos)
