@@ -1202,9 +1202,13 @@ class TaskAgent:
         # print(f"[DEBUG] cook:candidates target_ing_loc={target_ing_loc} best_score={best_score} assigned_counter_candidate={assigned_counter_candidate} assigned_counter_score={assigned_counter_score} missing={missing_ings}")
 
         if target_ing_loc is None and assigned_counter_candidate is not None:
-            target_ing_loc = assigned_counter_candidate
-            # print(f"[DEBUG] cook:use_assigned_counter_candidate pos={target_ing_loc}")
-                        
+            # 残っているのが、指定の台に集まりかけた一部だけ。ここで取り上げても
+            # この工程は必ず同じ台へ置き戻すので、持って置いてを繰り返すだけになる
+            # (実測: 取得⇄置く の切替が1試行で40回)。足りない分は相手が持って
+            # くるのを待つ。参加者から見ると「AI が同じ物を持ったり置いたり
+            # している」ように映るので、待つ方がまだ分かりやすい。
+            return (0, 0), "不足分がそろうのを待機中"
+
         if target_ing_loc:
             # print(f"[DEBUG] cook:pickup_target pos={target_ing_loc} obj={getattr(env.pos_obj.get(target_ing_loc), 'full_name', None)}")
             return self.move_to(env, target_ing_loc, dynamic_obstacles=dynamic_obstacles), "食材の取得"
