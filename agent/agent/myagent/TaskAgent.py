@@ -672,12 +672,23 @@ class TaskAgent:
         blenders = [assigned_blender] if assigned_blender else self.reachable_positions(env, env.get_pos_by_obj_gs(gs='Blender'))
         holding = env.hold
 
+        want = {str(i).lower() for i in (ingredients or [])}
         for b_loc in blenders:
             obj = env.pos_obj.get(b_loc)
             if obj is None:
                 continue
             if getattr(obj, 'is_mixed', lambda: False)():
-                return (0, 0), "混ぜ完了 (Done)"
+                # 「中身が全部 Mixed」は、フルーツ1種だけでも成り立つ。人が1種だけ
+                # 入れて混ぜると、環境の規則上もう片方は足せず、その注文は完成
+                # できない。それを「完了」と報告すると、誰も気づかないまま計画が
+                # 止まる。中身が注文の材料と一致するときだけ完了とする。
+                have = {str(getattr(c, 'name', '')).lower()
+                        for c in getattr(obj, 'contents', []) if getattr(c, 'name', '')}
+                have.discard('cup')
+                if not want or have == want:
+                    return (0, 0), "混ぜ完了 (Done)"
+                return (0, 0), (f"ミキサーの中身が注文と違う ({'-'.join(sorted(have))} / "
+                                f"必要 {'-'.join(sorted(want))})。取り出せないため進められない")
             if getattr(obj, 'is_mixing', lambda: False)():
                 if holding is not None:
                     # 手が塞がっているとインタラクトが「入れる/取り出す」に
@@ -1610,8 +1621,14 @@ class TaskAgent:
         # (例: レタス+玉ねぎの置き場と、トマトだけの置き場が別々にある場合、
         #  トマトを切り直すのではなく運んで合流させる)
         # 運び先は必ず assigned_counter なので、運び元と運び先が入れ替わる往復は起きない。
+        # 手に何か持ったまま取りに行っても拾えない。ここに来て持ち物が残って
+        # いるのは、切る対象の生の材料を持っている場合だけ(他は上で手放し、
+        # 切り終えた物は上で置きに行く)。それなら別の台の分を取りに行くより、
+        # 手の中の材料をそのまま切ればよい。取りに行くのは手ぶらのときだけ。
+        # (人が生の材料を持ったまま計画が付け替えに変わると、拾えないのに
+        #  取りに行き続けて73秒止まる、という往復が起きていた)
         carry_from = getattr(self, 'carry_from', None)
-        if carry_from is not None and carry_from != assigned_counter:
+        if carry_from is not None and carry_from != assigned_counter and holding is None:
             source_obj = env.pos_obj.get(carry_from)
             source_name = getattr(source_obj, 'full_name', '') if source_obj is not None else ''
             if chopped_ing_name in source_name:

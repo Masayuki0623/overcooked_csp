@@ -4380,7 +4380,7 @@ class CSPAgent:
         carry_sources = {}
 
         def consume_chopped(ingredient_name, assigned_counter, reserved_counters,
-                            order_uid=None, use_component=None):
+                            order_uid=None, use_component=None, order_ings=None):
             def usable_here(pos):
                 # 仕切りの向こうに置かれた物は、この注文を進める側からは
                 # 取りに行けない。数に入れると工程が永久に止まる。
@@ -4405,8 +4405,17 @@ class CSPAgent:
                 for pos in available_chopped_by_pos.keys():
                     if pos == assigned_counter or pos in reserved_counters:
                         continue
-                    if available_chopped_by_pos.get(pos, {}).get(ingredient_name, 0) > 0:
-                        preferred_positions.append(pos)
+                    stock = available_chopped_by_pos.get(pos, {})
+                    if stock.get(ingredient_name, 0) <= 0:
+                        continue
+                    # 山は丸ごとしか運べない。この注文に無い材料が混ざった山
+                    # (別の注文の分)から1つだけ抜くことはできないので、
+                    # そこは当てにしない。当てにすると、運んでも置き場に
+                    # 合流できず、山を持って台から台へ移すだけになる。
+                    if order_ings is not None and any(
+                            k.lower() not in order_ings for k in stock):
+                        continue
+                    preferred_positions.append(pos)
 
             for pos in preferred_positions:
                 if not usable_here(pos):
@@ -4758,7 +4767,8 @@ class CSPAgent:
                     if counter is not None and counter != assigned_counter
                 }
                 if consume_chopped(ing, assigned_counter, reserved_other_counters,
-                                   order_uid=order_uid, use_component=use_component):
+                                   order_uid=order_uid, use_component=use_component,
+                                   order_ings={x.lower() for x in ings_lower}):
                     continue
                 # 材料とまな板が別の側にあるなら、共有テーブルまで運んでから刻む。
                 # その場合、刻む工程の起点は材料の供給口ではなく共有テーブル。
