@@ -3,7 +3,9 @@
 シミュレーションと同じ環境・同じ AI を人が相手にする。違うのは、人間側を
 方策ではなくキーボードが操作することだけ。
 
-    python tools/play_session.py --participant p01 --case 9 --skip-budget 0
+    python tools/play_session.py                      # そのまま遊ぶ
+    python tools/play_session.py --skip-budget 4      # 後回しの量を変える
+    python tools/play_session.py --participant p01 --case 13 --session 2
 
 操作: 矢印キーで移動、スペースで持つ/置く/使う。
 指示: 開始直後に1回だけ選ぶ(見送り不可)。着手できる工程だけが候補に出る。
@@ -80,9 +82,12 @@ def natural_rank_of(state, verb, obj, skip_budget):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--participant', required=True, help='参加者ID')
-    ap.add_argument('--case', type=int, required=True, help='注文構成の番号')
-    ap.add_argument('--skip-budget', type=int, required=True, choices=[0, 2, 4])
+    # 引数なしでも遊べるようにしておく。本番では参加者IDと回数を渡す。
+    ap.add_argument('--participant', default='test', help='参加者ID')
+    ap.add_argument('--case', type=int, default=EXPERIMENT_CASES[0],
+                    help='注文構成の番号(既定: %d)' % EXPERIMENT_CASES[0])
+    ap.add_argument('--skip-budget', type=int, default=0, choices=[0, 2, 4],
+                    help='AI が指示を後回しにできる量(既定: 0)')
     ap.add_argument('--session', type=int, default=None, help='何回目か(1〜3)')
     ap.add_argument('--any-case', action='store_true',
                     help='本実験で使う構成以外も許す(練習用)')

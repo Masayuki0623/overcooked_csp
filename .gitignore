@@ -42,3 +42,5 @@ agent/agent/myagent/rl_models/
 # API Keys
 google_api_key.txt
 openai_api_key.txt
+# 人がプレイしたセッションの記録。参加者のデータなので追跡しない。
+results/play_sessions.csv
