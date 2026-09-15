@@ -25,11 +25,6 @@ ROOT = Path(__file__).resolve().parents[1]
 for _p in ('.', 'agent', 'testbed-cooking', 'tools'):
     sys.path.insert(0, str(ROOT / _p))
 
-# 実験ハーネスは読み込むだけで画面なしに設定するので、その前に取り消す。
-for _var in ('SDL_VIDEODRIVER', 'SDL_AUDIODRIVER'):
-    if os.environ.get(_var) == 'dummy':
-        os.environ.pop(_var)
-
 from gym_cooking.utils.order_preset import (  # noqa: E402
     enumerate_order_recipes, experiment_case_indices)
 from gym_cooking.utils.replay import Replay  # noqa: E402
@@ -37,6 +32,14 @@ from agent.mind.agent import AgentSetting  # noqa: E402
 from agent.gameplay import GamePlay, INSTRUCTION_TIMING_ONCE_AT_START  # noqa: E402
 from agent.myagent.CSPAgent import CSPAgent  # noqa: E402
 import run_human_model_experiment as H  # noqa: E402
+
+# 実験ハーネスは読み込むだけで画面なし(dummy)に設定する。人が遊ぶので
+# 取り消す。import より前に消しても、その import がまた設定してしまうため、
+# 必ず読み込みが全部終わってから消すこと。pygame はウィンドウを作る瞬間に
+# この値を読むので、ここで消せば間に合う。
+for _var in ('SDL_VIDEODRIVER', 'SDL_AUDIODRIVER'):
+    if os.environ.get(_var) == 'dummy':
+        os.environ.pop(_var)
 
 # 「整合な指示」がスープ専属になる注文構成。サラダとスープが AI 側の具材を
 # 共有すると、その指示が「スープを優先させた」と言い切れなくなる。
@@ -107,6 +110,17 @@ def main():
     print('あなたは右側(1番)です。左側(0番)が AI。')
     print('矢印キーで移動、スペースで持つ/置く/使う。')
     print('開始直後に指示を1つ選んでください(見送りはできません)。')
+
+    # 画面が出ない状態で始めてしまうと、AI だけが動いて100秒が過ぎる。
+    # 始める前に、実際にウィンドウを開けるドライバかどうかを見せる。
+    import pygame
+    pygame.display.init()
+    driver = pygame.display.get_driver()
+    if driver == 'dummy':
+        print('!! 画面を開けません(描画ドライバ: dummy)。'
+              'SDL_VIDEODRIVER を解除してから実行してください。')
+        return
+    print('表示: ウィンドウを開きます  [描画ドライバ: %s]' % driver)
 
     # --- 観測 -----------------------------------------------------------
     rec = {'wait': None, 'before': [], 'prev': None, 'target': None}
