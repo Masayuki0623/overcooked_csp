@@ -1802,6 +1802,142 @@ class CSPAgent:
                 return candidate
         return None
 
+    # 受け渡し台に置くところまで進めるのに、どうしても要る器具。
+    HANDOVER_EQUIPMENT_BY_KIND = {
+        KIND_SALAD: ('PlateTile',),
+        KIND_JUICE: ('Blender', 'CupTile'),
+        KIND_SOUP: ('Pot', 'PlateTile'),
+    }
+
+    def _agent_can_reach_equipment(self, env, agent_idx, gs_names):
+        """その器具のどれか1つに、自分の側から手が届くか。"""
+        comp = self._agent_component(env, agent_idx)
+        for gs in gs_names:
+            positions = env.get_pos_by_obj_gs(gs=gs) or []
+            if not any(comp in self._components_touching(env, tuple(pos))
+                       for pos in positions):
+                return False
+        return True
+
+    def _chopped_parts_reachable(self, env, agent_idx, dish_name):
+        """その料理の刻んだ材料が、全部こちら側の手の届く所にあるか。
+
+        相手が持ったままの材料や、仕切りの向こうに置かれた材料は取れない。
+        「ある」ことと「自分に取れる」ことを混同すると、取りに行けない物を
+        当てにして途中で止まる。
+        """
+        needed = {('Chopped' + p.capitalize()) for p in dish_ingredients(dish_name)}
+        if not needed:
+            return False
+        comp = self._agent_component(env, agent_idx)
+        found = set()
+        held = getattr(env.agents[agent_idx], 'holding', None)
+        for name in (getattr(held, 'full_name', '') or '').split('-'):
+            if name in needed:
+                found.add(name)
+        for pos, obj in (getattr(env, 'pos_obj', {}) or {}).items():
+            if obj is None or getattr(obj, 'is_held', False):
+                continue
+            if comp not in self._components_touching(env, tuple(pos)):
+                continue
+            for name in (getattr(obj, 'full_name', '') or '').split('-'):
+                if name in needed:
+                    found.add(name)
+        return found >= needed
+
+    def _pick_handover_counter(self, env, agent_idx, tid, dish_name):
+        """肩代わりした料理を組み立てる台を選ぶ。
+
+        毎フレーム選び直すと、動くたびに一番近い空き台が変わり、置いては
+        拾うの往復になる(実測: 1試行で往復 480 回)。一度決めたら変えない。
+        すでにその料理の材料が乗っている台があれば、そこへ集める。
+        """
+        cache = self.__dict__.setdefault('_handover_counter_by_tid', {})
+        wanted = {('Chopped' + p.capitalize()) for p in dish_ingredients(dish_name)}
+        pos_obj = getattr(env, 'pos_obj', {}) or {}
+
+        def usable(pos):
+            if pos is None:
+                return False
+            if len(self._components_touching(env, tuple(pos))) < 2:
+                return False
+            obj = pos_obj.get(pos)
+            if obj is None:
+                return True
+            parts = (getattr(obj, 'full_name', '') or '').split('-')
+            return all(p in wanted or p == 'Plate' for p in parts)
+
+        if usable(cache.get(tid)):
+            return cache[tid]
+
+        best, best_score = None, -1
+        for pos in env.get_pos_by_obj_gs(gs='Counter'):
+            if not usable(pos):
+                continue
+            obj = pos_obj.get(pos)
+            parts = (getattr(obj, 'full_name', '') or '').split('-') if obj else []
+            score = sum(1 for p in parts if p in wanted)
+            if score > best_score:
+                best, best_score = pos, score
+        if best is None:
+            best = self._find_shared_counter(
+                env, tuple(env.agents[agent_idx].location))
+        if best is not None:
+            cache[tid] = best
+        return best
+
+    def _find_helpful_handover_task(self, env, agent_idx):
+        """相手の担当で自分にはできない提供工程を、途中まで肩代わりする。
+
+        仕切りの向こうに提供口がある料理は、自分では出せない。それでも材料が
+        こちら側にそろっていれば、完成させて受け渡し台に置くところまでは
+        できる。手待ちで突っ立っているより良いし、参加者から見れば
+        「AI が作って渡してくれた」ことになる。
+
+        (実測: 参加者が刻んだ材料を仕切りに並べても、その料理の提供が
+         まるごと相手の担当だと、AI は最後まで一歩も動かなかった)
+        """
+        if not getattr(self, 'schedule_per_agent', None):
+            return None
+        own_sc = self.schedule_per_agent.get(agent_idx, []) or []
+        other_sc = self.schedule_per_agent.get(1 - agent_idx, []) or []
+        if not other_sc:
+            return None
+        self._annotate_task_geometry(env, other_sc, env.self_pos)
+        blocked = self.blocked_tasks.get(agent_idx, {})
+        own_ids = {t.get('id') for t in own_sc}
+        for t in other_sc:
+            verb, obj, order_uid = t.get('id', (None, None, None))
+            if verb not in ('serve', 'serve_salad', 'serve_juice'):
+                continue
+            if agent_idx in self._task_allowed_agents(env, t):
+                continue  # 自分で最後まで出せるなら、肩代わりする理由がない
+            tid = ('handover', obj, order_uid)
+            if tid in own_ids or tid in blocked:
+                continue
+            if self._counter_holding_dish(env, obj) is not None:
+                continue  # もう受け渡し台に置いてある
+            kind = t.get('dish_kind') or dish_kind_of(obj)
+            if not self._agent_can_reach_equipment(
+                    env, agent_idx, self.HANDOVER_EQUIPMENT_BY_KIND.get(kind, ())):
+                continue
+            if not self._chopped_parts_reachable(env, agent_idx, obj):
+                continue
+            counter = self._pick_handover_counter(env, agent_idx, tid, obj)
+            if counter is None:
+                continue
+            probe = {'id': tid, 'verb': 'handover', 'obj': obj,
+                     'assigned_counter': counter}
+            if agent_idx not in self._task_allowed_agents(env, probe):
+                continue
+            task = {k: v for k, v in t.items()
+                    if k not in ('geom_by_agent', 'start_pos', 'end_pos', 'fixed_res')}
+            task.update({'id': tid, 'verb': 'handover', 'obj': obj,
+                         'dish_kind': kind, 'assigned_counter': counter,
+                         'res_candidates': []})
+            return task
+        return None
+
     def __call__(self, env):
         """
         環境から呼ばれるメイン関数
@@ -2190,6 +2326,11 @@ class CSPAgent:
                             (t for t in other_sc
                              if agent_idx in self._task_allowed_agents(env, t)),
                             None)
+                        if takeover is None:
+                            # 相手の担当をそのまま引き受けられなくても、
+                            # 受け渡し台に置くところまでなら進められる。
+                            takeover = self._find_helpful_handover_task(
+                                env, agent_idx)
                         if takeover is not None:
                             self._emit_counter_debug(
                                 f"[DEBUG] AI{agent_idx} 手待ちのため人間スロットのタスクを引き受け: {takeover['id']}")
@@ -2276,6 +2417,12 @@ class CSPAgent:
                     if self.human_counterpart_mode or self.partner_is_external:
                         takeover_task = self._find_takeover_task_for_deps(
                             missing_deps, agent_idx, env)
+                        if takeover_task is None:
+                            # 前提を自分で埋めることもできない(例: まな板が
+                            # 相手側にしかない)。それでも、相手の担当になって
+                            # いる料理を途中まで作って渡すことはできる。
+                            takeover_task = self._find_helpful_handover_task(
+                                env, agent_idx)
 
                     if takeover_task is not None:
                         self._emit_counter_debug(

@@ -1194,8 +1194,22 @@ class TaskAgent:
 
         if assigned_counter:
             target_ing_loc, best_score, assigned_counter_candidate, assigned_counter_score = find_best_ingredient_target(True)
-            if target_ing_loc is None and assigned_counter_candidate is None:
-                target_ing_loc, best_score, assigned_counter_candidate, assigned_counter_score = find_best_ingredient_target(False)
+            if target_ing_loc is None:
+                # 指定テーブルだけでは足りない。参加者が1つの注文の材料を
+                # 別々の台に置くのは普通に起きるので、必ず他の台も見に行く。
+                # (ここを「候補すら無いとき」に限ると、指定テーブルに1つ
+                #  乗った時点で探索が止まり、離れた残りを永久に待ち続ける)
+                on_counter = (getattr(env.pos_obj.get(assigned_counter), 'full_name', '') or '').split('-')
+                still_missing = {n for n in missing_ings if n not in on_counter}
+                (other, other_score, other_cand,
+                 other_cand_score) = self._find_chopped_pickup_target(
+                    env, ingredients, missing_ings, assigned_counter, False,
+                    require_names=still_missing)
+                if other is not None:
+                    target_ing_loc, best_score = other, other_score
+                if assigned_counter_candidate is None:
+                    assigned_counter_candidate = other_cand
+                    assigned_counter_score = other_cand_score
         else:
             target_ing_loc, best_score, assigned_counter_candidate, assigned_counter_score = find_best_ingredient_target(False)
 
@@ -1217,10 +1231,16 @@ class TaskAgent:
         # print(f"[DEBUG]   カウンター上: { {p: env.pos_obj[p].full_name for p in env.get_pos_by_obj_gs('Counter') if env.pos_obj.get(p)} }")
         return (0, 0), "必要な食材 (Chopped) を待機中"
 
-    def _find_chopped_pickup_target(self, env, ingredients, missing_ings, assigned_counter, only_assigned_counter):
+    def _find_chopped_pickup_target(self, env, ingredients, missing_ings, assigned_counter,
+                                    only_assigned_counter, require_names=None):
         """置かれている刻んだ食材のうち、次に取りに行くべき場所を探す。
 
         戻り値: (target_pos, best_score, assigned_counter_candidate, assigned_counter_score)
+
+        require_names を渡すと、そのどれかを含む山だけを候補にする。
+        置き場にもう乗っている食材をわざわざ取りに行くと、置き場には重ねられず
+        別の台へ置き直すだけになり、取る⇄置くの往復が止まらない
+        (実測: 1試行で往復 440 回)。「まだ無い分」だけを取りに行くために使う。
 
         assigned_counter に「一部だけ」集まっている場合は、そこから取ってしまうと
         せっかく進んだマージが巻き戻るため、通常候補とは分けて返す
@@ -1253,6 +1273,9 @@ class TaskAgent:
                 else:
                     has_unwanted = True
 
+            if require_names is not None and not any(p in require_names for p in parts):
+                continue
+
             if valid_count > 0 and not has_unwanted:
                 dist = abs(self_pos[0] - pos[0]) + abs(self_pos[1] - pos[1])
                 score = (valid_count * 100) - dist
@@ -1267,6 +1290,16 @@ class TaskAgent:
                     local_target_ing_loc = pos
 
         return local_target_ing_loc, local_best_score, local_assigned_counter_candidate, local_assigned_counter_score
+
+    def _find_plated_dish(self, env, target_ing_names, container='Plate'):
+        """容器に盛られた完成品が置かれている台を探す。手が届くものだけ。"""
+        want = set(target_ing_names) | {container}
+        for pos in self.reachable_positions(env, env.get_pos_by_obj_gs(gs='Counter')):
+            obj = env.pos_obj.get(pos)
+            name = getattr(obj, 'full_name', '') or ''
+            if name and set(name.split('-')) == want:
+                return pos
+        return None
 
     def process_serve_salad_task(self, env, ingredients=None, assigned_counter=None,
                                  assigned_serve_loc=None, dynamic_obstacles=None):
@@ -1334,6 +1367,15 @@ class TaskAgent:
         #    (皿を持っていれば拾い上げてそのまま盛り付けになり、
         #     皿を持っていなければ一旦テーブルに置いて合流させる)
         if holding_name:
+            # 誰かが先に皿へ盛ってしまっていることがある(相方が途中まで
+            # 作って渡してくれた場合)。いま持っている材料は余りなので、
+            # 手放して完成品を取りに行く。持ったままだと、合流先の無い
+            # 材料を抱えて二人とも止まる。
+            if self._find_plated_dish(env, target_ing_names) is not None:
+                return self.drop_unwanted_item(
+                    env, holding,
+                    reason="台に完成したサラダがあるため",
+                    dynamic_obstacles=dynamic_obstacles, allow_strict_override=True)
             # 指定テーブルに料理が既に全部そろっているなら、いま持っている
             # ものは余り。同じ食材は重ねられないので、置きに行っても何も
             # 起きず永久に固まる。手放して、完成した山を取りに行く。
@@ -1389,6 +1431,14 @@ class TaskAgent:
             return self._handle_counter_fallback("共有置き場ID未割当のため待機中", fallback_func, unassigned=True)
 
         # 4. 手が空 -> 足りない食材を探す(マージが進んでいるものを優先)
+        # その前に、皿に盛られた同じサラダが台に置かれていないか見る。
+        # 相方が途中まで作って受け渡し台に置いてくれることがあり、それを
+        # 見落とすと、同じサラダをもう一度最初から作ろうとして材料が尽きる。
+        plated = self._find_plated_dish(env, target_ing_names)
+        if plated is not None:
+            return (self.move_to(env, plated, dynamic_obstacles=dynamic_obstacles),
+                    "台の完成品を取る")
+
         target_ing_loc = None
         assigned_counter_candidate = None
 
@@ -1424,7 +1474,8 @@ class TaskAgent:
             on_counter = getattr(env.pos_obj.get(assigned_counter), 'full_name', '') or ''
             still_missing = [n for n in missing_ings if n not in on_counter.split('-')]
             elsewhere, _, _, _ = self._find_chopped_pickup_target(
-                env, ingredients, still_missing, assigned_counter, False)
+                env, ingredients, still_missing, assigned_counter, False,
+                require_names=set(still_missing))
             if elsewhere is not None and elsewhere != assigned_counter:
                 return (self.move_to(env, elsewhere, dynamic_obstacles=dynamic_obstacles),
                         "不足分を取りに行く")
