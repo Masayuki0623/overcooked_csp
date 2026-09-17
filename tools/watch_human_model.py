@@ -59,9 +59,11 @@ def task_label(ai, agent_idx, human=None):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--case', type=int, default=0, help='全列挙した注文構成の番号(0-17)')
+    ap.add_argument('--case', type=int, default=0,
+                    help='注文構成の番号(0-17)。本実験で使うのは 6-17')
     ap.add_argument('--model', default='greedy',
-                    choices=['follow_plan', 'greedy', 'random'], help='人間役の方針')
+                    choices=['follow_plan', 'greedy', 'random', 'messy'],
+                    help='人間役の方針(messy = 実際の参加者に近い乱雑な相方)')
     ap.add_argument('--d', type=int, default=4, help='skip_budget')
     ap.add_argument('--quality', default='good', choices=['good', 'bad', 'random'])
     ap.add_argument('--speed', type=float, default=1.0,
