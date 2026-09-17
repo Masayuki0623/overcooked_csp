@@ -1169,6 +1169,12 @@ class TaskAgent:
                                 if p not in order_allowed_names:
                                     has_unwanted = True
 
+                            # 重ねられるかは環境の規則が決める。同じ食材どうしは
+                            # 重ならないので、持ち物と同じ物が乗った台へ向かうと
+                            # 置けないまま押し続ける(実測: 21.7秒静止)。
+                            if not mergeable(holding, obj):
+                                continue
+
                             if is_valid_target and not has_unwanted:
                                 dist = abs(self_pos[0] - pos[0]) + abs(self_pos[1] - pos[1])
                                 if dist < min_dist:
@@ -1177,7 +1183,12 @@ class TaskAgent:
 
                     if local_target_merge_loc:
                         return self.move_to(env, local_target_merge_loc, dynamic_obstacles=dynamic_obstacles), "離れた食材とマージさせるために置く"
-                    return self.move_to(env, target_pot_loc, dynamic_obstacles=dynamic_obstacles), "マージ対象がないため今の分を鍋に入れる"
+                    # 足りないまま鍋へ入れてはいけない。この環境では入れた
+                    # 瞬間に調理が始まり、後から材料を足せない。焦げれば火が
+                    # 出て鍋ごと使えなくなり、その注文は二度と完成しない
+                    # (実測: 単品のトマトを入れて CharredTomato-Fire になり、
+                    #  以後ずっと「鍋が空くまで待機中」)。
+                    return (0, 0), "マージ対象がそろうのを待機中"
 
                 return self._handle_counter_fallback("共有置き場ID未割当のため待機中", fallback_func, unassigned=True)
                 
@@ -1406,6 +1417,8 @@ class TaskAgent:
                 for pos, obj in env.pos_obj.items():
                     if not self._is_available_object(obj):
                         continue
+                    if not self.can_use_position(env, pos):
+                        continue
                     obj_name = getattr(obj, 'full_name', '')
                     parts = obj_name.split('-')
 
@@ -1416,6 +1429,10 @@ class TaskAgent:
                             is_valid_target = True
                         if p not in order_allowed_names:
                             has_unwanted = True
+
+                    # 重ねられない台へ向かっても置けない(cook 側と同じ理由)。
+                    if not mergeable(holding, obj):
+                        continue
 
                     if is_valid_target and not has_unwanted:
                         dist = abs(self_pos[0] - pos[0]) + abs(self_pos[1] - pos[1])
@@ -1695,6 +1712,11 @@ class TaskAgent:
         # (人が生の材料を持ったまま計画が付け替えに変わると、拾えないのに
         #  取りに行き続けて73秒止まる、という往復が起きていた)
         carry_from = getattr(self, 'carry_from', None)
+        # 仕切りの向こうに置かれた物は取りに行けない。指定を無視して自分で
+        # 刻む。(実測: 相手側の台に切った物があると、そこへ向かって歩き続け
+        #  84秒動かなかった)
+        if carry_from is not None and not self.can_use_position(env, carry_from):
+            carry_from = None
         if carry_from is not None and carry_from != assigned_counter and holding is None:
             source_obj = env.pos_obj.get(carry_from)
             source_name = getattr(source_obj, 'full_name', '') if source_obj is not None else ''

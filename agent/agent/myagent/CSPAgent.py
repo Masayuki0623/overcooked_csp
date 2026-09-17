@@ -2643,6 +2643,12 @@ class CSPAgent:
         if not plates:
             plates = env.get_pos_by_obj_gs(gs="PlateTile") 
         counters = env.get_pos_by_obj_gs(gs="Counter")
+        # 四方を台に囲まれた角など、どちら側からも手の届かない台がある。
+        # そこを置き場に選ぶと、その注文は誰にも進められなくなる。
+        usable_counters = [c for c in counters
+                           if self._components_touching(env, tuple(c))]
+        if usable_counters:
+            counters = usable_counters
         blenders = env.get_pos_by_obj_gs(gs="Blender")
         cups = env.get_pos_by_obj_gs(gs="Cup")
         if not cups:
@@ -3003,6 +3009,21 @@ class CSPAgent:
                 return start_pos
             return min(candidates, key=lambda p: abs(p[0] - start_pos[0]) + abs(p[1] - start_pos[1]))
 
+        comp_filter = resources.get('component')
+
+        def own_side(positions):
+            """担当者の側から手が届く場所だけ。
+
+            届かない場所を出発点にすると、その工程は「誰にもできない」と
+            判定され、計画には残るのに誰も動かなくなる。
+            (実測: 相手側の台に余った刻み材料が1つあるだけで、サラダの
+             提供工程が全員できない扱いになり、68秒止まった)
+            """
+            if comp_filter is None:
+                return list(positions)
+            return [q for q in positions
+                    if comp_filter in self._components_touching(env, tuple(q))]
+
         for t in tasks:
             # 持ち物から作った臨時のタスクには verb/obj/order が無い。
             # id から取れる分だけ取り、取れないものは位置を入れずに飛ばす。
@@ -3086,6 +3107,7 @@ class CSPAgent:
                 # 「誰にもできない」と誤判定される。
                 start_pos = t.get('assigned_counter')
                 if start_pos is None:
+                    start_candidates = own_side(start_candidates)
                     if start_candidates:
                         start_pos = (self._nearest_by_path(env, default_start_pos, start_candidates)
                                      or get_nearest(default_start_pos, start_candidates))
@@ -3106,13 +3128,19 @@ class CSPAgent:
 
                 start_pos = t.get('assigned_counter')
                 if start_pos is None:
-                    start_candidates = []
-                    for pos, world_obj in env.pos_obj.items():
-                        if world_obj is None:
-                            continue
-                        base_name = chopped_base_name(world_obj)
-                        if base_name is not None and base_name.lower() in needed_ings:
-                            start_candidates.append(pos)
+                    # もう皿に盛られて台に置いてあれば、そこが出発点。
+                    # 余った刻み材料の位置を先に見ると、相手側の余り物を
+                    # 起点にしてしまう。
+                    done = self._counter_holding_dish(env, obj)
+                    start_candidates = [done] if done is not None else []
+                    if not start_candidates:
+                        for pos, world_obj in env.pos_obj.items():
+                            if world_obj is None:
+                                continue
+                            base_name = chopped_base_name(world_obj)
+                            if base_name is not None and base_name.lower() in needed_ings:
+                                start_candidates.append(pos)
+                    start_candidates = own_side(start_candidates)
                     if start_candidates:
                         start_pos = self._nearest_by_path(env, default_start_pos, start_candidates) or get_nearest(default_start_pos, start_candidates)
                     else:
