@@ -461,20 +461,23 @@
   // ゲームで使う絵を、ページを開いた時点で全部読み込んでおく。初めて
   // 使う瞬間に読み込むと、スマホでは最初の数秒、描けていない物がある
   // 状態でゲームが進んでいた。読み終わるまでスタートは押せない。
-  let spriteTotal = 0, spriteDone = 0;
+  let spriteTotal = 0, spriteDone = 0, spriteBytes = 0;
   let spritesAllLoaded = false;
   const spriteWaiters = [];
   function onSpriteSettled() {
     spriteDone += 1;
-    updateStartButton();
+    // 全部そろったかを先に決めてから表示を更新する。逆順だと、最後の1枚で
+    // 「110/110」と出たまま押せない状態で止まっていた。
     if (spriteDone >= spriteTotal && !spritesAllLoaded) {
       spritesAllLoaded = true;
       spriteWaiters.splice(0).forEach((f) => f());
     }
+    updateStartButton();
   }
   function whenSpritesLoaded(f) { if (spritesAllLoaded) f(); else spriteWaiters.push(f); }
   fetch('/api/sprites').then(r => r.json()).then((d) => {
     spriteTotal = d.names.length;
+    spriteBytes = d.total_bytes || 0;
     if (!spriteTotal) { spritesAllLoaded = true; updateStartButton(); return; }
     d.names.forEach((name) => {
       const im = sprite(name);
@@ -484,12 +487,24 @@
     });
   }).catch(() => { spritesAllLoaded = true; updateStartButton(); });
 
+  function formatBytes(n) {
+    if (!n) return '';
+    return n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)}MB` : `${Math.round(n / 1024)}KB`;
+  }
   function updateStartButton() {
     const b = document.getElementById('start');
-    if (!b) return;
-    b.disabled = !spritesAllLoaded;
-    b.textContent = spritesAllLoaded ? 'スタート'
-      : `画像を読み込み中 ${spriteDone}/${spriteTotal || '?'}`;
+    if (b) {
+      b.disabled = !spritesAllLoaded;
+      b.textContent = spritesAllLoaded ? 'スタート'
+        : `画像を読み込み中 ${spriteDone}/${spriteTotal || '?'}`;
+    }
+    const note = document.getElementById('dl-note');
+    if (note) {
+      const size = formatBytes(spriteBytes);
+      note.textContent = spritesAllLoaded
+        ? (size ? `ゲームの画像を読み込みました(${size})` : '')
+        : `ゲームの画像を読み込んでいます${size ? `(全部で約 ${size})` : ''}`;
+    }
   }
 
   // 最初の盤面を描き終えたか(カウントダウンはその後に始める)
@@ -580,7 +595,8 @@
       `<div class="hint">${esc(recipe.desc)}</div></div>` +
       `<div class="pick"><div class="lab">注文の組み合わせ(${recipe.combos.length} 通り)</div>` +
       `<select id="pick-case">${combos}</select></div>` +
-      '<div class="go"><button class="primary" id="start" disabled>スタート</button></div>' +
+      '<div class="go"><button class="primary" id="start" disabled>スタート</button>' +
+      '<div class="sub" id="dl-note" style="margin-top:8px"></div></div>' +
       '</div>');
 
     el.overlayText.querySelectorAll('.opts button').forEach((b) => b.addEventListener('click', () => {

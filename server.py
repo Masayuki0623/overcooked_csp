@@ -71,6 +71,33 @@ from gym_cooking.utils.order_preset import (  # noqa: E402
 WEB_DIR = ROOT / 'web'
 # ゲームの絵(pygame が使うのと同じ PNG)。ブラウザ側で描くときに読み込む。
 GRAPHICS_DIR = ROOT / 'testbed-cooking' / 'gym_cooking' / 'misc' / 'game' / 'graphics'
+# ブラウザに配る縮小版の置き場。元の絵は最大 2475px 四方で合計約 13MB あり、
+# スマホで毎回落とすには重すぎる。画面では 1マス 40px で描くので、
+# その2倍(80px)あれば見た目は変わらない。
+WEB_GRAPHICS_DIR = ROOT / '.cache' / 'web_graphics'
+WEB_SPRITE_PX = 80
+
+
+def prepare_web_graphics():
+    """ブラウザに配る縮小版の絵を作る(元の絵より新しければ作り直さない)。"""
+    WEB_GRAPHICS_DIR.mkdir(parents=True, exist_ok=True)
+    for src in GRAPHICS_DIR.glob('*.png'):
+        dst = WEB_GRAPHICS_DIR / src.name
+        if dst.exists() and dst.stat().st_mtime >= src.stat().st_mtime:
+            continue
+        if Image is None:
+            dst.write_bytes(src.read_bytes())
+            continue
+        with Image.open(src) as im:
+            im = im.convert('RGBA')
+            w, h = im.size
+            k = min(1.0, WEB_SPRITE_PX / max(w, h))
+            if k < 1.0:
+                im = im.resize((max(1, round(w * k)), max(1, round(h * k))), Image.LANCZOS)
+            im.save(dst, 'PNG', optimize=True)
+
+
+prepare_web_graphics()
 
 # 遊ぶ前に選べる地図とレシピ。地図の中身は play_test.MAP_SETTINGS を参照。
 MAP_CHOICES = [
@@ -684,7 +711,7 @@ class WebGamePlay:
 # ----------------------------------------------------------------------
 session: WebGamePlay | None = None
 app = FastAPI(title='Overcooked CSP Web')
-app.mount('/graphics', StaticFiles(directory=str(GRAPHICS_DIR)), name='graphics')
+app.mount('/graphics', StaticFiles(directory=str(WEB_GRAPHICS_DIR)), name='graphics')
 
 
 @app.get('/')
@@ -697,8 +724,12 @@ async def index():
 @app.get('/api/sprites')
 async def sprites():
     """ゲームで使う絵の名前の一覧。端末はこれを先に全部読み込んでおく。"""
-    names = sorted(p.stem for p in GRAPHICS_DIR.glob('*.png'))
-    return JSONResponse({'names': names})
+    files = sorted(WEB_GRAPHICS_DIR.glob('*.png'))
+    return JSONResponse({
+        'names': [p.stem for p in files],
+        # 端末に「どれくらい落とすか」を見せるための合計バイト数
+        'total_bytes': sum(p.stat().st_size for p in files),
+    })
 
 
 @app.get('/api/options')

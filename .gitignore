@@ -48,3 +48,6 @@ results/play_sessions.csv
 # 配置探索で作る一時的な地図
 testbed-cooking/gym_cooking/utils/levels/_search/
 results/layouts/
+
+# Web 版に配る縮小した絵(server.py が起動時に作る)
+.cache/
