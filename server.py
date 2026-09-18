@@ -320,7 +320,7 @@ class WebGamePlay:
         画面を見る前に時間が進んでしまう。スタートボタンで start() を呼ぶ。
         """
         with self._player_lock:
-            if self.player is None and self.state in ('waiting', 'running'):
+            if self.player is None and self.state in ('waiting', 'ready', 'running'):
                 self.player = token
                 return True
             return False
@@ -332,6 +332,18 @@ class WebGamePlay:
                 return
             self.selection = self._resolve_choice(choice or {})
             self.client_connected.set()
+
+    def go(self, token):
+        """カウントダウンが終わった。時間を進め始める。"""
+        with self._player_lock:
+            if self.player is not token or self.state != 'ready' or self.game is None:
+                return
+            if getattr(self, '_released', False):
+                return
+            self._released = True
+            self.game._q_env.put(('Continue', {}))
+            self.state = 'running'
+            print(f'[server] #{self.game_id} ゲームを開始します')
 
     def _resolve_choice(self, choice):
         """画面で選ばれた内容を、組み立てに使える形にする。おかしな値は既定に戻す。"""
@@ -371,7 +383,7 @@ class WebGamePlay:
                 self.player = None
 
     def slot_free(self):
-        return self.player is None and self.state in ('waiting', 'running')
+        return self.player is None and self.state in ('waiting', 'ready', 'running')
 
     def remaining_seconds(self):
         """いまのゲームの残り時間(ゲーム内の秒)。遊んでいなければ None。"""
@@ -481,10 +493,16 @@ class WebGamePlay:
             print(f"[server] #{self.game_id} 選択: {sel.get('map')} / {sel.get('preset')} "
                   f"/ {sel.get('recipes')}")
 
-            self.state = 'running'
+            # 時間を止めたまま始める。盤面は描いて送るので、端末は絵を読み
+            # 込んで最初の盤面を描き終えてから 3・2・1 を出し、合図(go)を
+            # 送ってくる。そこで時間を進め始める。組み立てた直後に進めると、
+            # スマホではまだ絵が描けていないうちにゲームが始まっていた。
+            self.game._q_env.put(('Pause', {}))
+            self._released = False
+            self.state = 'ready'
             self.perf.update(rendered=0, encoded=0, sent=0, started=time.time(),
                              client_rtt_ms=[])
-            print(f'[server] #{self.game_id} ゲームを開始します')
+            print(f'[server] #{self.game_id} 盤面を用意しました(開始の合図待ち)')
             success = False
             try:
                 success = self.game.on_execute()
@@ -674,6 +692,13 @@ async def index():
     # 画面を直したときに、参加者の端末に古い版が残らないようにする。
     return FileResponse(WEB_DIR / 'index.html',
                         headers={'Cache-Control': 'no-store'})
+
+
+@app.get('/api/sprites')
+async def sprites():
+    """ゲームで使う絵の名前の一覧。端末はこれを先に全部読み込んでおく。"""
+    names = sorted(p.stem for p in GRAPHICS_DIR.glob('*.png'))
+    return JSONResponse({'names': names})
 
 
 @app.get('/api/options')
@@ -874,6 +899,8 @@ async def ws(sock: WebSocket):
                 session.start(token, {
                     'map': msg.get('map'), 'preset': msg.get('preset'),
                     'case': msg.get('case')})
+            elif kind == 'go':
+                session.go(token)
             elif kind == 'hello':
                 mode[0] = 'png' if msg.get('mode') == 'png' else 'draw'
             elif kind == 'ping':
@@ -897,6 +924,10 @@ async def ws(sock: WebSocket):
                 await loop.run_in_executor(None, session.wait_and_capture)
             else:
                 await loop.run_in_executor(None, session.wait_frame)
+
+            if (session.state == 'ready'
+                    and time.time() - acquired_at > START_TIMEOUT_S):
+                session.go(token)
 
             # 枠を取ったままスタートされないと、後ろの人がずっと待たされる。
             if (session.state == 'waiting'

@@ -119,6 +119,13 @@
     background: rgba(10,12,15,.84); font-size: 16px; text-align: center; padding: 24px; z-index: 10;
   }
   #overlay.show { display: flex; }
+  /* カウントダウン中は盤面が見えるよう、背景を薄くする */
+  #overlay.countdown { background: rgba(10,12,15,.35); }
+  #overlay .cd {
+    font-size: 120px; font-weight: 800; line-height: 1;
+    text-shadow: 0 4px 24px rgba(0,0,0,.6);
+  }
+  #overlay button:disabled { opacity: .55; }
   #overlay .big { font-size: 20px; font-weight: 600; margin-bottom: 10px; }
   #overlay .sub { color: var(--muted); font-size: 14px; line-height: 1.8; }
   #overlay .count { font-size: 40px; font-weight: 700; margin: 14px 0 4px; }
@@ -384,6 +391,7 @@
       }
       bmp.close();
       drawing = false;
+      if (!boardDrawn) { boardDrawn = true; boardWaiters.splice(0).forEach((f) => f()); }
       el.fps.textContent = rate(recvTimes);
       if (queued) { const b = queued; queued = null; drawBlob(b); }
     }).catch(() => { drawing = false; });
@@ -450,6 +458,50 @@
     }
   }
 
+  // ゲームで使う絵を、ページを開いた時点で全部読み込んでおく。初めて
+  // 使う瞬間に読み込むと、スマホでは最初の数秒、描けていない物がある
+  // 状態でゲームが進んでいた。読み終わるまでスタートは押せない。
+  let spriteTotal = 0, spriteDone = 0;
+  let spritesAllLoaded = false;
+  const spriteWaiters = [];
+  function onSpriteSettled() {
+    spriteDone += 1;
+    updateStartButton();
+    if (spriteDone >= spriteTotal && !spritesAllLoaded) {
+      spritesAllLoaded = true;
+      spriteWaiters.splice(0).forEach((f) => f());
+    }
+  }
+  function whenSpritesLoaded(f) { if (spritesAllLoaded) f(); else spriteWaiters.push(f); }
+  fetch('/api/sprites').then(r => r.json()).then((d) => {
+    spriteTotal = d.names.length;
+    if (!spriteTotal) { spritesAllLoaded = true; updateStartButton(); return; }
+    d.names.forEach((name) => {
+      const im = sprite(name);
+      if (im.complete && im.naturalWidth) { onSpriteSettled(); return; }
+      im.addEventListener('load', onSpriteSettled, { once: true });
+      im.addEventListener('error', onSpriteSettled, { once: true });
+    });
+  }).catch(() => { spritesAllLoaded = true; updateStartButton(); });
+
+  function updateStartButton() {
+    const b = document.getElementById('start');
+    if (!b) return;
+    b.disabled = !spritesAllLoaded;
+    b.textContent = spritesAllLoaded ? 'スタート'
+      : `画像を読み込み中 ${spriteDone}/${spriteTotal || '?'}`;
+  }
+
+  // 最初の盤面を描き終えたか(カウントダウンはその後に始める)
+  let boardDrawn = false;
+  const boardWaiters = [];
+  function markBoardDrawn() {
+    if (boardDrawn || !seq.length) return;
+    boardDrawn = true;
+    boardWaiters.splice(0).forEach((f) => f());
+  }
+  function whenBoardDrawn(f) { if (boardDrawn) f(); else boardWaiters.push(f); }
+
   function onDraw(msg) {
     if (msg.reset) { defs.clear(); seq = []; }
     for (const k in msg.defs) defs.set(+k, msg.defs[k]);
@@ -458,6 +510,7 @@
     recvTimes.push(performance.now());
     el.fps.textContent = rate(recvTimes);
     paint();
+    markBoardDrawn();
   }
 
   // ---- 接続 ------------------------------------------------------------
@@ -527,7 +580,7 @@
       `<div class="hint">${esc(recipe.desc)}</div></div>` +
       `<div class="pick"><div class="lab">注文の組み合わせ(${recipe.combos.length} 通り)</div>` +
       `<select id="pick-case">${combos}</select></div>` +
-      '<div class="go"><button class="primary" id="start">スタート</button></div>' +
+      '<div class="go"><button class="primary" id="start" disabled>スタート</button></div>' +
       '</div>');
 
     el.overlayText.querySelectorAll('.opts button').forEach((b) => b.addEventListener('click', () => {
@@ -540,7 +593,9 @@
       pick.case = e.target.value;
       savePick();
     });
+    updateStartButton();
     document.getElementById('start').addEventListener('click', () => {
+      if (!spritesAllLoaded) return;
       send({ type: 'start', map: pick.map, preset: pick.preset,
              case: pick.case === '' ? null : Number(pick.case) });
       showOverlay('<div class="big">準備しています</div><div class="sub">数秒かかります</div>');
@@ -548,6 +603,30 @@
   }
   function savePick() {
     try { localStorage.setItem(PICK_STORE, JSON.stringify(pick)); } catch (e) {}
+  }
+
+  // 盤面が描けて絵も揃ったら 3・2・1 を出し、終わったら開始の合図を送る。
+  // それまでサーバー側の時間は止まっている。
+  let countdownStarted = false;
+  function startCountdown() {
+    if (countdownStarted) return;
+    countdownStarted = true;
+    whenSpritesLoaded(() => whenBoardDrawn(() => {
+      paint();
+      let n = 3;
+      const tick = () => {
+        if (n > 0) {
+          el.overlay.classList.add('countdown');
+          showOverlay(`<div class="cd">${n}</div>`);
+          n -= 1;
+          setTimeout(tick, 1000);
+        } else {
+          send({ type: 'go' });
+          showOverlay('<div class="cd">スタート!</div>');
+        }
+      };
+      tick();
+    }));
   }
 
   function showStart() {
@@ -573,7 +652,7 @@
       if (msg.state === 'running' && msg.remaining != null) {
         body = '<div class="sub">終わりしだい、自動で始まります</div>' +
                `<div class="count">${msg.remaining}</div><div class="sub">秒ほどで終わる予定</div>`;
-      } else if (msg.state === 'waiting' || msg.state === 'preparing') {
+      } else if (msg.state === 'waiting' || msg.state === 'preparing' || msg.state === 'ready') {
         body = '<div class="sub">別の人がステージを選んでいるところです。<br>このままお待ちください。</div>';
       } else {
         body = '<div class="sub">次のゲームを準備しています。<br>このままお待ちください。</div>';
@@ -595,7 +674,7 @@
       el.rtt.textContent = lastRtt;
     } else if (msg.type === 'status') {
       el.state.textContent = ({
-        preparing: '準備中', waiting: '開始待ち', running: 'プレイ中', finished: '終了',
+        preparing: '準備中', waiting: '開始待ち', ready: '開始直前', running: 'プレイ中', finished: '終了',
       })[msg.state] || msg.state;
       if (msg.selection) {
         const sel = msg.selection;
@@ -603,7 +682,12 @@
       }
       if (msg.state === 'waiting' && !started) {
         showStart();
+      } else if (msg.state === 'ready') {
+        showOverlay('<div class="big">盤面を描いています...</div>');
+        startCountdown();
       } else if (msg.state === 'running') {
+        el.overlay.classList.remove('countdown');
+        playing = true;
         if (!started && msg.selection) {
           showToast(`${msg.selection.map} / ${msg.selection.preset}: ${msg.selection.orders.join('、')}`);
         }
@@ -634,7 +718,11 @@
   }
   function hideOverlay() { el.overlay.classList.remove('show'); }
 
+  // ゲームが始まるまで(カウントダウン中も)は移動・指示を送らない。
+  // 送ると、止まっている間に溜まり、始まった瞬間に勝手に動いてしまう。
+  let playing = false;
   function send(obj) {
+    if (obj.type === 'key' && !playing) return;
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
   }
 
