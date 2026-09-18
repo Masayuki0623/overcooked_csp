@@ -8,7 +8,7 @@ from gym_cooking.utils.config import BLENDING_NUM_STEPS
 from .csp.model import CSPModel
 from .csp.solver import solve as solve_csp
 from .TaskAgent import TaskAgent
-from gym_cooking.utils.config import COOKING_TIME_SECONDS
+from gym_cooking.utils.config import COOKING_TIME_SECONDS, COOKED_BEFORE_FIRE_TIME_SECONDS
 
 
 @dataclass
@@ -955,6 +955,12 @@ class CSPAgent:
             # ので効かない。AI の側だけで譲る。
             return self._yield_to_partner(env, actions)
 
+        # 2人とも CSP が動かすときも、待っている側が道をふさいでいる状態
+        # (要所で待つ・相手の目当ての前で待つ)は、下の処理では拾えない
+        # (どちらも行動が (0,0) で「押し合い」にならないため)。先に AI(0番)の
+        # 譲り方を通す。
+        actions = self._yield_to_partner(env, actions)
+
         positions = [tuple(a.location) for a in agents[:2]]
         moved = positions != getattr(self, '_last_agent_positions', None)
         self._last_agent_positions = list(positions)
@@ -1002,6 +1008,14 @@ class CSPAgent:
     YIELD_AFTER_BLOCKED = 2      # 進めないのがこのフレーム数続いたら譲る
     YIELD_WAIT_FRAMES = 3        # よけた後に待つフレーム数
     CORRIDOR_STANDOFF = 5        # 通路で相手を通せんぼしているとみなすまで
+    OPEN_STANDOFF = 20           # 通路でなくても、隣で2人とも止まり続けたらよける(2秒)
+    ENTRANCE_CROWD = 5           # 器具の入り口で待っていて、相手が近くにいたらよける(0.5秒)
+
+    # 前に立って使う器具・供給口(ただの台は含めない。台は受け渡しに使い、
+    # 壁際の台の前をすべて「入り口」とするとAIが落ち着かなくなるため)
+    STATION_KINDS = ('Pot', 'Cutboard', 'Delivery', 'Blender', 'PlateTile', 'CupTile',
+                     'LettuceTile', 'OnionTile', 'TomatoTile', 'AppleTile',
+                     'OrangeTile', 'BananaTile')
 
     OSCILLATION_PAUSE = 3   # 行ったり来たりを検知したら止まるフレーム数
 
@@ -1057,6 +1071,7 @@ class CSPAgent:
 
         st = self.__dict__.setdefault('_yield_state', {
             'last_me': None, 'last_you': None, 'blocked': 0, 'standoff': 0, 'wait': 0})
+        st.setdefault('crowd', 0)
 
         # よけた後は、しばらくその場で待って相手を通す
         if st['wait'] > 0:
@@ -1080,15 +1095,49 @@ class CSPAgent:
         neighbours = [(me[0] + dx, me[1] + dy) for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))]
         corridor = sum(1 for n in neighbours if self._walkable(env, n)) <= 2
         adjacent = abs(me[0] - you[0]) + abs(me[1] - you[1]) == 1
-        if (act == (0, 0) and corridor and adjacent
+        if (act == (0, 0) and adjacent
                 and me == st['last_me'] and you == st['last_you']):
             st['standoff'] += 1
         else:
             st['standoff'] = 0
+        # 通路では早めに、広い所では少し待ってからよける。広い所で待つのは、
+        # 相手が隣で作業しているだけのときに AI がそわそわ動かないため。
+        standoff_limit = self.CORRIDOR_STANDOFF if corridor else self.OPEN_STANDOFF
 
         st['last_me'], st['last_you'] = me, you
 
-        if st['blocked'] >= self.YIELD_AFTER_BLOCKED or st['standoff'] >= self.CORRIDOR_STANDOFF:
+        # (4) 器具の入り口(前に立てる唯一のマス)で待っていて、相手が近い
+        #     → 相手はその器具を使いたいかもしれない。待つなら入り口の外で。
+        #     相手が少し動いても数え直さない(動けずにもがいていることが多い)。
+        if (act == (0, 0) and me in self._station_entrances(env)
+                and abs(me[0] - you[0]) + abs(me[1] - you[1]) <= 2):
+            st['crowd'] += 1
+        else:
+            st['crowd'] = 0
+        if st['crowd'] >= self.ENTRANCE_CROWD:
+            step = self._step_away(env, me, you, None)
+            if step is not None:
+                st['blocked'] = st['standoff'] = st['crowd'] = 0
+                st['wait'] = self.YIELD_WAIT_FRAMES
+                actions[key] = step
+                self._emit_counter_debug(f"[CSPAgent] 器具の入り口 {me} を空ける: {step}")
+                return actions
+
+        # (3) 要所(ボトルネックの穴とその出入り口)で待っていて、相手が近い
+        #     → そこから出る。待つなら通り道の外で待つ(実測: 穴の出入り口で
+        #     材料を待ち続け、完成品を運びたい相手が78秒通れなかった)。
+        # 相手が遠くても、向こう側へ行く道はここしかない。待つ理由は無い
+        # (実測: 相手が10マス先から穴を通りたいのに、出入り口で待ち続けた)。
+        if act == (0, 0) and me in self._chokepoints(env):
+            step = self._step_off_chokepoint(env, me, you)
+            if step is not None:
+                st['blocked'] = st['standoff'] = 0
+                st['wait'] = self.YIELD_WAIT_FRAMES
+                actions[key] = step
+                self._emit_counter_debug(f"[CSPAgent] 要所 {me} から出る: {step}")
+                return actions
+
+        if st['blocked'] >= self.YIELD_AFTER_BLOCKED or st['standoff'] >= standoff_limit:
             step = self._step_away(env, me, you, target)
             st['blocked'] = st['standoff'] = 0
             st['wait'] = self.YIELD_WAIT_FRAMES
@@ -1096,6 +1145,142 @@ class CSPAgent:
             self._emit_counter_debug(
                 f"[CSPAgent] 相手に道を譲る: {me} -> {step} (相手 {you})")
         return actions
+
+    def _chokepoints(self, env):
+        """ふさぐと床がつながらなくなるマス(グラフの関節点)。地図ごとに1回だけ計算。
+
+        ボトルネックの地図の穴と、その両側の出入り口がこれに当たる。ここで
+        立ち止まると、相手は向こう側へ行けなくなる。
+        """
+        key = (env.world_width, env.world_height,
+               tuple(tuple(col) for col in env.to_grid))
+        cache = self.__dict__.setdefault('_chokepoint_cache', {})
+        if key in cache:
+            return cache[key]
+        cells = {(x, y) for x in range(env.world_width) for y in range(env.world_height)
+                 if env.to_grid[x][y] == 1}
+
+        def neighbours(c):
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                n = (c[0] + dx, c[1] + dy)
+                if n in cells:
+                    yield n
+
+        # 関節点(Tarjan)。再帰を避けて明示的なスタックで回す。
+        order, low, points = {}, {}, set()
+        counter = [0]
+        for root in cells:
+            if root in order:
+                continue
+            order[root] = low[root] = counter[0]
+            counter[0] += 1
+            children = 0
+            stack = [(root, None, iter(list(neighbours(root))))]
+            while stack:
+                node, parent, it = stack[-1]
+                advanced = False
+                for nxt in it:
+                    if nxt not in order:
+                        order[nxt] = low[nxt] = counter[0]
+                        counter[0] += 1
+                        stack.append((nxt, node, iter(list(neighbours(nxt)))))
+                        if node == root:
+                            children += 1
+                        advanced = True
+                        break
+                    elif nxt != parent:
+                        low[node] = min(low[node], order[nxt])
+                if advanced:
+                    continue
+                stack.pop()
+                if parent is not None:
+                    low[parent] = min(low[parent], low[node])
+                    if parent != root and low[node] >= order[parent]:
+                        points.add(parent)
+            if children > 1:
+                points.add(root)
+        cache[key] = points
+        return points
+
+    def _station_entrances(self, env):
+        """前に立てるマスが1つしかない器具の、その1マス。地図ごとに1回だけ計算。
+
+        そこで誰かが待っていると、その器具はもう誰も使えない
+        (実測: 鍋の前の1マスで AI が材料を待ち、鍋に入れたい相手が
+        近づけないまま試合が終わった)。
+        """
+        key = ('entrances', env.world_width, env.world_height,
+               tuple(tuple(col) for col in env.to_grid))
+        cache = self.__dict__.setdefault('_chokepoint_cache', {})
+        if key in cache:
+            return cache[key]
+        out = set()
+        for kind in self.STATION_KINDS:
+            try:
+                positions = env.get_pos_by_obj_gs(gs=kind) or []
+            except Exception:
+                positions = []
+            for pos in positions:
+                floor = [(pos[0] + dx, pos[1] + dy)
+                         for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))
+                         if self._walkable(env, (pos[0] + dx, pos[1] + dy))]
+                if len(floor) == 1:
+                    out.add(floor[0])
+        cache[key] = out
+        return out
+
+    def _idle_action(self, env, agent_idx):
+        """やることが無いときの動き。
+
+        何かを持っていたら空いている台に置く(持ったまま立っていると、
+        その物を待っている工程が進まない)。器具の入り口や要所に立って
+        いたら、そこからどく(実測: やることの無い担当者が皿を持ったまま
+        鍋の前の唯一のマスに立ち、煮えたスープを誰も取れずに焦げた)。
+        """
+        agents = getattr(env, 'agents', None) or []
+        if agent_idx >= len(agents):
+            return (0, 0)
+        me = tuple(agents[agent_idx].location)
+        you = tuple(agents[1 - agent_idx].location) if len(agents) > 1 else me
+        holding = getattr(agents[agent_idx], 'holding', None)
+        import copy
+        e_agent = copy.copy(env)
+        e_agent.agent_idx = agent_idx
+        if agent_idx != getattr(env, 'agent_idx', 0):
+            from agent.executor.low import bfs_reachable
+            e_agent.rch_map = bfs_reachable(e_agent.to_grid, e_agent.self_pos)
+        if holding is not None:
+            ta = self.task_agents[agent_idx]
+            ta.task_name = None
+            try:
+                action, _reason = ta.drop_unwanted_item(
+                    e_agent, holding, reason='やることが無いので置く',
+                    dynamic_obstacles={you}, allow_strict_override=True)
+                return action
+            except Exception:
+                return (0, 0)
+        if me in self._chokepoints(env) or me in self._station_entrances(env):
+            step = self._step_off_chokepoint(env, me, you)
+            if step is not None:
+                return step
+        return (0, 0)
+
+    def _step_off_chokepoint(self, env, me, you):
+        """要所から、要所でない空いた隣のマスへ出る1歩(相手から離れる向き優先)。"""
+        chokes = self._chokepoints(env)
+        entrances = self._station_entrances(env)
+        best, best_d = None, -1
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            n = (me[0] + dx, me[1] + dy)
+            if n == you or not self._walkable(env, n):
+                continue
+            # 要所でも器具の入り口でもないマスを優先する(入り口へ移るだけだと
+            # 次の瞬間またどくことになり、壁際をさまよう)
+            d = (abs(n[0] - you[0]) + abs(n[1] - you[1])
+                 + (0 if n in chokes else 100) + (0 if n in entrances else 50))
+            if d > best_d:
+                best, best_d = (dx, dy), d
+        return best
 
     def _step_away(self, env, me, you, blocked_target):
         """相手から一番離れる向きの、空いている隣のマスへの1歩。無ければ None。"""
@@ -1667,6 +1852,25 @@ class CSPAgent:
 
         carry_task = self.carry_task_by_agent[agent_idx] if self.sc_2agent else self.carry_task_by_agent
 
+        # 覚えている行き先が、もう計画に無い(済んだ)なら使わない。
+        # スープが鍋に入って煮えた後も「鍋に入れる」を覚えたまま、
+        # 手の材料を持って鍋が空くのを待ち続け、煮えたスープを誰も盛らずに
+        # 焦がしていた。持ち物から作った臨時の工程(注文番号 -1)は計画に
+        # 載らないので対象外。
+        if carry_task and getattr(self, 'schedule_per_agent', None):
+            c_id = carry_task.get('id')
+            live = {t.get('id') for tasks in self.schedule_per_agent.values() for t in tasks}
+            # 切る工程は対象外。切り終えると計画からは消えるが、切った物を
+            # 置き場へ運ぶ仕事はこの覚えている工程が担っている(捨てると、
+            # 切った物を持ったまま何もしなくなる)。
+            if (c_id and c_id[2] != -1 and c_id[0] in ('cook', 'mix', 'serve_salad')
+                    and c_id not in live):
+                carry_task = None
+                if self.sc_2agent:
+                    self.carry_task_by_agent[agent_idx] = None
+                else:
+                    self.carry_task_by_agent = None
+
         def matches_single_chopped(task):
             if carried_ing is None or not holding_name.startswith('Chopped') or task is None:
                 return False
@@ -1675,6 +1879,18 @@ class CSPAgent:
                 return False
             needed_parts = dish_ingredients(obj)
             return carried_ing in needed_parts
+
+        # 材料の一式を持っているときは、いったん決めた行き先(鍋か皿か)を
+        # 手放すまで守る。同じ材料で作る料理が2つある(玉ねぎトマトのサラダと
+        # スープ等)と、計画を立て直すたびに「その一式はどちらの分か」が
+        # 入れ替わる。鍋へ向かう途中で皿の分に変わって置き直し、置くと
+        # また鍋の分に戻る、を永久に繰り返していた(実測: 100秒で1品も
+        # できなかった)。
+        if chopped_combo_parts and carry_task:
+            c_verb, c_obj, _ = carry_task['id']
+            if (c_verb in ('cook', 'serve_salad', 'mix')
+                    and sorted(dish_ingredients(c_obj)) == chopped_combo_parts):
+                return deepcopy(carry_task)
 
         if scheduled_task:
             verb, obj, _ = scheduled_task['id']
@@ -1692,7 +1908,9 @@ class CSPAgent:
                 else:
                     self.carry_task_by_agent = deepcopy(scheduled_task)
                 return scheduled_task
-            if verb == 'chop':
+            # 一式を持っているときは、1つの材料を切る工程には乗り換えない
+            # (一式の中に同じ材料が入っているだけで、そちらの工程だと誤る)。
+            if verb == 'chop' and not chopped_combo_parts:
                 food_names = (f"Fresh{obj.capitalize()}", f"Chopped{obj.capitalize()}")
                 if any(food_name in holding_name for food_name in food_names):
                     if self.sc_2agent:
@@ -2454,7 +2672,7 @@ class CSPAgent:
                             self._emit_counter_debug(
                                 f"[DEBUG] AI{agent_idx} 手待ちのため人間スロットのタスクを引き受け: {takeover['id']}")
                     if takeover is None:
-                        actions[f"ai_{agent_idx}"] = (0, 0)
+                        actions[f"ai_{agent_idx}"] = self._idle_action(env, agent_idx)
                         reasons.append(f"AI{agent_idx}:Idle")
                         continue
                     sc = [takeover]
@@ -5790,6 +6008,52 @@ class CSPAgent:
                 for h in handovers:
                     model.Add(starts[i] >= h['end'])
 
+        # 焦げる前に盛り付ける(締め切り)。
+        # スープは煮上がってから COOKED_BEFORE_FIRE_TIME_SECONDS 秒で焦げて
+        # 火が出て、鍋ごと使えなくなる。以前はこれが計画に無く、盛り付けを
+        # 後回しにした計画が普通に出て、その間に焦がしていた(実測: 煮上がった
+        # スープの横で別の材料を運び続け、25秒後に焦げてその注文は完成不能)。
+        # 間に合わない状況でも解なしにならないよう、破ると大きな罰になる形で
+        # 入れる(下の目的関数で最優先に扱う)。
+        fire_frames = int(COOKED_BEFORE_FIRE_TIME_SECONDS * self.fps)
+        burn_margin = int(3 * self.fps)
+        pot_deadline = {}
+        for pot_pos in env.get_pos_by_obj_gs(gs='Pot') or []:
+            obj = env.pos_obj.get(pot_pos)
+            name = getattr(obj, 'full_name', '') or ''
+            if not name or 'Charred' in name or 'Fire' in name:
+                continue
+            key = tuple(sorted(c.name for c in getattr(obj, 'contents', [])
+                               if getattr(c, 'name', '') not in ('Plate', 'Fire')))
+            try:
+                if 'Cooked' in name:
+                    left = obj.rest_turn_time()
+                elif 'Cooking' in name:
+                    left = obj.rest_cooking_time() + COOKED_BEFORE_FIRE_TIME_SECONDS
+                else:
+                    continue
+            except Exception:
+                continue
+            pot_deadline[key] = max(0, int(left * self.fps) - burn_margin)
+
+        burn_terms = []
+        for i in range(num_tasks):
+            t = tasks[i]
+            if t['verb'] not in ('serve', 'handover') or dish_kind_of(t['obj']) != KIND_SOUP:
+                continue
+            order_vars = vars_by_order.get(t['order'], [])
+            cooks = [v for v in order_vars if v['task']['verb'] == 'cook']
+            late = model.NewIntVar(0, horizon, f'burn_late_{i}')
+            if cooks:
+                for c in cooks:
+                    model.Add(late >= starts[i] - (c['end'] + cooking_frames + fire_frames - burn_margin))
+            else:
+                key = tuple(sorted(p.capitalize() for p in dish_ingredients(t['obj'])))
+                if key not in pot_deadline:
+                    continue
+                model.Add(late >= starts[i] - pot_deadline[key])
+            burn_terms.append(late)
+
         # 鍋の占有制約 (Pot Usage Constraint)
         pot_usage_intervals = {}
         for order_idx, tasks_list in vars_by_order.items():
@@ -5916,6 +6180,10 @@ class CSPAgent:
             model.Add(makespan == 0)
         end_sum = sum(task_ends) if task_ends else 0
         weight_makespan = num_tasks * 1000
+        # 焦がすのは所要時間の悪化とは比べものにならない損失なので、
+        # 所要時間より上の優先度で避ける。
+        if burn_terms:
+            end_sum = end_sum + sum(burn_terms) * (weight_makespan * 10)
         if switch_penalty_terms:
             # switch_scale は switch_penalty が取り得る最大値より大きくし、
             # (makespan, end_sum) の優先順位を一切変えずに完全な同点のときだけ

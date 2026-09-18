@@ -244,6 +244,21 @@ class HumanModel:
         return choice
 
     def act(self, env, other_pos):
+        action, tid = self._act_messy_or_plain(env, other_pos)
+        # 人は、通り道の要所(ボトルネックの穴とその出入り口)で相手が近づいて
+        # きたら、そこで立ち止まったままにはしない。模擬の人間役がそこで材料を
+        # 待ち続けると、実際の人ならまず起きない形で AI が通れなくなり、
+        # AI の問題と区別がつかなくなる。
+        if (action or (0, 0)) == (0, 0):
+            me = tuple(env.self_pos)
+            you = tuple(other_pos)
+            if me in self.ai._chokepoints(env):
+                step = self.ai._step_off_chokepoint(env, me, you)
+                if step is not None:
+                    return step, tid
+        return action, tid
+
+    def _act_messy_or_plain(self, env, other_pos):
         if self.model == 'messy':
             # 持ち上げた直後に、1/3 の確率で3秒ほど持ったまま歩き回る。
             # 人は考えたり迷ったりするので、持ち物が一時的に盤面から消える。

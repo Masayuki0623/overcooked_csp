@@ -333,6 +333,39 @@ class TaskAgent:
         self.wait_count = 0
         return random.choice(escapes)
 
+    def _delivery_candidates(self, env, assigned_serve_loc=None):
+        """提供に使える場所を、指定があればそれを先頭にして返す。
+
+        指定が提供口なら、他の提供口も候補に足す。提供口は横に3マス並んで
+        いて、どれに出しても同じ。1つに決め打ちすると、その前に相手が
+        立っているだけで向かえなくなる。指定が受け渡し台なら、そこだけ。
+        """
+        deliveries = self.reachable_positions(env, env.get_pos_by_obj_gs(gs='Delivery'))
+        if assigned_serve_loc is None:
+            return deliveries
+        if tuple(assigned_serve_loc) in {tuple(d) for d in deliveries}:
+            return [assigned_serve_loc] + [d for d in deliveries
+                                           if tuple(d) != tuple(assigned_serve_loc)]
+        return [assigned_serve_loc]
+
+    def _move_to_first_usable(self, env, targets, dynamic_obstacles=None):
+        """近い順に試し、実際に向かえる所へ向かう。
+
+        戻り値: (行動, 選んだ場所, 隣にいるか)。どこへも向かえなければ
+        ((0, 0), None, False)。一番近い所の前に相手が立っていると、そこへは
+        経路が引けず (0,0) が返る。そのまま待つと、相手が退くまで(相手に
+        やることが無ければ永久に)止まる(実測: 完成したスープを持ったまま
+        73秒)。空いている別の所を使う。
+        """
+        me = env.self_pos
+        order = sorted(targets, key=lambda p: abs(p[0] - me[0]) + abs(p[1] - me[1]))
+        for t in order:
+            dist = abs(t[0] - me[0]) + abs(t[1] - me[1])
+            action = self.move_to(env, t, dynamic_obstacles=dynamic_obstacles)
+            if dist == 1 or action != (0, 0):
+                return action, t, dist == 1
+        return (0, 0), None, False
+
     def move_to(self, env, target_pos, dynamic_obstacles=None):
         # 経路は毎フレーム、実際の現在地(self_pos)から作り直す。
         # このゲームは speed パラメータによる連続的な移動を扱っており、
@@ -859,14 +892,12 @@ class TaskAgent:
             return bool(name) and container in name and target and all(t in name for t in target)
 
         if is_target(holding_name):
-            deliveries = ([assigned_serve_loc] if assigned_serve_loc
-                          else self.reachable_positions(env, env.get_pos_by_obj_gs(gs='Delivery')))
+            deliveries = self._delivery_candidates(env, assigned_serve_loc)
             if not deliveries:
                 return (0, 0), "提供口が見つかりません"
-            d = min(deliveries, key=lambda p: abs(p[0]-self_pos[0]) + abs(p[1]-self_pos[1]))
-            dist = abs(self_pos[0]-d[0]) + abs(self_pos[1]-d[1])
-            action = self.move_to(env, d, dynamic_obstacles=dynamic_obstacles)
-            return action, "配膳 (完了)" if dist == 1 else "配膳"
+            action, _d, adjacent = self._move_to_first_usable(
+                env, deliveries, dynamic_obstacles=dynamic_obstacles)
+            return action, "配膳 (完了)" if adjacent else "配膳"
 
         if holding is not None:
             return self.drop_unwanted_item(
@@ -940,18 +971,11 @@ class TaskAgent:
 
         # 1. If holding Plate + Food -> Go to Delivery
         if is_target_plate_food(holding_name):
-            if assigned_serve_loc:
-                deliveries = [assigned_serve_loc]
-            else:
-                deliveries = self.reachable_positions(env, env.get_pos_by_obj_gs(gs='Delivery'))
-            
+            deliveries = self._delivery_candidates(env, assigned_serve_loc)
             if deliveries:
-                target = min(deliveries, key=lambda p: abs(p[0]-self_pos[0]) + abs(p[1]-self_pos[1]))
-                #print(f"  -> {target} へ配膳中")
-                dist = abs(self_pos[0]-target[0]) + abs(self_pos[1]-target[1])
-                if dist == 1:
-                    return self.move_to(env, target, dynamic_obstacles=dynamic_obstacles), "配膳 (完了)"
-                return self.move_to(env, target, dynamic_obstacles=dynamic_obstacles), "配膳"
+                action, _t, adjacent = self._move_to_first_usable(
+                    env, deliveries, dynamic_obstacles=dynamic_obstacles)
+                return action, "配膳 (完了)" if adjacent else "配膳"
             return (0,0), "受取場所が見つかりません"
 
         # 2. If holding Plate -> Go to Pot with Cooked Food
@@ -1002,14 +1026,20 @@ class TaskAgent:
             if assigned_plate:
                 plate_locs = [assigned_plate]
             else:
-                plate_locs = self._filter_unheld_positions(env, env.get_pos_by_obj_gs(obj=container))
-                if not plate_locs:
-                    plate_locs = self.reachable_positions(env, env.get_pos_by_obj_gs(gs=container_tile))
-            
+                # 置かれている皿は、手の届くものだけ。届かない皿を目指すと
+                # 経路が引けず、その場で止まり続ける。
+                plate_locs = self.reachable_positions(
+                    env, self._filter_unheld_positions(env, env.get_pos_by_obj_gs(obj=container)))
+            # 皿置き場も候補に入れておく。目当ての皿や皿置き場の前に相手が
+            # 立っていても、別の所から取れる(実測: 皿置き場の前で2人が
+            # 互いに待ち、煮えたスープが焦げた)。
+            tiles = self.reachable_positions(env, env.get_pos_by_obj_gs(gs=container_tile))
+            plate_locs = list(plate_locs) + [t for t in tiles if t not in plate_locs]
+
             if plate_locs:
-                target = min(plate_locs, key=lambda p: abs(p[0]-self_pos[0]) + abs(p[1]-self_pos[1]))
-                #print(f"  -> {target} から皿を取得しに行きます")
-                return self.move_to(env, target, dynamic_obstacles=dynamic_obstacles), f"{container}の取得"
+                action, _t, _adj = self._move_to_first_usable(
+                    env, plate_locs, dynamic_obstacles=dynamic_obstacles)
+                return action, f"{container}の取得"
             
             return (0,0), f"{container}が見つかりません"
             
@@ -1356,17 +1386,12 @@ class TaskAgent:
 
         # 1. 皿の上に材料が全部そろっている(=サラダ完成) -> 提供口へ
         if has_plate and not missing_ings:
-            if assigned_serve_loc:
-                deliveries = [assigned_serve_loc]
-            else:
-                deliveries = self.reachable_positions(env, env.get_pos_by_obj_gs(gs='Delivery'))
+            deliveries = self._delivery_candidates(env, assigned_serve_loc)
             if not deliveries:
                 return (0, 0), "受取場所が見つかりません"
-            target = min(deliveries, key=lambda p: abs(p[0] - self_pos[0]) + abs(p[1] - self_pos[1]))
-            dist = abs(self_pos[0] - target[0]) + abs(self_pos[1] - target[1])
-            if dist == 1:
-                return self.move_to(env, target, dynamic_obstacles=dynamic_obstacles), "サラダの配膳 (完了)"
-            return self.move_to(env, target, dynamic_obstacles=dynamic_obstacles), "サラダの配膳"
+            action, _t, adjacent = self._move_to_first_usable(
+                env, deliveries, dynamic_obstacles=dynamic_obstacles)
+            return action, "サラダの配膳 (完了)" if adjacent else "サラダの配膳"
 
         # 2. 皿なしで材料が全部そろっている -> 皿タイルへ行って皿に乗せる
         #    カウンター上に置かれた皿と合流させると、マージ結果がカウンター側に
@@ -1375,8 +1400,10 @@ class TaskAgent:
             plate_tiles = self.reachable_positions(env, env.get_pos_by_obj_gs(gs='PlateTile'))
             if not plate_tiles:
                 return (0, 0), "皿タイルが見つかりません"
-            target = min(plate_tiles, key=lambda p: abs(p[0] - self_pos[0]) + abs(p[1] - self_pos[1]))
-            return self.move_to(env, target, dynamic_obstacles=dynamic_obstacles), "サラダを皿に乗せる"
+            # 皿置き場の前に相手が立っていたら、別の皿置き場を使う
+            action, _t, _adj = self._move_to_first_usable(
+                env, plate_tiles, dynamic_obstacles=dynamic_obstacles)
+            return action, "サラダを皿に乗せる"
 
         # ここから先は材料がまだ足りない。cook と同じく置き場で合流させる。
         # 3. 一部だけ持っている -> 指定テーブルへ運んでマージする
@@ -1558,11 +1585,9 @@ class TaskAgent:
         if holding_name == 'Plate':
             plate_tiles = self.reachable_positions(env, env.get_pos_by_obj_gs(gs='PlateTile'))
             if plate_tiles:
-                target = min(
-                    plate_tiles,
-                    key=lambda p: abs(env.self_pos[0] - p[0]) + abs(env.self_pos[1] - p[1])
-                )
-                return self.move_to(env, target, dynamic_obstacles=dynamic_obstacles), f"不要な皿を戻す: {reason}"
+                action, _t, _adj = self._move_to_first_usable(
+                    env, plate_tiles, dynamic_obstacles=dynamic_obstacles)
+                return action, f"不要な皿を戻す: {reason}"
 
         if self.strict_counter_management and not allow_strict_override:
             return (0, 0), f"共有置き場管理中のため待機: {reason}"
@@ -1746,22 +1771,32 @@ class TaskAgent:
         else:
             cutboard_locs = all_cutboards
         
+        # まな板の上にある同じ材料(置かれたまま・切りかけ)を切りに行くのは、
+        # 手が空いているときだけ。手に持ったままでは、まな板の上の物は切れず、
+        # 自分の物も置けないまま止まる(実測: 切りかけのリンゴの前で、別の
+        # リンゴを持って 45 秒)。
+        same_on_board = []
         for loc in cutboard_locs:
             obj = env.pos_obj[loc]
             if obj:
                 if target_ing_name in obj.full_name or chopping_ing_name in obj.full_name:
+                    if holding is not None:
+                        same_on_board.append(loc)
+                        continue
                     #print(f"  [まな板確認] {loc} で {obj.full_name} を発見")
                     self._log_chop_debug(env, ing_name, holding_name, assigned_cutboard, assigned_counter, "move_to_cutboard", target=loc)
                     return self.move_to(env, loc, dynamic_obstacles=dynamic_obstacles), f"{ing_name} を切る"
-        
+
         # 2. If holding Fresh Ingredient -> Place on Cutboard
         if holding_name and target_ing_name in holding_name:
             best_cb = None
             min_dist = float('inf')
-            
-            check_cbs = cutboard_locs
+
+            # 指定のまな板が埋まっていたら、手の届く他のまな板も使う。
+            # 決め打ちすると、空いているまな板があるのに待ち続ける。
+            check_cbs = list(cutboard_locs) + [c for c in all_cutboards if c not in cutboard_locs]
             if env.agent_idx == 1:
-                check_cbs = list(reversed(cutboard_locs))
+                check_cbs = list(reversed(check_cbs))
 
             for loc in check_cbs:
                 if env.pos_obj[loc] is None:
@@ -1774,6 +1809,12 @@ class TaskAgent:
                 #print(f"  -> {target_ing_name} をまな板 {best_cb} に置きます")
                 self._log_chop_debug(env, ing_name, holding_name, assigned_cutboard, assigned_counter, "place_fresh", target=best_cb)
                 return self.move_to(env, best_cb, dynamic_obstacles=dynamic_obstacles), f"{target_ing_name} を置く"
+            elif same_on_board:
+                # 空いているまな板は無いが、同じ材料がまな板に乗っている。
+                # 手の物をいったん置けば、そちらを切れる。
+                return self.drop_unwanted_item(
+                    env, holding, reason="まな板の上の同じ材料を先に切るため、手の物を置く",
+                    dynamic_obstacles=dynamic_obstacles, allow_strict_override=True)
             else:
                 # まな板が全部ふさがっている。関係ない物が置きっぱなしなら、
                 # どかせば使える。まず手を空けてから片付けに向かう。
