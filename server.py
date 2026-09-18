@@ -338,6 +338,8 @@ class WebGamePlay:
         self.selection = None
         self._hooks_installed = False
 
+        self.timeline = []             # 1秒ごとの通信の様子(ゲーム後にファイルへ)
+        self.disconnect_reason = None
         # 配信経路のどこでコマが落ちているかを見るための計数。/api/perf で読む。
         self.perf = {'rendered': 0, 'encoded': 0, 'sent': 0, 'started': time.time(),
                      'client_rtt_ms': []}
@@ -423,6 +425,35 @@ class WebGamePlay:
         buf = self.perf.setdefault(key, [])
         buf.append(v)
         del buf[:-120]
+
+    def note_timeline(self, row):
+        """遊んでいる間の通信の様子を1秒ごとに残す(ゲーム後にファイルへ書く)。
+
+        平均だけでは「序盤は速いのに途中から遅くなる」のような変化が
+        分からないので、時刻つきで全部残す。
+        """
+        if self.state not in ('ready', 'running'):
+            return
+        env = self.env
+        row = dict(row, wall=round(time.time(), 2), state=self.state,
+                   game_t=round(float(getattr(env, 'current_time', 0.0) or 0.0), 1))
+        self.timeline.append(row)
+
+    def _save_timeline(self, reason):
+        if not self.timeline:
+            return
+        outdir = ROOT / 'results' / 'web_perf'
+        outdir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        path = outdir / f'{stamp}-game{self.game_id}.json'
+        try:
+            path.write_text(json.dumps({
+                'selection': self.selection, 'end_reason': reason,
+                'disconnect': self.disconnect_reason, 'timeline': self.timeline,
+            }, ensure_ascii=False, indent=1), encoding='utf-8')
+            print(f'[server] 通信の記録を保存しました: {path}')
+        except Exception as e:
+            print(f'[server] 通信の記録の保存に失敗: {e}')
 
     def release(self, token):
         """接続が切れた。遊んでいる途中なら、そのゲームは打ち切る。
@@ -549,6 +580,8 @@ class WebGamePlay:
             self.env = None
             self.selection = None
             self._aborted = False
+            self.timeline = []
+            self.disconnect_reason = None
             with self._pending_lock:
                 self._draw = None      # 前のゲームの盤面を残さない
             self.state = 'waiting'
@@ -580,6 +613,7 @@ class WebGamePlay:
             finally:
                 self.state = 'finished'
                 self._save_replay()
+                self._save_timeline('aborted' if self._aborted else 'finished')
 
             order = self.env.order_scheduler
             self.result = {
@@ -660,7 +694,8 @@ class WebGamePlay:
         repdir = ROOT / 'agent' / 'agent' / 'replay'
         repdir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        path = repdir / f'web-{a.map}-{a.agent0}-{a.agent1}-{stamp}.rep'
+        map_name = (self.selection or {}).get('map') or a.map
+        path = repdir / f'web-{map_name}-{a.agent0}-{a.agent1}-{stamp}.rep'
         try:
             self.replay.save(path)
             print(f'[server] リプレイを保存しました: {path}')
@@ -996,6 +1031,12 @@ async def ws(sock: WebSocket):
                     session.note_client_rtt(msg.get('rtt'))
                 session.note_client_stat('client_paint_ms', msg.get('paint_ms'))
                 session.note_client_stat('client_recv_fps', msg.get('recv_fps'))
+                session.note_timeline({
+                    'rtt': msg.get('rtt'), 'paint_ms': msg.get('paint_ms'),
+                    'recv_fps': msg.get('recv_fps'),
+                    'defs': msg.get('defs'), 'seq': msg.get('seq'),
+                    'unacked': frame_no[0] - frame_no[1], 'sent': frame_no[0],
+                })
                 await sock.send_text(json.dumps({'type': 'pong', 't': msg.get('t')}))
 
     async def send_text(obj):
@@ -1112,7 +1153,14 @@ async def ws(sock: WebSocket):
     # 枠が空かず、次の人がずっと「別の人がプレイ中」のままだった)。
     tasks = [asyncio.create_task(c) for c in (pump_input(), stream(), watchdog())]
     try:
-        await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        names = {tasks[0]: 'input', tasks[1]: 'stream', tasks[2]: 'silence'}
+        for t in done:
+            err = t.exception() if not t.cancelled() else None
+            why = f"{names[t]}: {type(err).__name__} {err}" if err else f"{names[t]}: 終了"
+            if session.player is token:
+                session.disconnect_reason = why
+                print(f'[server] #{session.game_id} 接続が終わった理由: {why}')
     finally:
         for t in tasks:
             t.cancel()

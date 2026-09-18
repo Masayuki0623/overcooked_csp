@@ -51,3 +51,4 @@ results/layouts/
 
 # Web 版に配る縮小した絵(server.py が起動時に作る)
 .cache/
+results/web_perf/

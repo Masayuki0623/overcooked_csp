@@ -619,7 +619,8 @@
       const pm = document.getElementById('paintms');
       if (pm && avgPaint != null) pm.textContent = avgPaint.toFixed(1);
       send({ type: 'ping', t: performance.now(), rtt: lastRtt,
-             paint_ms: avgPaint, recv_fps: Number(rate(recvTimes)) });
+             paint_ms: avgPaint, recv_fps: Number(rate(recvTimes)),
+             defs: defs.size, seq: seq.length });
     }, 1000);
   };
 
