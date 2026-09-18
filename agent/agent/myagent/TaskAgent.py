@@ -878,7 +878,10 @@ class TaskAgent:
         # 指定の台を先に見るが、別の台に置かれていたらそちらへ取りに行く。
         # 完成品はどの台にあっても同じものなので、待ち続ける理由はない。
         candidates = [assigned_counter] if assigned_counter else []
-        candidates += [c for c in self.reachable_positions(env, env.get_pos_by_obj_gs(gs='Counter'))
+        # 人はまな板の上に置くこともあるので、置ける場所は全部見る。
+        surfaces = (list(env.get_pos_by_obj_gs(gs='Counter'))
+                    + list(env.get_pos_by_obj_gs(gs='Cutboard')))
+        candidates += [c for c in self.reachable_positions(env, surfaces)
                        if c not in candidates]
         for c in candidates:
             if c is None:
@@ -1305,7 +1308,9 @@ class TaskAgent:
     def _find_plated_dish(self, env, target_ing_names, container='Plate'):
         """容器に盛られた完成品が置かれている台を探す。手が届くものだけ。"""
         want = set(target_ing_names) | {container}
-        for pos in self.reachable_positions(env, env.get_pos_by_obj_gs(gs='Counter')):
+        surfaces = (list(env.get_pos_by_obj_gs(gs='Counter'))
+                    + list(env.get_pos_by_obj_gs(gs='Cutboard')))
+        for pos in self.reachable_positions(env, surfaces):
             obj = env.pos_obj.get(pos)
             name = getattr(obj, 'full_name', '') or ''
             if name and set(name.split('-')) == want:

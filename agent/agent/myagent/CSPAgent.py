@@ -2701,6 +2701,13 @@ class CSPAgent:
             return None
         return int(best + 8 + 2)
 
+    def _reachable_from_cutboard(self, env, pos):
+        """その場所に、まな板のある側から手が届くか。"""
+        board_comps = set()
+        for b in env.get_pos_by_obj_gs(gs='Cutboard'):
+            board_comps |= self._components_touching(env, tuple(b))
+        return bool(board_comps & self._components_touching(env, tuple(pos)))
+
     def _carried_units(self, env, ing_lower):
         """刻む人の手の届く範囲に、その材料がいくつ届いているか。
 
@@ -2730,6 +2737,16 @@ class CSPAgent:
         # 使われている最中なので、まだ使える在庫には数えない。数えると、
         # 別の注文がその1つを当てにして運搬を省き、材料の来ない工程を
         # 待ち続けることになる。
+        # まな板の上で切り終わった物も、まだ「これから使う材料」として数える。
+        # 切った材料の在庫(consume_chopped)は、まな板の上の物を意図的に
+        # 外している(数えると「切る」工程が計画から消え、まな板から取って
+        # 置き場へ運ぶ段取りまで無くなる)。ここでも数えないと、切り終えてから
+        # 持ち上げるまでの間だけ材料が世界から消えたことになり、AI が
+        # 同じ材料をもう1つ運んでくる(実測: 12試合で使われない材料が
+        # 8〜12個残った)。
+        board_set = {tuple(b) for b in boards}
+        chopped_name = f"Chopped{cap}"
+
         total = 0
         for pos, obj in env.pos_obj.items():
             # 持ち上げられた物は盤面の一覧にも残るので、手持ちと二重に
@@ -2738,6 +2755,8 @@ class CSPAgent:
                 continue
             if self._components_touching(env, tuple(pos)) & board_comps:
                 total += units(obj)
+                if tuple(pos) in board_set:
+                    total += (getattr(obj, 'full_name', '') or '').count(chopped_name)
         for idx, agent in enumerate(getattr(env, 'agents', []) or []):
             held = getattr(agent, 'holding', None)
             if held is not None and self._agent_component(env, idx) in board_comps:
@@ -3776,6 +3795,11 @@ class CSPAgent:
             return False
 
         entry = self._get_counter_policy_entry(order_uid)
+        if reason == 'counter_contaminated':
+            # 間違えて重ねた山は、待っても元に戻らない。すぐ手放す。
+            entry['invalid_since'] = None
+            entry['last_invalid_reason'] = None
+            return True
         now = getattr(env, 'time', 0)
         invalid_since = entry.get('invalid_since')
         if invalid_since is None:
@@ -3961,6 +3985,13 @@ class CSPAgent:
         has_required_material = bool(state['counter_food_names'] & expected)
         if state['unexpected'] and not has_required_material:
             return 'counter_occupied_by_other_order'
+        if state['unexpected']:
+            # 必要な材料と余計な材料が同じ山に入っている。人が間違えて重ねた
+            # 場合に起きる(トマトのサラダの山に玉ねぎを重ねる等)。この環境
+            # では山を分けられないので、この注文にはもう使えない。以前は
+            # 「必要な材料が入っているから」と置き場のまま残していたため、
+            # 使えない山を当てにし続け、関係ない注文まで止まった。
+            return 'counter_contaminated'
         return None
 
     def _is_counter_conflict_for_order(self, env, order_ingredient_names, assigned_counter, current_orders=None):
@@ -4578,7 +4609,9 @@ class CSPAgent:
             # テーブル間の移動合戦を防ぐため)。
             if assigned_counter is not None:
                 for pos in available_chopped_by_pos.keys():
-                    if pos == assigned_counter or pos in reserved_counters:
+                    if pos == assigned_counter:
+                        continue
+                    if pos in reserved_counters and reserved_needs(pos, ingredient_name):
                         continue
                     stock = available_chopped_by_pos.get(pos, {})
                     if stock.get(ingredient_name, 0) <= 0:
@@ -4597,6 +4630,12 @@ class CSPAgent:
                     continue
                 pos_stock = available_chopped_by_pos.get(pos, {})
                 if pos_stock.get(ingredient_name, 0) <= 0:
+                    continue
+                # この注文に無い材料が混ざった山は、分けられないので使えない。
+                # 指定の置き場の上でも同じ(人が間違えて重ねた場合)。数えると
+                # 「材料はある」ことになり、作り直す工程が出てこない。
+                if order_ings is not None and any(
+                        k.lower() not in order_ings for k in pos_stock):
                     continue
                 pos_stock[ingredient_name] -= 1
                 if pos_stock[ingredient_name] <= 0:
@@ -4707,14 +4746,20 @@ class CSPAgent:
                         'mixed': bool(getattr(obj, 'is_mixed', lambda: False)()),
                     })
                 else:
+                    # 皿に盛った完成品は、どこに置かれていても数える。人は
+                    # まな板の上にも置く。まな板を除いていたため、そこに
+                    # 置かれた完成スープを「まだ無い」とみなし、作り直すための
+                    # 材料を AI が運んできた。
+                    plated_names = plated_food_names(obj)
+                    if plated_names is not None:
+                        plate_states.append({'names': plated_names, 'obj': obj, 'used': False})
+                        full = getattr(obj, 'full_name', '') or ''
+                        if 'Cooked' in full or 'Charred' in full:
+                            cooked_dish_states.append(
+                                {'names': plated_names, 'obj': obj, 'used': False})
+                    # 切った材料の在庫からは、まな板の上の物を外す。数えると
+                    # 「切る」工程が消え、切った人が置き場へ運ぶ段取りが無くなる。
                     if obj.location not in cutboard_locs:
-                        plated_names = plated_food_names(obj)
-                        if plated_names is not None:
-                            plate_states.append({'names': plated_names, 'obj': obj, 'used': False})
-                            full = getattr(obj, 'full_name', '') or ''
-                            if 'Cooked' in full or 'Charred' in full:
-                                cooked_dish_states.append(
-                                    {'names': plated_names, 'obj': obj, 'used': False})
                         register_chopped_item(obj, obj.location)
 
         # 手に持っている完成品も数える。上の走査は持ち物を飛ばしているので、
@@ -4749,6 +4794,38 @@ class CSPAgent:
         carried_budget = {}
         current_orders = env.order.current_orders if hasattr(env, 'order') and hasattr(env.order, 'current_orders') else []
         order_uids = self._refresh_active_order_uids(current_orders)
+
+        # 他の注文の置き場に置かれた材料を、その注文がまだ使うかどうか。
+        # 置き場の予約は AI の中だけの取り決めで、人は知らずにどこにでも
+        # 置く。予約した注文が使わない材料(玉ねぎトマトスープの置き場に
+        # 置かれたレタス等)や、もう組み立て終わった注文の置き場にある材料
+        # まで「取らない」とすると、在るのに無いことになり、AI が同じ材料を
+        # もう1つ運んでくる(実測: 切ったレタスが共有台にあるのに運搬開始)。
+        counter_owner = {
+            entry['counter']: uid
+            for uid, entry in self.counter_policy_by_order.items()
+            if entry.get('counter') is not None
+        }
+        ings_by_uid = {}
+        assembled_uids = set()
+        for _idx, _ot in enumerate(current_orders):
+            _name = getattr(_ot[0], 'full_name', '').lower()
+            _ings = [i for i in ALL_INGREDIENTS if i in _name]
+            _uid = order_uids[_idx]
+            ings_by_uid[_uid] = set(_ings)
+            _kind = goal_dish_kind(_name)
+            _want = sorted(i.capitalize() for i in _ings)
+            _pool = (blender_states if _kind == KIND_JUICE
+                     else plate_states if _kind == KIND_SALAD
+                     else pot_states + cooked_dish_states)
+            if any(ps['names'] == _want for ps in _pool):
+                assembled_uids.add(_uid)
+
+        def reserved_needs(pos, ingredient_name):
+            owner = counter_owner.get(pos)
+            if owner is None or owner in assembled_uids:
+                return False
+            return ingredient_name.lower() in ings_by_uid.get(owner, set())
         # 合流地点は注文ごとに1枚へ固定する。途中で移動すると、前に置いた
         # 食材がその場に取り残され、別注文の山に混ざって使えなくなる。
         # 注: 合流地点の固定は試したが取り消した。注文と鍋・提供口の距離を
@@ -4953,14 +5030,28 @@ class CSPAgent:
                 # 切る材料の在庫を1つ引き、足りなければ運搬を出す。
                 #   運ぶべき数 = まだ切る必要のある注文の数 - まだ切っていない在庫
                 via_counter = needs_carry_route
+                # 既に切られた物が別の台にあるなら、切らずに運ぶだけでよい。
+                # そのときは生の材料を供給口から運んでくる工程は要らない。
+                # ここを見ずに「生の材料が届いていない」とだけ判定すると、
+                # 切ったレタスが共有台にあるのに、AI がもう1つ運んでくる
+                # (実測: 12試合で使われない材料が 4〜13 個残った)。
+                carry_from = carry_sources.pop(ing, None)
+                # ただし、切った物が刻む側から手の届かない台にあるなら当てに
+                # しない。この地図ではまな板が人間側にしかなく、AI 側の台に
+                # 置かれた切った物は人間には取れない。当てにして生の材料を
+                # 運ばないと、誰も材料を持ってこないまま止まる
+                # (実測: 散らかし試験で 72 中 26 試行が未完)。
+                if (carry_from is not None and via_counter
+                        and not self._reachable_from_cutboard(env, carry_from)):
+                    carry_from = None
                 got_unit = False
-                if via_counter:
+                if via_counter and carry_from is None:
                     if ing_key not in carried_budget:
                         carried_budget[ing_key] = self._carried_units(env, ing_key)
                     if carried_budget[ing_key] > 0:
                         carried_budget[ing_key] -= 1
                         got_unit = True
-                carry_needed = via_counter and not got_unit
+                carry_needed = via_counter and not got_unit and carry_from is None
                 if via_counter:
                     dur = self._chop_duration_from(env, assigned_counter)
                 else:
@@ -4968,8 +5059,6 @@ class CSPAgent:
                         env, 'chop', ing.lower(), order_idx, assigned_counter)
                 if dur is None:
                     continue
-                # 既に切られた物が別のテーブルにあるなら、切らずに運ぶだけでよい
-                carry_from = carry_sources.pop(ing, None)
                 chop_task = {
                     'carry_from': carry_from,
                     'id': ('chop', ing.lower(), order_uid),
@@ -6251,7 +6340,10 @@ class CSPAgent:
             return None
         done_state = self.DONE_STATE_BY_KIND.get(dish_kind_of(dish_name), 'Cooked')
         container = 'Cup' if dish_kind_of(dish_name) == KIND_JUICE else 'Plate'
-        for pos in env.get_pos_by_obj_gs(gs='Counter'):
+        # 人はまな板の上にも置くので、置ける場所は全部見る。
+        surfaces = (list(env.get_pos_by_obj_gs(gs='Counter'))
+                    + list(env.get_pos_by_obj_gs(gs='Cutboard')))
+        for pos in surfaces:
             obj = env.pos_obj.get(pos)
             name = getattr(obj, 'full_name', '') or ''
             if not name or container not in name:
