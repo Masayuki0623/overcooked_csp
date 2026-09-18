@@ -305,6 +305,16 @@ class CSPAgent:
             if entry.get('order_idx') is not None:
                 uid_by_idx[entry['order_idx']] = entry.get('uid')
 
+        # すでに鍋で煮ている/煮えたスープの注文は、もう材料を入れる先ではない。
+        # これを候補に残すと、サラダ用に玉ねぎ+トマトを持ち上げたときに
+        # 「同じ組み合わせのスープ」と取り違え、煮ている鍋へ入れようとして
+        # 止まっていた。鍋の数だけ、同じレシピのスープ注文を候補から外す。
+        in_pot = []
+        for pot_pos in (env.get_pos_by_obj_gs(gs='Pot') or []) if hasattr(env, 'get_pos_by_obj_gs') else []:
+            pname = str(getattr(env.pos_obj.get(pot_pos), 'full_name', '') or '')
+            if 'Cooking' in pname or 'Cooked' in pname:
+                in_pot.append({ing for ing in ALL_INGREDIENTS if ing in pname.lower()})
+
         supersets = []
         for order_idx, order_tuple in enumerate(current_orders):
             goal = order_tuple[0] if order_tuple else None
@@ -313,6 +323,9 @@ class CSPAgent:
             if not ings:
                 continue
             kind = goal_dish_kind(name)
+            if kind == KIND_SOUP and set(ings) in in_pot:
+                in_pot.remove(set(ings))
+                continue
             ing_set = set(ings)
             counter = None
             uid = uid_by_idx.get(order_idx)
@@ -1863,7 +1876,16 @@ class CSPAgent:
             # 切る工程は対象外。切り終えると計画からは消えるが、切った物を
             # 置き場へ運ぶ仕事はこの覚えている工程が担っている(捨てると、
             # 切った物を持ったまま何もしなくなる)。
-            if (c_id and c_id[2] != -1 and c_id[0] in ('cook', 'mix', 'serve_salad')
+            # 持ち物から作った臨時の「鍋に入れる」(注文番号 -1)も、計画に同じ
+            # 料理を鍋に入れる工程がもう無ければ捨てる。そのスープはすでに
+            # 鍋で煮えていて、覚えたままだと「鍋に入れる工程は完了」を毎回
+            # 返して止まる(実測: サラダ用に玉ねぎ+トマトを持ち上げたとき、
+            # 同じ組み合わせのスープの工程と取り違えて 90 秒止まった)。
+            live_cook_dishes = {t[1] for t in live if t and t[0] == 'cook'}
+            stale_adhoc_cook = (c_id and c_id[2] == -1 and c_id[0] == 'cook'
+                                and c_id[1] not in live_cook_dishes)
+            if stale_adhoc_cook or (
+                    c_id and c_id[2] != -1 and c_id[0] in ('cook', 'mix', 'serve_salad')
                     and c_id not in live):
                 carry_task = None
                 if self.sc_2agent:
@@ -2731,6 +2753,13 @@ class CSPAgent:
                     # 前提は cook と同じ「刻んだ食材が世界にあるか」。
                     if not self._salad_dependency_ready_from_world(env, obj):
                         can_start = False
+                if not can_start and verb in ('cook', 'serve_salad')                         and self._holds_only_parts_of(env, agent_idx, obj):
+                    # 材料がまだ揃っていなくても、その料理の材料を手に持って
+                    # いるなら、まず置き場へ置く(TaskAgent が合わせる台へ置く)。
+                    # 待機に入ると持ったまま動かず、手がふさがって煮上がった
+                    # スープも出せなくなっていた(Web 版で実測: 刻んだ玉ねぎを
+                    # 持ったまま、相手のレタスを待って止まった)。
+                    can_start = True
                 elif verb == 'serve':
                     # serve は皿の先取りができるので、cook 完了前でも TaskAgent に進める。
                     # 鍋前待機や実際の取得タイミングは process_serve_task 側で判定する。
@@ -4466,13 +4495,18 @@ class CSPAgent:
         if not normalized:
             return False
 
-        candidate_tokens = {
-            f"Chopped{normalized.capitalize()}",
-            f"Cooking{normalized.capitalize()}",
-            f"Cooked{normalized.capitalize()}",
-        }
+        candidate_tokens = {f"Chopped{normalized.capitalize()}"}
         if not require_ready_to_cook:
-            candidate_tokens.add(f"Fresh{normalized.capitalize()}")
+            candidate_tokens |= {
+                f"Cooking{normalized.capitalize()}",
+                f"Cooked{normalized.capitalize()}",
+                f"Fresh{normalized.capitalize()}",
+            }
+        # require_ready_to_cook(鍋に入れる・皿に盛る前提)では、すでに鍋で
+        # 煮ている/煮えた物は数えない。それは別の料理(スープ)の中身で、
+        # 取り出して使うことはできない。以前はこれを数えていたため、スープの
+        # トマトを見て「サラダのトマトはある」と判断し、どこにもないトマトを
+        # 取りに行こうとして 25 秒止まっていた(Web 版で実測)。
 
         def has_token(obj_or_name):
             if obj_or_name is None:
@@ -4501,6 +4535,19 @@ class CSPAgent:
             self._owns_world_ingredient(env, p, require_ready_to_cook=True)
             for p in parts
         )
+
+    def _holds_only_parts_of(self, env, agent_idx, dish_name):
+        """手に持っている物が、その料理の刻んだ材料だけでできているか。"""
+        agents = getattr(env, 'agents', None) or []
+        if agent_idx >= len(agents):
+            return False
+        held = getattr(agents[agent_idx], 'holding', None)
+        name = getattr(held, 'full_name', '') or ''
+        if not name or 'Plate' in name:
+            return False
+        parts = {p.capitalize() for p in dish_ingredients(dish_name)}
+        pieces = name.split('-')
+        return all(pc.startswith('Chopped') and pc[len('Chopped'):] in parts for pc in pieces)
 
     def _salad_dependency_ready_from_world(self, env, dish_name):
         """serve_salad の前提となる「刻んだ食材」が実世界に存在するなら true。
@@ -6018,6 +6065,7 @@ class CSPAgent:
         fire_frames = int(COOKED_BEFORE_FIRE_TIME_SECONDS * self.fps)
         burn_margin = int(3 * self.fps)
         pot_deadline = {}
+        pot_ready = {}      # 煮ている最中の鍋が煮上がるまでのフレーム数
         for pot_pos in env.get_pos_by_obj_gs(gs='Pot') or []:
             obj = env.pos_obj.get(pot_pos)
             name = getattr(obj, 'full_name', '') or ''
@@ -6035,6 +6083,11 @@ class CSPAgent:
             except Exception:
                 continue
             pot_deadline[key] = max(0, int(left * self.fps) - burn_margin)
+            if 'Cooking' in name:
+                try:
+                    pot_ready[key] = int(obj.rest_cooking_time() * self.fps)
+                except Exception:
+                    pass
 
         burn_terms = []
         for i in range(num_tasks):
@@ -6053,6 +6106,24 @@ class CSPAgent:
                     continue
                 model.Add(late >= starts[i] - pot_deadline[key])
             burn_terms.append(late)
+
+        # 鍋ですでに煮ているスープは、煮上がるまで出せない。
+        # 鍋に入れる工程(cook)が済んだ注文は上の「cook 終了 + 調理時間」の
+        # 条件が付かず、以前は「今すぐ出せる」扱いになっていた。そのため
+        # 煮上がりまで 15 秒ある間も皿を持って鍋の横で待ち続け、その間に
+        # できたはずの材料運び(実測: 3つ目の玉ねぎ)を後回しにしていた。
+        # 皿を取りに行く分は先に動いてよいので、終わり(提供)が煮上がりより
+        # 後になることだけを求める。
+        for i in range(num_tasks):
+            t = tasks[i]
+            if t['verb'] not in ('serve', 'handover') or dish_kind_of(t['obj']) != KIND_SOUP:
+                continue
+            order_vars = vars_by_order.get(t['order'], [])
+            if any(v['task']['verb'] == 'cook' for v in order_vars):
+                continue
+            key = tuple(sorted(p.capitalize() for p in dish_ingredients(t['obj'])))
+            if key in pot_ready:
+                model.Add(ends[i] >= pot_ready[key] + 3)
 
         # 鍋の占有制約 (Pot Usage Constraint)
         pot_usage_intervals = {}

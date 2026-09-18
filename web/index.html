@@ -611,7 +611,10 @@
   ws.onopen = () => {
     el.conn.textContent = '接続済み';
     el.dot.classList.add('on');
-    send({ type: 'hello', mode: MODE });
+    const nc = navigator.connection || {};
+    send({ type: 'hello', mode: MODE,
+           net: { type: nc.type || null, effective: nc.effectiveType || null,
+                  downlink: nc.downlink || null, rtt: nc.rtt || null } });
     setInterval(() => {
       // 直前に測った往復時間も一緒に送る。サーバー側で、参加者が実際に
       // どれだけ待たされているかを記録するため。

@@ -339,6 +339,7 @@ class WebGamePlay:
         self._hooks_installed = False
 
         self.timeline = []             # 1秒ごとの通信の様子(ゲーム後にファイルへ)
+        self.connection_info = None
         self.disconnect_reason = None
         # 配信経路のどこでコマが落ちているかを見るための計数。/api/perf で読む。
         self.perf = {'rendered': 0, 'encoded': 0, 'sent': 0, 'started': time.time(),
@@ -449,7 +450,8 @@ class WebGamePlay:
         try:
             path.write_text(json.dumps({
                 'selection': self.selection, 'end_reason': reason,
-                'disconnect': self.disconnect_reason, 'timeline': self.timeline,
+                'disconnect': self.disconnect_reason,
+                'connection': self.connection_info, 'timeline': self.timeline,
             }, ensure_ascii=False, indent=1), encoding='utf-8')
             print(f'[server] 通信の記録を保存しました: {path}')
         except Exception as e:
@@ -980,6 +982,13 @@ async def ws(sock: WebSocket):
     if not session.try_acquire(token):
         await wait_in_line(sock)
         return
+    # どの経路で来たか(家の中の LAN か、Funnel 経由か)。遅さの切り分けに使う。
+    host = getattr(sock.client, 'host', '') or ''
+    via_funnel = ('tailscale-funnel-request' in sock.headers
+                  or host in ('127.0.0.1', '::1'))
+    session.connection_info = {'route': 'funnel' if via_funnel else 'lan', 'host': host,
+                               'user_agent': sock.headers.get('user-agent', '')}
+    print(f"[server] #{session.game_id} 接続: {session.connection_info['route']} ({host})")
     my_game = session.game_id
     acquired_at = time.time()
     last_seen = [time.time()]
@@ -1025,6 +1034,9 @@ async def ws(sock: WebSocket):
                 session.go(token)
             elif kind == 'hello':
                 mode[0] = 'png' if msg.get('mode') == 'png' else 'draw'
+                if isinstance(msg.get('net'), dict):
+                    # 端末から見た回線の種類(Wi-Fi / モバイル回線など。分かる端末だけ)
+                    session.connection_info = dict(session.connection_info or {}, net=msg['net'])
             elif kind == 'ping':
                 # RTT 計測用。クライアントの送信時刻をそのまま返す。
                 if msg.get('rtt') is not None:
