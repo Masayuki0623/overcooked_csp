@@ -137,6 +137,11 @@ START_TIMEOUT_S = 120
 PLAYER_SILENCE_TIMEOUT_S = 10
 # 1回の送信を待つ上限(秒)。これを超えたら相手は居ないとみなす。
 SEND_TIMEOUT_S = 5
+# 端末が「描いた」と返事をしていない盤面が、これだけ溜まっていたら次は送らない。
+# 送り続けると、端末や途中の経路に盤面が溜まり、その分だけ操作の応答が遅れる
+# (実測: スマホで往復 900ms、送れたのは描いた分の4割)。追いつけないときは
+# 途中を飛ばして、いつも最新の盤面だけを送る。
+MAX_UNACKED_FRAMES = 2
 
 # スレッド間で GIL を渡す間隔(既定 5ms)。ローカル版と違い Web 版は
 # 環境・AI・配信・エンコードが同じプロセスで同時に動くため、既定のままだと
@@ -404,6 +409,16 @@ class WebGamePlay:
         buf.append(v)
         del buf[:-120]
 
+    def note_client_stat(self, key, value):
+        """端末が報告した数値(描画にかかった時間など)を残す。/api/perf で見る。"""
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            return
+        buf = self.perf.setdefault(key, [])
+        buf.append(v)
+        del buf[:-120]
+
     def release(self, token):
         with self._player_lock:
             if self.player is token:
@@ -528,7 +543,8 @@ class WebGamePlay:
             self._released = False
             self.state = 'ready'
             self.perf.update(rendered=0, encoded=0, sent=0, started=time.time(),
-                             client_rtt_ms=[])
+                             client_rtt_ms=[], client_paint_ms=[], client_recv_fps=[],
+                             send_wait_ms=[])
             print(f'[server] #{self.game_id} 盤面を用意しました(開始の合図待ち)')
             success = False
             try:
@@ -823,6 +839,11 @@ async def perf():
     """
     p = dict(session.perf)
     elapsed = max(1e-6, time.time() - p.pop('started'))
+    for key in ('client_paint_ms', 'client_recv_fps', 'send_wait_ms'):
+        vals = sorted(p.pop(key, []) or [])
+        if vals:
+            p[key + '_median'] = round(vals[len(vals) // 2], 1)
+            p[key + '_max'] = round(vals[-1], 1)
     rtts = sorted(p.pop('client_rtt_ms', []) or [])
     if rtts:
         p['client_rtt_median_ms'] = rtts[len(rtts) // 2]
@@ -908,6 +929,7 @@ async def ws(sock: WebSocket):
     sent_size = None
     last_state = None
     encoder = DrawEncoder()
+    frame_no = [0, 0]      # [送った盤面の番号, 端末が描いたと返事した番号]
 
     async def pump_input():
         """ブラウザからの入力を pygame イベントへ流し続ける。"""
@@ -930,6 +952,11 @@ async def ws(sock: WebSocket):
                 session.start(token, {
                     'map': msg.get('map'), 'preset': msg.get('preset'),
                     'case': msg.get('case')})
+            elif kind == 'ack':
+                try:
+                    frame_no[1] = max(frame_no[1], int(msg.get('n', 0)))
+                except (TypeError, ValueError):
+                    pass
             elif kind == 'go':
                 session.go(token)
             elif kind == 'hello':
@@ -938,6 +965,8 @@ async def ws(sock: WebSocket):
                 # RTT 計測用。クライアントの送信時刻をそのまま返す。
                 if msg.get('rtt') is not None:
                     session.note_client_rtt(msg.get('rtt'))
+                session.note_client_stat('client_paint_ms', msg.get('paint_ms'))
+                session.note_client_stat('client_recv_fps', msg.get('recv_fps'))
                 await sock.send_text(json.dumps({'type': 'pong', 't': msg.get('t')}))
 
     async def send_text(obj):
@@ -982,9 +1011,15 @@ async def ws(sock: WebSocket):
                     sent_size = base
                     await send_text({'type': 'meta', 'w': base[0], 'h': base[1],
                                      'base_w': base[0], 'base_h': base[1]})
-                if draw_version != sent_draw_version:
+                if (draw_version != sent_draw_version
+                        and frame_no[0] - frame_no[1] < MAX_UNACKED_FRAMES):
                     sent_draw_version = draw_version
-                    await send_text(encoder.encode(draw))
+                    frame_no[0] += 1
+                    msg = encoder.encode(draw)
+                    msg['n'] = frame_no[0]
+                    t_send = time.time()
+                    await send_text(msg)
+                    session.note_client_stat('send_wait_ms', (time.time() - t_send) * 1000)
                     session.perf['sent'] += 1
                 await send_status_and_notices()
                 continue

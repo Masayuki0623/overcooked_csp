@@ -190,6 +190,7 @@
   <span><span id="conn-dot" class="dot"></span><span id="conn">接続中...</span></span>
   <span>RTT <b id="rtt">--</b> ms</span>
   <span><b id="fps">--</b> fps</span>
+  <span>描画 <b id="paintms">--</b> ms</span>
   <span>状態 <b id="state">--</b></span>
   <span id="cfg"></span>
   <button id="gear" type="button" aria-label="ボタンの設定">⚙ 設定</button>
@@ -411,7 +412,7 @@
     if (!im) {
       im = new Image();
       // 初めて使う絵は読み込み待ちになる。読み込めたら描き直す。
-      im.onload = () => paint();
+      im.onload = () => { bgIds = []; paint(); };
       im.src = '/graphics/' + encodeURIComponent(name) + '.png';
       sprites.set(name, im);
     }
@@ -419,16 +420,66 @@
   }
   function rgb(e, i) { return `rgb(${e[i]},${e[i + 1]},${e[i + 2]})`; }
 
+  // 背景(床・台・器具など、ほとんど変わらない先頭の命令)は別の画用紙に
+  // 一度だけ描いておき、毎回はそれを貼ってから残りだけ描く。全部を毎回
+  // 描き直すと、この PC でも 1回 23ms かかり、スマホでは描画が追いつかず
+  // 操作の応答まで遅れていた。
+  const bgCanvas = document.createElement('canvas');
+  const bgCtx = bgCanvas.getContext('2d');
+  let bgIds = [];        // 背景に描いてある命令の番号の列
+  let lastKeep = 0;      // 直近のコマで、前のコマと先頭から一致していた数
+
+  function commonPrefix(a, b) {
+    const n = Math.min(a.length, b.length);
+    let i = 0;
+    while (i < n && a[i] === b[i]) i++;
+    return i;
+  }
+
   function paint() {
+    // 背景として使える長さ。前のコマと一致していた先頭部分を背景にする。
+    // 今の背景がそのまま使えるならそれを使い、背景の途中が変わったとき
+    // (まれ)と、背景がずっと短いままのときだけ描き直す。
+    const same = commonPrefix(seq, bgIds);
+    let bgLen = bgIds.length;
+    if (same < bgIds.length || !bgIds.length || lastKeep > bgIds.length + 40) {
+      bgLen = Math.min(lastKeep || same, seq.length);
+      if (bgCanvas.width !== gameCv.width) bgCanvas.width = gameCv.width;
+      if (bgCanvas.height !== gameCv.height) bgCanvas.height = gameCv.height;
+      bgCtx.clearRect(0, 0, bgCanvas.width, bgCanvas.height);
+      drawRange(bgCtx, bgCanvas, 0, bgLen);
+      bgIds = seq.slice(0, bgLen);
+    }
     const c = gameCtx;
+    c.imageSmoothingEnabled = false;
+    c.drawImage(bgCanvas, 0, 0);
+    drawRange(c, gameCv, bgLen, seq.length);
+  }
+
+  // 確認用: 描画にかかる時間を開発者ツールから測れるようにする
+  window.__overcooked = {
+    benchPaint(n = 100) {
+      const t0 = performance.now();
+      for (let i = 0; i < n; i++) paint();
+      return (performance.now() - t0) / n;
+    },
+    benchFull(n = 100) {
+      const t0 = performance.now();
+      for (let i = 0; i < n; i++) drawRange(gameCtx, gameCv, 0, seq.length);
+      return (performance.now() - t0) / n;
+    },
+    sizes: () => ({ total: seq.length, background: bgIds.length }),
+  };
+
+  function drawRange(c, cv, from, to) {
     c.imageSmoothingEnabled = false;   // ドット絵をぼかさない(pygame と同じ)
-    for (const id of seq) {
-      const e = defs.get(id);
+    for (let k = from; k < to; k++) {
+      const e = defs.get(seq[k]);
       if (!e) continue;
       switch (e[0]) {
         case 'F':   // ['F', r, g, b]
           c.fillStyle = rgb(e, 1);
-          c.fillRect(0, 0, gameCv.width, gameCv.height);
+          c.fillRect(0, 0, cv.width, cv.height);
           break;
         case 'R': { // ['R', r, g, b, x, y, w, h, 線幅]
           const lw = e[8];
@@ -522,10 +573,33 @@
     for (const k in msg.defs) defs.set(+k, msg.defs[k]);
     // 先頭 keep 個(ほとんど動かない背景)は前のコマと同じ。残りだけ届く。
     seq = seq.slice(0, msg.keep).concat(msg.tail);
+    lastKeep = msg.keep;
+    if (msg.n) pendingAck = msg.n;
     recvTimes.push(performance.now());
     el.fps.textContent = rate(recvTimes);
-    paint();
-    markBoardDrawn();
+    schedulePaint();
+  }
+
+  // 届いた盤面は、画面の書き換え1回ぶんにまとめて描く。端末の処理が
+  // 追いつかないとき、古い盤面を順に描いて遅れが溜まっていくのを防ぐ。
+  // 描くのにかかった時間はサーバーへ報告する(遅さの切り分け用)。
+  let paintQueued = false;
+  const paintMs = [];
+  let pendingAck = 0;     // 描き終えたらサーバーに返す盤面の番号
+  function schedulePaint() {
+    if (paintQueued) return;
+    paintQueued = true;
+    requestAnimationFrame(() => {
+      paintQueued = false;
+      const t0 = performance.now();
+      paint();
+      paintMs.push(performance.now() - t0);
+      if (paintMs.length > 50) paintMs.shift();
+      markBoardDrawn();
+      // 描き終えたことを伝える。サーバーはこの返事が来るまで、次の盤面を
+      // 先に送りすぎない(遅れが溜まらないようにするため)。
+      if (pendingAck) { send({ type: 'ack', n: pendingAck }); pendingAck = 0; }
+    });
   }
 
   // ---- 接続 ------------------------------------------------------------
@@ -541,7 +615,11 @@
     setInterval(() => {
       // 直前に測った往復時間も一緒に送る。サーバー側で、参加者が実際に
       // どれだけ待たされているかを記録するため。
-      send({ type: 'ping', t: performance.now(), rtt: lastRtt });
+      const avgPaint = paintMs.length ? paintMs.reduce((a, b) => a + b, 0) / paintMs.length : null;
+      const pm = document.getElementById('paintms');
+      if (pm && avgPaint != null) pm.textContent = avgPaint.toFixed(1);
+      send({ type: 'ping', t: performance.now(), rtt: lastRtt,
+             paint_ms: avgPaint, recv_fps: Number(rate(recvTimes)) });
     }, 1000);
   };
 
@@ -624,6 +702,14 @@
   // 盤面が描けて絵も揃ったら 3・2・1 を出し、終わったら開始の合図を送る。
   // それまでサーバー側の時間は止まっている。
   let countdownStarted = false;
+  let lastSelection = null;
+  function selectionNote() {
+    // 何を選んだかは、始まる前(カウントダウン中)にだけ見せる。
+    // 始まってから出すと盤面が隠れる。
+    if (!lastSelection) return '';
+    return `<div class="sub" style="margin-top:14px">${esc(lastSelection.map)} / ${esc(lastSelection.preset)}` +
+           `<br>${lastSelection.orders.map(esc).join('<br>')}</div>`;
+  }
   function startCountdown() {
     if (countdownStarted) return;
     countdownStarted = true;
@@ -633,7 +719,7 @@
       const tick = () => {
         if (n > 0) {
           el.overlay.classList.add('countdown');
-          showOverlay(`<div class="cd">${n}</div>`);
+          showOverlay(`<div class="cd">${n}</div>` + selectionNote());
           n -= 1;
           setTimeout(tick, 1000);
         } else {
@@ -694,6 +780,7 @@
       })[msg.state] || msg.state;
       if (msg.selection) {
         const sel = msg.selection;
+        lastSelection = sel;
         el.cfg.textContent = `${sel.map} / ${sel.preset} / ${sel.orders.join('、')}`;
       }
       if (msg.state === 'waiting' && !started) {
@@ -704,9 +791,7 @@
       } else if (msg.state === 'running') {
         el.overlay.classList.remove('countdown');
         playing = true;
-        if (!started && msg.selection) {
-          showToast(`${msg.selection.map} / ${msg.selection.preset}: ${msg.selection.orders.join('、')}`);
-        }
+
         started = true;
         hideOverlay();
       } else if (msg.state === 'finished' && msg.result) {
