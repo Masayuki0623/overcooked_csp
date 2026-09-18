@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Overcooked CSP</title>
 <style>
   :root {
@@ -20,6 +20,16 @@
     font-family: "Segoe UI", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", sans-serif;
     padding: 20px 24px 40px;
     min-height: 100vh;
+    /* スマホでボタンを連打したときに、文字選択やダブルタップ拡大が起きないように */
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+  @media (max-width: 640px) {
+    body { padding: 10px 12px 24px; }
+    h1 { font-size: 15px; margin-bottom: 8px; }
+    .bar { font-size: 11.5px; padding: 7px 10px; gap: 4px 12px; }
+    #cfg { display: none; }
   }
   h1 { font-size: 17px; font-weight: 600; margin: 0 0 12px; letter-spacing: .02em; }
 
@@ -27,6 +37,7 @@
      ゲームとパネルを別々の canvas にして横に並べる。 */
   #stage {
     display: flex;
+    flex-wrap: wrap;      /* 画面が狭いと、指示パネルはゲーム画面の下に回る */
     align-items: flex-start;
     gap: 12px;
   }
@@ -38,7 +49,43 @@
     box-shadow: 0 6px 24px rgba(0,0,0,.45);
   }
   #game { cursor: default; }
-  #panel { cursor: pointer; }
+  #panel { cursor: pointer; touch-action: none; }
+
+  /* 画面上の操作ボタン。キーボードが無い端末(スマホ)でも遊べるように。 */
+  #pad {
+    display: flex;
+    align-items: center;
+    gap: 28px;
+    margin-top: 16px;
+    touch-action: none;
+  }
+  .dpad {
+    display: grid;
+    grid-template-columns: repeat(3, 64px);
+    grid-template-rows: repeat(3, 64px);
+    gap: 6px;
+  }
+  .dpad .up    { grid-column: 2; grid-row: 1; }
+  .dpad .left  { grid-column: 1; grid-row: 2; }
+  .dpad .right { grid-column: 3; grid-row: 2; }
+  .dpad .down  { grid-column: 2; grid-row: 3; }
+  .actions { display: flex; flex-direction: column; gap: 10px; }
+  #pad button {
+    font: inherit;
+    font-size: 24px;
+    color: var(--text);
+    background: #2a2f38;
+    border: 1px solid #3a414c;
+    border-bottom-width: 3px;
+    border-radius: 10px;
+    touch-action: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #pad .actions button { font-size: 15px; padding: 14px 18px; min-width: 104px; }
+  #pad button.pressed { background: #3b4350; transform: translateY(2px); border-bottom-width: 1px; }
+  @media (max-width: 640px) {
+    #pad { justify-content: center; gap: 20px; }
+  }
   #panel.hidden { display: none; }
 
   .bar {
@@ -75,6 +122,13 @@
     padding: 24px;
   }
   #overlay.show { display: flex; }
+  #toast {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+    background: #2a2f38; border: 1px solid #3a414c; border-radius: 8px;
+    padding: 10px 16px; font-size: 14px; opacity: 0; pointer-events: none;
+    transition: opacity .2s; max-width: calc(100% - 32px); text-align: center;
+  }
+  #toast.show { opacity: 1; }
 </style>
 </head>
 <body>
@@ -94,17 +148,38 @@
   <canvas id="panel" class="hidden" width="1" height="1"></canvas>
 </div>
 
+<div id="pad">
+  <div class="dpad">
+    <button class="up"    data-code="ArrowUp"    aria-label="上">▲</button>
+    <button class="left"  data-code="ArrowLeft"  aria-label="左">◀</button>
+    <button class="right" data-code="ArrowRight" aria-label="右">▶</button>
+    <button class="down"  data-code="ArrowDown"  aria-label="下">▼</button>
+  </div>
+  <div class="actions">
+    <button data-code="Space">AIに指示</button>
+    <button data-code="Escape">閉じる</button>
+  </div>
+</div>
+
 <div class="keys">
   <kbd>↑</kbd> <kbd>↓</kbd> <kbd>←</kbd> <kbd>→</kbd> で移動 / 向いている先へインタラクト<br>
-  <kbd>Space</kbd> でAIへの指示パネル（パネル内はマウスでカードをクリック）
+  <kbd>Space</kbd> でAIへの指示パネル（パネル内はカードをクリック / タップ）<br>
+  画面下のボタンでも同じ操作ができます
 </div>
 
 <div id="overlay"><div id="overlay-text"></div></div>
+<div id="toast" role="status" aria-live="polite"></div>
 
 <script>
 (function () {
-  // 320x400 のドット絵なので少しだけ拡大する。等倍に近いほど文字が読みやすい。
-  const SCALE = 1.5;
+  // ドット絵なので少しだけ拡大する(最大 1.5 倍)。スマホでは画面幅に収める。
+  const MAX_SCALE = 1.5;
+  function scaleFor(w) {
+    const avail = document.documentElement.clientWidth
+      - parseFloat(getComputedStyle(document.body).paddingLeft)
+      - parseFloat(getComputedStyle(document.body).paddingRight);
+    return Math.min(MAX_SCALE, avail / w);
+  }
 
   const gameCv = document.getElementById('game');
   const panelCv = document.getElementById('panel');
@@ -129,8 +204,9 @@
   function setCanvas(cv, w, h) {
     if (cv.width !== w) cv.width = w;
     if (cv.height !== h) cv.height = h;
-    cv.style.width = (w * SCALE) + 'px';
-    cv.style.height = (h * SCALE) + 'px';
+    const k = scaleFor(w);
+    cv.style.width = (w * k) + 'px';
+    cv.style.height = (h * k) + 'px';
   }
 
   function applyMeta(msg) {
@@ -216,6 +292,8 @@
     const msg = JSON.parse(ev.data);
     if (msg.type === 'meta') {
       applyMeta(msg);
+    } else if (msg.type === 'notice') {
+      showToast(msg.text);
     } else if (msg.type === 'pong') {
       el.rtt.textContent = (performance.now() - msg.t).toFixed(0);
     } else if (msg.type === 'status') {
@@ -229,6 +307,15 @@
       }
     }
   };
+
+  let toastTimer = null;
+  function showToast(text) {
+    const t = document.getElementById('toast');
+    t.textContent = text;
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove('show'), 2500);
+  }
 
   function showOverlay(html) {
     el.overlayText.innerHTML = html;
@@ -262,16 +349,38 @@
     };
   }
   function bindMouse(cv, getOffsetX) {
-    cv.addEventListener('mousemove', (e) => {
+    // pointer イベントはマウスとタッチの両方で届く。タッチには「ホバー」が
+    // 無いので、押した位置へカーソルを動かしてからクリックとして送る
+    // (指示パネルはホバー中のカードを見て選択を判定するため)。
+    cv.addEventListener('pointermove', (e) => {
+      if (e.pointerType !== 'mouse') return;
       const p = toSurface(cv, e, getOffsetX());
       send({ type: 'mousemove', x: p.x, y: p.y });
     });
-    cv.addEventListener('mousedown', (e) => {
-      if (e.button !== 0) return;
+    cv.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      e.preventDefault();
       const p = toSurface(cv, e, getOffsetX());
+      send({ type: 'mousemove', x: p.x, y: p.y });
       send({ type: 'mousedown', x: p.x, y: p.y });
     });
   }
+  // 画面上のボタン。キーボードと同じく、押した瞬間に1回だけ送る。
+  // 押しっぱなしでの連続入力はしない(キーボード側もキーリピートを
+  // 無視しているので、操作方法で条件がずれないようにそろえる)。
+  document.querySelectorAll('#pad button').forEach((btn) => {
+    btn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      btn.classList.add('pressed');
+      send({ type: 'key', code: btn.dataset.code });
+    });
+    const release = () => btn.classList.remove('pressed');
+    btn.addEventListener('pointerup', release);
+    btn.addEventListener('pointerleave', release);
+    btn.addEventListener('pointercancel', release);
+    btn.addEventListener('contextmenu', (e) => e.preventDefault());
+  });
+
   bindMouse(gameCv, () => 0);
   bindMouse(panelCv, () => baseW);
 
@@ -281,6 +390,11 @@
   }).catch(() => {});
 
   setCanvas(gameCv, baseW, baseH);
+  // 向きを変えたとき(縦↔横)に大きさを合わせ直す。
+  window.addEventListener('resize', () => {
+    setCanvas(gameCv, baseW, baseH);
+    if (!panelCv.classList.contains('hidden')) setCanvas(panelCv, panelCv.width, panelCv.height);
+  });
 })();
 </script>
 </body>

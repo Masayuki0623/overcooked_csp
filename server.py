@@ -129,6 +129,20 @@ class WebGamePlay:
         self.state = 'waiting'        # waiting -> running -> finished
         self.result = None
 
+        # ブラウザへ出す短いお知らせ(「いま指示できる作業はありません」等)。
+        # ゲーム側のスレッドが積み、WebSocket 側が取り出して送る。
+        self._notices = []
+        self._notices_lock = threading.Lock()
+
+    def notify(self, text):
+        with self._notices_lock:
+            self._notices.append(text)
+
+    def take_notices(self):
+        with self._notices_lock:
+            out, self._notices = self._notices, []
+        return out
+
     # ------------------------------------------------------------------
     # 構築と実行
     # ------------------------------------------------------------------
@@ -308,7 +322,9 @@ app = FastAPI(title='Overcooked CSP Web')
 
 @app.get('/')
 async def index():
-    return FileResponse(WEB_DIR / 'index.html')
+    # 画面を直したときに、参加者の端末に古い版が残らないようにする。
+    return FileResponse(WEB_DIR / 'index.html',
+                        headers={'Cache-Control': 'no-store'})
 
 
 @app.get('/api/config')
@@ -466,6 +482,9 @@ async def ws(sock: WebSocket):
                 await sock.send_bytes(data)
                 session.perf['sent'] += 1
 
+            for text in session.take_notices():
+                await sock.send_text(json.dumps({'type': 'notice', 'text': text}))
+
             if session.state != last_state:
                 last_state = session.state
                 await sock.send_text(json.dumps(
@@ -547,6 +566,21 @@ def main():
         return ret
 
     session.game.on_init = on_init
+
+    # 指示の候補が1つも無いとき、ローカル版は文字入力の窓(Tk)を開く。
+    # その窓はサーバーの PC の画面に出るため、ブラウザからは閉じられず、
+    # ゲームが一時停止したまま止まる。Web 版では開かない。
+    original_request = session.game._request_instruction
+
+    def request_instruction(trigger='space', allow_text_fallback=True):
+        # 指示できるのは「AI がいま着手できる作業」だけ。1つも無いときに
+        # 何も起きないと、ボタンが壊れているように見えるので知らせる。
+        if not session.game._get_unexecuted_task_candidates():
+            session.notify('いま AI に指示できる作業はありません')
+            return None
+        return original_request(trigger=trigger, allow_text_fallback=False)
+
+    session.game._request_instruction = request_instruction
 
     start_server_thread(args.host, args.port)
 
