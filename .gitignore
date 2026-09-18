@@ -44,3 +44,7 @@ google_api_key.txt
 openai_api_key.txt
 # 人がプレイしたセッションの記録。参加者のデータなので追跡しない。
 results/play_sessions.csv
+
+# 配置探索で作る一時的な地図
+testbed-cooking/gym_cooking/utils/levels/_search/
+results/layouts/
