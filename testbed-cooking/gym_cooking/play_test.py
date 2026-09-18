@@ -35,6 +35,10 @@ MAP_SETTINGS = dict(
     exp_partition=dict(level="exp_partition", max_num_orders=3,),
     exp_bottleneck=dict(level="exp_bottleneck", max_num_orders=3,),
     exp_ring=dict(level="exp_ring", max_num_orders=3,),
+    # 上の3つから、フルーツ・ミキサー・コップを取り除いた版(野菜だけの注文用)
+    exp_partition_veg=dict(level="exp_partition_veg", max_num_orders=3,),
+    exp_bottleneck_veg=dict(level="exp_bottleneck_veg", max_num_orders=3,),
+    exp_ring_veg=dict(level="exp_ring_veg", max_num_orders=3,),
 )
 
 if __name__ == '__main__':

@@ -114,6 +114,11 @@ _JP_FOOD = {'Lettuce': 'レタス', 'Onion': '玉ねぎ', 'Tomato': 'トマト',
 _JP_DISH = {'Salad': 'サラダ', 'Soup': 'スープ', 'Juice': 'ジュース'}
 
 
+def uses_fruit(recipes):
+    """注文の中にフルーツを使うもの(ジュース)があるか。"""
+    return any(f in r for r in recipes for f in ('Apple', 'Orange', 'Banana', 'Juice'))
+
+
 def recipe_label(name):
     """'OnionLettuceSoup' -> '玉ねぎ・レタスのスープ'。"""
     words = re.findall(r'[A-Z][a-z]*', name)
@@ -477,6 +482,9 @@ class WebGamePlay:
         sel = self.selection
         map_name = sel['map'] if sel else a.map
         orders = sel['recipes'] if sel else a.orders
+        if sel and not uses_fruit(orders):
+            # 野菜だけの注文では、フルーツ・ミキサー・コップのない版の地図を使う
+            map_name = f'{map_name}_veg'
         self.game, self.env, self.replay = play_main.init_env_replay(
             map_name, a.agent0, a.agent1, a.task,
             a.no_reschedule, a.debug,
