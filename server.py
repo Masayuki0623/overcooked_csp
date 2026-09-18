@@ -39,6 +39,10 @@ from datetime import datetime
 from pathlib import Path
 
 import pygame
+try:
+    from PIL import Image
+except ImportError:      # 無くても動く(画面が少し重くなるだけ)
+    Image = None
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 
@@ -57,6 +61,15 @@ from gym_cooking.utils.order_preset import preset_names  # noqa: E402
 
 WEB_DIR = ROOT / 'web'
 
+# 枠を取ってからスタートを押すまでの猶予(秒)。
+START_TIMEOUT_S = 120
+# 操作している人の端末から、これだけ何も届かなければ居なくなったとみなす(秒)。
+# ブラウザは1秒ごとに ping を送る。スマホは電波が切れても「閉じた」とは
+# 知らせてこないので、待っているだけでは枠が永久に空かない。
+PLAYER_SILENCE_TIMEOUT_S = 10
+# 1回の送信を待つ上限(秒)。これを超えたら相手は居ないとみなす。
+SEND_TIMEOUT_S = 5
+
 # スレッド間で GIL を渡す間隔(既定 5ms)。ローカル版と違い Web 版は
 # 環境・AI・配信・エンコードが同じプロセスで同時に動くため、既定のままだと
 # 1度 GIL を握ったスレッドが最大 5ms 手放さず、10Hz で回りたい環境スレッドの
@@ -74,6 +87,29 @@ KEY_MAP = {
     'Escape': pygame.K_ESCAPE,
 }
 
+
+
+def encode_frame(surface):
+    """1枚の画面を PNG にする。色を 256 色に減らしてから圧縮する。
+
+    ドット絵なので色数が少なく(実測 約1000色)、256色に落としても見た目は
+    ほぼ変わらない。そのまま PNG にすると 1枚 約19KB(10fps で 1.6Mbps)、
+    減色すると 約9KB(0.7Mbps)で、かかる時間はどちらも数ms。スマホの
+    回線では送る量がそのまま遅れになるので、軽い方を送る。
+    Pillow が無い環境では、従来どおり pygame でそのまま保存する。
+    """
+    buf = io.BytesIO()
+    try:
+        if Image is not None:
+            w, h = surface.get_size()
+            img = Image.frombytes('RGB', (w, h), pygame.image.tobytes(surface, 'RGB'))
+            img = img.quantize(colors=256, method=Image.Quantize.FASTOCTREE)
+            img.save(buf, 'PNG')
+        else:
+            pygame.image.save(surface, buf, 'png')
+    except Exception:
+        return None
+    return buf.getvalue()
 
 
 class RemoteMouse:
@@ -135,7 +171,8 @@ class WebGamePlay:
         self._hooks_installed = False
 
         # 配信経路のどこでコマが落ちているかを見るための計数。/api/perf で読む。
-        self.perf = {'rendered': 0, 'encoded': 0, 'sent': 0, 'started': time.time()}
+        self.perf = {'rendered': 0, 'encoded': 0, 'sent': 0, 'started': time.time(),
+                     'client_rtt_ms': []}
         # preparing -> waiting -> running -> finished -> preparing ...
         self.state = 'preparing'
         self.result = None
@@ -146,13 +183,36 @@ class WebGamePlay:
         self._notices_lock = threading.Lock()
 
     def try_acquire(self, token):
-        """空いていれば、この接続を操作する人にする。"""
+        """空いていれば、この接続を操作する人にする。
+
+        枠を取っただけではゲームは始めない。URL を開いた瞬間に始まると、
+        画面を見る前に時間が進んでしまう。スタートボタンで start() を呼ぶ。
+        """
         with self._player_lock:
             if self.player is None and self.state in ('waiting', 'running'):
                 self.player = token
-                self.client_connected.set()
                 return True
             return False
+
+    def start(self, token):
+        """操作する人がスタートを押した。"""
+        with self._player_lock:
+            if self.player is token and self.state == 'waiting':
+                self.client_connected.set()
+
+    def note_client_rtt(self, rtt_ms):
+        """参加者の端末で測った往復時間を残す。/api/perf で見る。
+
+        サーバーの手元で測っても参加者の遅さは分からない(Funnel を
+        経由しても、この PC から自分へつなぐと 1ms で返ってくる)。
+        """
+        try:
+            v = float(rtt_ms)
+        except (TypeError, ValueError):
+            return
+        buf = self.perf.setdefault('client_rtt_ms', [])
+        buf.append(v)
+        del buf[:-120]
 
     def release(self, token):
         with self._player_lock:
@@ -243,7 +303,8 @@ class WebGamePlay:
             self.client_connected.wait()
 
             self.state = 'running'
-            self.perf.update(rendered=0, encoded=0, sent=0, started=time.time())
+            self.perf.update(rendered=0, encoded=0, sent=0, started=time.time(),
+                             client_rtt_ms=[])
             print(f'[server] #{self.game_id} ゲームを開始します')
             success = False
             try:
@@ -340,12 +401,9 @@ class WebGamePlay:
         if surface is None:
             return None
 
-        buf = io.BytesIO()
-        try:
-            pygame.image.save(surface, buf, 'png')
-        except Exception:
+        data = encode_frame(surface)
+        if data is None:
             return None
-        data = buf.getvalue()
 
         with self._frame_lock:
             if data == self._frame:
@@ -467,6 +525,17 @@ async def state():
     })
 
 
+@app.get('/api/slot')
+async def slot():
+    """操作枠がいま埋まっているか。順番待ちが詰まったときの確認用。"""
+    return JSONResponse({
+        'state': session.state,
+        'game_id': session.game_id,
+        'player_connected': session.player is not None,
+        'remaining_s': session.remaining_seconds(),
+    })
+
+
 @app.get('/api/perf')
 async def perf():
     """どこが遅いかを切り分けるための実測値。
@@ -476,6 +545,12 @@ async def perf():
     """
     p = dict(session.perf)
     elapsed = max(1e-6, time.time() - p.pop('started'))
+    rtts = sorted(p.pop('client_rtt_ms', []) or [])
+    if rtts:
+        p['client_rtt_median_ms'] = rtts[len(rtts) // 2]
+        p['client_rtt_p90_ms'] = rtts[int(len(rtts) * 0.9)]
+        p['client_rtt_max_ms'] = rtts[-1]
+        p['client_rtt_samples'] = len(rtts)
     stats = getattr(session.game, 'loop_stats', {}) or {}
     return JSONResponse({
         'elapsed_s': round(elapsed, 1),
@@ -484,7 +559,7 @@ async def perf():
         'sent_fps': round(p['sent'] / elapsed, 2),
         'env_work_ms': round(stats.get('work_s', 0.0) * 1000, 1),
         'env_period_ms': round(stats.get('period_s', 0.0) * 1000, 1),
-        'env_target_ms': round(1000 / max(session.game.fps, 1), 1),
+        'env_target_ms': round(1000 / max(getattr(session.game, 'fps', 10), 1), 1),
         'cpu_count': os.cpu_count(),
         **p,
     })
@@ -531,7 +606,7 @@ async def wait_in_line(sock: WebSocket):
                 'remaining': None if remaining is None else round(remaining),
             }))
             await asyncio.sleep(1.0)
-    except (WebSocketDisconnect, RuntimeError):
+    except Exception:
         pass
 
 
@@ -543,6 +618,8 @@ async def ws(sock: WebSocket):
         await wait_in_line(sock)
         return
     my_game = session.game_id
+    acquired_at = time.time()
+    last_seen = [time.time()]
 
     loop = asyncio.get_running_loop()
     sent_version = 0
@@ -553,6 +630,7 @@ async def ws(sock: WebSocket):
         """ブラウザからの入力を pygame イベントへ流し続ける。"""
         while True:
             raw = await sock.receive_text()
+            last_seen[0] = time.time()
             try:
                 msg = json.loads(raw)
             except json.JSONDecodeError:
@@ -565,23 +643,40 @@ async def ws(sock: WebSocket):
                 session.post_mouse_move(msg.get('x', 0), msg.get('y', 0))
             elif kind == 'mousedown':
                 session.post_mouse_down(msg.get('x', 0), msg.get('y', 0))
+            elif kind == 'start':
+                session.start(token)
             elif kind == 'ping':
                 # RTT 計測用。クライアントの送信時刻をそのまま返す。
+                if msg.get('rtt') is not None:
+                    session.note_client_rtt(msg.get('rtt'))
                 await sock.send_text(json.dumps({'type': 'pong', 't': msg.get('t')}))
 
-    task = asyncio.create_task(pump_input())
-    try:
+    async def send_text(obj):
+        # 送信が戻ってこないことがある(相手が消えた直後)。待ち続けると
+        # 枠を握ったまま止まるので、時間を切る。
+        await asyncio.wait_for(sock.send_text(json.dumps(obj)), SEND_TIMEOUT_S)
+
+    async def stream():
+        """描画ができるたびに画面を送る。状態の変化もここで知らせる。"""
+        nonlocal sent_version, sent_size, last_state
         while True:
             # 次の描画を待って PNG 化する。待ちもエンコードも executor 側なので
             # イベントループは塞がらず、入力(ping/キー)は待たされない。
             await loop.run_in_executor(None, session.wait_and_capture)
 
+            # 枠を取ったままスタートされないと、後ろの人がずっと待たされる。
+            if (session.state == 'waiting'
+                    and time.time() - acquired_at > START_TIMEOUT_S):
+                await send_text({
+                    'type': 'kicked',
+                    'text': 'しばらくスタートされなかったので、<br>順番を次の人に譲りました'})
+                return
+
             # この人の回が終わった。結果を渡して、次の人に枠を譲る。
             if session.game_id != my_game:
-                await sock.send_text(json.dumps(
-                    {'type': 'status', 'state': 'finished',
-                     'result': session.results.get(my_game)}))
-                break
+                await send_text({'type': 'status', 'state': 'finished',
+                                 'result': session.results.get(my_game)})
+                return
 
             version, data, size = session.latest_frame()
 
@@ -591,30 +686,47 @@ async def ws(sock: WebSocket):
                 # 出すと display はこれより横に広がるが、左側 base_w ぶんは
                 # 常にゲーム画面なので、クライアントはそこだけを切り出して
                 # 位置を動かさずに描き続けられる。
-                await sock.send_text(json.dumps(
-                    {'type': 'meta', 'w': size[0], 'h': size[1],
-                     'base_w': session.game.width, 'base_h': session.game.height}))
+                await send_text({'type': 'meta', 'w': size[0], 'h': size[1],
+                                 'base_w': session.game.width,
+                                 'base_h': session.game.height})
 
             if data is not None and version != sent_version:
                 sent_version = version
-                await sock.send_bytes(data)
+                await asyncio.wait_for(sock.send_bytes(data), SEND_TIMEOUT_S)
                 session.perf['sent'] += 1
 
             for text in session.take_notices():
-                await sock.send_text(json.dumps({'type': 'notice', 'text': text}))
+                await send_text({'type': 'notice', 'text': text})
 
             if session.state != last_state:
                 last_state = session.state
-                await sock.send_text(json.dumps(
-                    {'type': 'status', 'state': session.state,
-                     'result': session.result}))
-    except (WebSocketDisconnect, RuntimeError):
-        pass
+                await send_text({'type': 'status', 'state': session.state,
+                                 'result': session.result})
+
+    async def watchdog():
+        """何も言わずに消えた端末(電波切れ等)を見つける。"""
+        while True:
+            await asyncio.sleep(1.0)
+            if time.time() - last_seen[0] > PLAYER_SILENCE_TIMEOUT_S:
+                return
+
+    # 入力・画面送り・見張りを別々に回し、どれか1つでも終わったら全部止めて
+    # 枠を空ける。1本のループで順に見ていると、送信が戻ってこないだけで
+    # 切断の確認までたどり着けず、枠を握ったまま止まる(実測: 切断後も
+    # 枠が空かず、次の人がずっと「別の人がプレイ中」のままだった)。
+    tasks = [asyncio.create_task(c) for c in (pump_input(), stream(), watchdog())]
+    try:
+        await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
     finally:
-        task.cancel()
+        for t in tasks:
+            t.cancel()
         # 途中で閉じた(再読み込みした)ときも枠を空ける。同じ人が
         # 開き直せば、続きから操作できる。
         session.release(token)
+        try:
+            await asyncio.wait_for(sock.close(), 2)
+        except Exception:
+            pass
 
 
 def start_server_thread(host, port):

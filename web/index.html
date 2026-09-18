@@ -11,59 +11,63 @@
     --text: #e8eaed;
     --muted: #9aa2ad;
     --bad: #e8697d;
+    --btn-bg: #2a2f38;
+    --btn-line: #3a414c;
+    /* 操作ボタンの大きさと、画面下からの高さ。設定画面から変えられる。 */
+    --btn: 64px;
+    --lift: 16px;
   }
   * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); }
   body {
-    margin: 0;
-    background: var(--bg);
     color: var(--text);
     font-family: "Segoe UI", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", sans-serif;
-    padding: 20px 24px 40px;
-    min-height: 100vh;
-    /* スマホでボタンを連打したときに、文字選択やダブルタップ拡大が起きないように */
+    padding: 16px 24px 32px;
+    /* ボタンを連打したときに、文字選択やダブルタップ拡大が起きないように */
     -webkit-user-select: none;
     user-select: none;
     -webkit-touch-callout: none;
   }
-  @media (max-width: 640px) {
-    body { padding: 10px 12px 24px; }
-    h1 { font-size: 15px; margin-bottom: 8px; }
-    .bar { font-size: 11.5px; padding: 7px 10px; gap: 4px 12px; }
-    #cfg { display: none; }
-  }
-  h1 { font-size: 17px; font-weight: 600; margin: 0 0 12px; letter-spacing: .02em; }
 
-  /* ゲーム画面は必ず左端。指示パネルが出ても位置がずれないよう、
-     ゲームとパネルを別々の canvas にして横に並べる。 */
-  #stage {
-    display: flex;
-    flex-wrap: wrap;      /* 画面が狭いと、指示パネルはゲーム画面の下に回る */
-    align-items: flex-start;
-    gap: 12px;
+  /* ---- 上の帯 ---- */
+  .bar {
+    display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: center;
+    background: var(--panel); border-radius: 8px; padding: 8px 12px;
+    font-size: 12.5px; color: var(--muted); margin-bottom: 12px;
   }
+  .bar b { color: var(--text); font-weight: 600; }
+  .bar .title { color: var(--text); font-weight: 600; font-size: 14px; margin-right: 4px; }
+  .dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--bad); margin-right: 6px; vertical-align: middle;
+  }
+  .dot.on { background: #6bd08a; }
+  #gear {
+    margin-left: auto; font: inherit; font-size: 13px; color: var(--text);
+    background: var(--btn-bg); border: 1px solid var(--btn-line); border-radius: 6px;
+    padding: 5px 10px;
+  }
+
+  /* ---- ゲーム画面 ---- */
+  #stage { position: relative; display: flex; align-items: flex-start; gap: 12px; }
   #stage canvas {
-    image-rendering: pixelated;
-    display: block;
-    background: #000;
-    border-radius: 6px;
-    box-shadow: 0 6px 24px rgba(0,0,0,.45);
+    image-rendering: pixelated; display: block; background: #000;
+    border-radius: 6px; box-shadow: 0 6px 24px rgba(0,0,0,.45);
   }
-  #game { cursor: default; }
   #panel { cursor: pointer; touch-action: none; }
+  #panel.hidden { display: none; }
 
-  /* 画面上の操作ボタン。キーボードが無い端末(スマホ)でも遊べるように。 */
+  /* ---- 操作ボタン ---- */
   #pad {
-    display: flex;
-    align-items: center;
-    gap: 28px;
-    margin-top: 16px;
+    display: flex; align-items: center; gap: 24px; margin-top: 16px;
     touch-action: none;
   }
+  #pad.dpad-right { flex-direction: row-reverse; }
   .dpad {
     display: grid;
-    grid-template-columns: repeat(3, 64px);
-    grid-template-rows: repeat(3, 64px);
-    gap: 6px;
+    grid-template-columns: repeat(3, var(--btn));
+    grid-template-rows: repeat(3, var(--btn));
+    gap: calc(var(--btn) * 0.1);
   }
   .dpad .up    { grid-column: 2; grid-row: 1; }
   .dpad .left  { grid-column: 1; grid-row: 2; }
@@ -71,84 +75,99 @@
   .dpad .down  { grid-column: 2; grid-row: 3; }
   .actions { display: flex; flex-direction: column; gap: 10px; }
   #pad button {
-    font: inherit;
-    font-size: 24px;
-    color: var(--text);
-    background: #2a2f38;
-    border: 1px solid #3a414c;
-    border-bottom-width: 3px;
-    border-radius: 10px;
-    touch-action: none;
-    -webkit-tap-highlight-color: transparent;
+    font: inherit; font-size: calc(var(--btn) * 0.38); color: var(--text);
+    background: var(--btn-bg); border: 1px solid var(--btn-line); border-bottom-width: 3px;
+    border-radius: 10px; touch-action: none; -webkit-tap-highlight-color: transparent;
+    padding: 0;
   }
-  #pad .actions button { font-size: 15px; padding: 14px 18px; min-width: 104px; }
+  #pad .actions button {
+    font-size: 15px; height: calc(var(--btn) * 0.9); min-width: calc(var(--btn) * 1.6);
+    padding: 0 14px;
+  }
   #pad button.pressed { background: #3b4350; transform: translateY(2px); border-bottom-width: 1px; }
-  @media (max-width: 640px) {
-    #pad { justify-content: center; gap: 20px; }
-  }
-  #panel.hidden { display: none; }
-
-  .bar {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px 20px;
-    align-items: center;
-    background: var(--panel);
-    border-radius: 8px;
-    padding: 9px 14px;
-    font-size: 12.5px;
-    color: var(--muted);
-    margin-bottom: 12px;
-    width: fit-content;
-  }
-  .bar b { color: var(--text); font-weight: 600; }
-  .dot {
-    display: inline-block; width: 8px; height: 8px;
-    border-radius: 50%; background: var(--bad); margin-right: 6px;
-    vertical-align: middle;
-  }
-  .dot.on { background: #6bd08a; }
 
   .keys { font-size: 12.5px; color: var(--muted); line-height: 1.9; margin-top: 14px; }
   kbd {
-    background: #2a2f38; border: 1px solid #3a414c; border-bottom-width: 2px;
-    border-radius: 4px; padding: 1px 7px; font-family: inherit;
-    font-size: 12px; color: var(--text);
+    background: var(--btn-bg); border: 1px solid var(--btn-line); border-bottom-width: 2px;
+    border-radius: 4px; padding: 1px 7px; font-family: inherit; font-size: 12px; color: var(--text);
   }
+
+  /* ---- スマホ(狭い画面・指で触る端末) ----
+     ページ全体を画面の高さに収めてスクロールさせない。スクロールできると、
+     ボタンを押したつもりが画面が動いただけ、ということが起きる。
+     ボタンは画面下に固定し、OS のジェスチャー領域(ホームバー)の分だけ
+     持ち上げる。 */
+  body.compact {
+    height: 100dvh; overflow: hidden; display: flex; flex-direction: column;
+    padding: calc(env(safe-area-inset-top) + 8px) 10px 0;
+  }
+  body.compact .bar { font-size: 11.5px; padding: 6px 10px; gap: 4px 12px; margin-bottom: 8px; }
+  body.compact .bar .title, body.compact #cfg, body.compact .keys { display: none; }
+  body.compact #stage {
+    flex: 1; min-height: 0; justify-content: center; align-items: center;
+  }
+  /* 指示パネルはゲーム画面の上に重ねる(選んでいる間はゲームが止まっている) */
+  body.compact #panel { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+  body.compact #pad {
+    justify-content: center; gap: 18px; margin-top: 8px;
+    padding-bottom: calc(env(safe-area-inset-bottom) + var(--lift));
+  }
+
+  /* ---- 重ね表示 ---- */
   #overlay {
-    position: fixed; inset: 0; display: none;
-    align-items: center; justify-content: center;
-    background: rgba(10,12,15,.82); font-size: 16px; text-align: center;
-    padding: 24px;
+    position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+    background: rgba(10,12,15,.84); font-size: 16px; text-align: center; padding: 24px; z-index: 10;
   }
   #overlay.show { display: flex; }
   #overlay .big { font-size: 20px; font-weight: 600; margin-bottom: 10px; }
   #overlay .sub { color: var(--muted); font-size: 14px; line-height: 1.8; }
   #overlay .count { font-size: 40px; font-weight: 700; margin: 14px 0 4px; }
-  #overlay button {
+  #overlay button, #settings button {
     margin-top: 20px; font: inherit; font-size: 16px; color: var(--text);
-    background: #2a2f38; border: 1px solid #3a414c; border-bottom-width: 3px;
-    border-radius: 10px; padding: 12px 24px;
+    background: var(--btn-bg); border: 1px solid var(--btn-line); border-bottom-width: 3px;
+    border-radius: 10px; padding: 12px 28px;
   }
+  #overlay button.primary { background: #2f6f4b; border-color: #3f8a60; font-size: 18px; padding: 14px 40px; }
+
   #toast {
-    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
-    background: #2a2f38; border: 1px solid #3a414c; border-radius: 8px;
+    position: fixed; left: 50%; top: 64px; transform: translateX(-50%);
+    background: var(--btn-bg); border: 1px solid var(--btn-line); border-radius: 8px;
     padding: 10px 16px; font-size: 14px; opacity: 0; pointer-events: none;
-    transition: opacity .2s; max-width: calc(100% - 32px); text-align: center;
+    transition: opacity .2s; max-width: calc(100% - 32px); text-align: center; z-index: 20;
   }
   #toast.show { opacity: 1; }
+
+  /* ---- 設定 ---- */
+  #settings {
+    position: fixed; inset: 0; display: none; align-items: flex-end; justify-content: center;
+    background: rgba(10,12,15,.6); z-index: 30;
+  }
+  #settings.show { display: flex; }
+  #settings .sheet {
+    width: min(480px, 100%); background: var(--panel); border-radius: 14px 14px 0 0;
+    padding: 18px 20px calc(env(safe-area-inset-bottom) + 18px);
+  }
+  #settings h2 { font-size: 16px; margin: 0 0 14px; }
+  #settings label { display: block; font-size: 13px; color: var(--muted); margin: 14px 0 6px; }
+  #settings label b { color: var(--text); font-weight: 600; }
+  #settings input[type=range] { width: 100%; }
+  #settings .seg { display: flex; gap: 8px; }
+  #settings .seg button { margin: 0; flex: 1; padding: 10px; font-size: 14px; }
+  #settings .seg button.on { background: #3b4350; border-color: #6b7686; }
+  #settings .row { display: flex; gap: 10px; }
+  #settings .row button { flex: 1; }
 </style>
 </head>
 <body>
 
-<h1>Overcooked CSP — 実験用プレイ画面</h1>
-
 <div class="bar">
+  <span class="title">Overcooked CSP</span>
   <span><span id="conn-dot" class="dot"></span><span id="conn">接続中...</span></span>
   <span>RTT <b id="rtt">--</b> ms</span>
-  <span>受信/描画 <b id="fps">--</b> fps</span>
+  <span><b id="fps">--</b> fps</span>
   <span>状態 <b id="state">--</b></span>
   <span id="cfg"></span>
+  <button id="gear" type="button" aria-label="ボタンの設定">⚙ 設定</button>
 </div>
 
 <div id="stage">
@@ -172,25 +191,37 @@
 <div class="keys">
   <kbd>↑</kbd> <kbd>↓</kbd> <kbd>←</kbd> <kbd>→</kbd> で移動 / 向いている先へインタラクト<br>
   <kbd>Space</kbd> でAIへの指示パネル（パネル内はカードをクリック / タップ）<br>
-  画面下のボタンでも同じ操作ができます
+  画面下のボタンでも同じ操作ができます。ボタンの大きさや位置は「⚙ 設定」で変えられます
 </div>
 
 <div id="overlay"><div id="overlay-text"></div></div>
 <div id="toast" role="status" aria-live="polite"></div>
 
+<div id="settings" role="dialog" aria-label="ボタンの設定">
+  <div class="sheet">
+    <h2>ボタンの設定</h2>
+    <label>ボタンの大きさ <b id="size-val"></b></label>
+    <input id="size" type="range" min="44" max="100" step="2">
+    <label>画面下からの高さ <b id="lift-val"></b></label>
+    <input id="lift" type="range" min="0" max="200" step="4">
+    <label>十字キーの位置</label>
+    <div class="seg">
+      <button type="button" data-side="left">左</button>
+      <button type="button" data-side="right">右</button>
+    </div>
+    <div class="row">
+      <button type="button" id="reset">初期値に戻す</button>
+      <button type="button" id="done">閉じる</button>
+    </div>
+  </div>
+</div>
+
 <script>
 (function () {
-  // ドット絵なので少しだけ拡大する(最大 1.5 倍)。スマホでは画面幅に収める。
-  const MAX_SCALE = 1.5;
-  function scaleFor(w) {
-    const avail = document.documentElement.clientWidth
-      - parseFloat(getComputedStyle(document.body).paddingLeft)
-      - parseFloat(getComputedStyle(document.body).paddingRight);
-    return Math.min(MAX_SCALE, avail / w);
-  }
-
   const gameCv = document.getElementById('game');
   const panelCv = document.getElementById('panel');
+  const stage = document.getElementById('stage');
+  const pad = document.getElementById('pad');
   const gameCtx = gameCv.getContext('2d');
   const panelCtx = panelCv.getContext('2d');
 
@@ -205,37 +236,106 @@
     overlayText: document.getElementById('overlay-text'),
   };
 
+  // ---- 画面の型 ------------------------------------------------------
+  // 指で触る端末か、幅の狭い画面では、スマホ用の配置にする。
+  function updateCompact() {
+    const touch = matchMedia('(pointer: coarse)').matches;
+    document.body.classList.toggle('compact', touch || window.innerWidth <= 700);
+  }
+  updateCompact();
+
+  // ---- ボタンの設定(端末ごとに保存) -----------------------------------
+  // 画面下の端は OS のジェスチャー(ホームバー)と重なりやすいので、少し持ち上げておく。
+  const DEFAULTS = { size: 64, lift: 28, side: 'left' };
+  const STORE = 'overcooked-pad-v1';
+  let prefs = Object.assign({}, DEFAULTS);
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORE) || 'null');
+    if (saved) prefs = Object.assign(prefs, saved);
+  } catch (e) { /* 保存できない環境(プライベートモード等)では既定値のまま */ }
+
+  // 画面幅に収まるボタンの大きさの上限。十字キー3つ分と右(左)の2つのボタン、
+  // その間の隙間が横一列に並ぶ(= ボタン幅のおよそ 4.8 倍 + 余白 66px)。
+  // はみ出すと端のボタンが画面の外に出て押せなくなるので、それ以上は大きくしない。
+  function maxButtonSize() {
+    return Math.floor((window.innerWidth - 66) / 4.8);
+  }
+
+  function applyPrefs() {
+    const cap = maxButtonSize();
+    const size = Math.max(40, Math.min(prefs.size, cap));
+    document.documentElement.style.setProperty('--btn', size + 'px');
+    document.documentElement.style.setProperty('--lift', prefs.lift + 'px');
+    pad.classList.toggle('dpad-right', prefs.side === 'right');
+    document.getElementById('size').value = prefs.size;
+    document.getElementById('lift').value = prefs.lift;
+    document.getElementById('size-val').textContent =
+      size < prefs.size ? `${size}px (画面幅に合わせて制限)` : `${prefs.size}px`;
+    document.getElementById('lift-val').textContent = prefs.lift + 'px';
+    document.querySelectorAll('#settings [data-side]').forEach((b) =>
+      b.classList.toggle('on', b.dataset.side === prefs.side));
+    fitAll();
+  }
+  function savePrefs() {
+    try { localStorage.setItem(STORE, JSON.stringify(prefs)); } catch (e) {}
+  }
+
+  const settings = document.getElementById('settings');
+  document.getElementById('gear').addEventListener('click', () => settings.classList.add('show'));
+  document.getElementById('done').addEventListener('click', () => settings.classList.remove('show'));
+  settings.addEventListener('click', (e) => { if (e.target === settings) settings.classList.remove('show'); });
+  document.getElementById('size').addEventListener('input', (e) => {
+    prefs.size = +e.target.value; applyPrefs(); savePrefs();
+  });
+  document.getElementById('lift').addEventListener('input', (e) => {
+    prefs.lift = +e.target.value; applyPrefs(); savePrefs();
+  });
+  document.querySelectorAll('#settings [data-side]').forEach((b) =>
+    b.addEventListener('click', () => { prefs.side = b.dataset.side; applyPrefs(); savePrefs(); }));
+  document.getElementById('reset').addEventListener('click', () => {
+    prefs = Object.assign({}, DEFAULTS); applyPrefs(); savePrefs();
+  });
+
+  // ---- 大きさ合わせ ----------------------------------------------------
   // サーバー側 Surface の大きさ。base はゲーム画面のみ、full は指示パネル込み。
   let baseW = 320, baseH = 400;
   let fullW = 320, fullH = 400;
+  const MAX_SCALE = 1.5;   // ドット絵なので少しだけ拡大する
 
-  function setCanvas(cv, w, h) {
+  function fit(cv, w, h) {
     if (cv.width !== w) cv.width = w;
     if (cv.height !== h) cv.height = h;
-    const k = scaleFor(w);
-    cv.style.width = (w * k) + 'px';
-    cv.style.height = (h * k) + 'px';
+    let k;
+    if (document.body.classList.contains('compact')) {
+      // 操作ボタンを置いた残りの高さに、縦横とも収める。
+      k = Math.min(MAX_SCALE, stage.clientWidth / w, stage.clientHeight / h);
+    } else {
+      k = Math.min(MAX_SCALE, (stage.clientWidth || document.body.clientWidth) / w);
+    }
+    k = Math.max(k, 0.1);
+    cv.style.width = Math.floor(w * k) + 'px';
+    cv.style.height = Math.floor(h * k) + 'px';
+  }
+  function fitAll() {
+    fit(gameCv, baseW, baseH);
+    if (!panelCv.classList.contains('hidden')) fit(panelCv, panelCv.width, panelCv.height);
   }
 
   function applyMeta(msg) {
     baseW = msg.base_w; baseH = msg.base_h;
     fullW = msg.w;      fullH = msg.h;
-
-    // ゲーム画面の canvas は常に同じ大きさ・同じ位置のまま動かさない。
-    setCanvas(gameCv, baseW, baseH);
-
+    fit(gameCv, baseW, baseH);
     const panelW = Math.max(0, fullW - baseW);
     if (panelW > 0) {
-      setCanvas(panelCv, panelW, fullH);
       panelCv.classList.remove('hidden');
+      fit(panelCv, panelW, fullH);
     } else {
       panelCv.classList.add('hidden');
     }
   }
 
-  // ---- 描画 --------------------------------------------------------
-  let recvTimes = [];      // 受信した枚数
-  let drawTimes = [];      // 実際に描けた枚数
+  // ---- 描画 ------------------------------------------------------------
+  let recvTimes = [];
   let drawing = false;
   let queued = null;       // 展開中に届いた最新の1枚
 
@@ -253,43 +353,43 @@
     createImageBitmap(blob).then(bmp => {
       // 左 baseW ぶんがゲーム画面、その右が指示パネル。切り分けて別々に描く。
       gameCtx.drawImage(bmp, 0, 0, baseW, baseH, 0, 0, baseW, baseH);
-
       const panelW = bmp.width - baseW;
       if (panelW > 0) {
-        if (panelCv.width !== panelW || panelCv.height !== bmp.height) {
-          setCanvas(panelCv, panelW, bmp.height);
+        if (panelCv.classList.contains('hidden') || panelCv.width !== panelW
+            || panelCv.height !== bmp.height) {
           panelCv.classList.remove('hidden');
+          fit(panelCv, panelW, bmp.height);
         }
-        panelCtx.drawImage(bmp, baseW, 0, panelW, bmp.height,
-                                0, 0, panelW, bmp.height);
+        panelCtx.drawImage(bmp, baseW, 0, panelW, bmp.height, 0, 0, panelW, bmp.height);
+      } else if (!panelCv.classList.contains('hidden')) {
+        panelCv.classList.add('hidden');
       }
       bmp.close();
       drawing = false;
-
-      drawTimes.push(performance.now());
-      el.fps.textContent = `${rate(recvTimes)} / ${rate(drawTimes)}`;
-
+      el.fps.textContent = rate(recvTimes);
       if (queued) { const b = queued; queued = null; drawBlob(b); }
     }).catch(() => { drawing = false; });
   }
 
-  // ---- 接続 --------------------------------------------------------
+  // ---- 接続 ------------------------------------------------------------
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const ws = new WebSocket(`${proto}://${location.host}/ws`);
   ws.binaryType = 'blob';
+  let lastRtt = null;
 
   ws.onopen = () => {
     el.conn.textContent = '接続済み';
     el.dot.classList.add('on');
     setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'ping', t: performance.now() }));
-      }
+      // 直前に測った往復時間も一緒に送る。サーバー側で、参加者が実際に
+      // どれだけ待たされているかを記録するため。
+      send({ type: 'ping', t: performance.now(), rtt: lastRtt });
     }, 1000);
   };
 
   // 結果表示や順番待ちの表示を出したあとは、切断の案内で上書きしない。
   let settled = false;
+  let started = false;
 
   ws.onclose = () => {
     el.conn.textContent = '切断されました';
@@ -299,10 +399,21 @@
                 '<button onclick="location.reload()">再読み込み</button>');
   };
 
+  function showStart() {
+    showOverlay(
+      '<div class="big">準備ができました</div>' +
+      '<div class="sub">ボタンを押すとゲームが始まります</div>' +
+      '<button class="primary" id="start">スタート</button>');
+    document.getElementById('start').addEventListener('click', () => {
+      send({ type: 'start' });
+      showOverlay('<div class="big">まもなく始まります</div>');
+    });
+  }
+
   ws.onmessage = (ev) => {
     if (typeof ev.data !== 'string') { drawBlob(ev.data); return; }
-
     const msg = JSON.parse(ev.data);
+
     if (msg.type === 'meta') {
       applyMeta(msg);
     } else if (msg.type === 'busy') {
@@ -310,27 +421,40 @@
       settled = true;
       el.conn.textContent = '順番待ち';
       el.state.textContent = '順番待ち';
-      const playing = msg.state === 'running' && msg.remaining != null;
-      showOverlay(
-        '<div class="big">別の人がプレイ中です</div>' +
-        (playing
-          ? `<div class="sub">終わりしだい、自動で始まります</div>` +
-            `<div class="count">${msg.remaining}</div><div class="sub">秒ほどで終わる予定</div>`
-          : '<div class="sub">次のゲームを準備しています。<br>このままお待ちください。</div>'));
+      let body;
+      if (msg.state === 'running' && msg.remaining != null) {
+        body = '<div class="sub">終わりしだい、自動で始まります</div>' +
+               `<div class="count">${msg.remaining}</div><div class="sub">秒ほどで終わる予定</div>`;
+      } else if (msg.state === 'waiting') {
+        body = '<div class="sub">別の人がまもなく始めるところです。<br>このままお待ちください。</div>';
+      } else {
+        body = '<div class="sub">次のゲームを準備しています。<br>このままお待ちください。</div>';
+      }
+      showOverlay('<div class="big">別の人がプレイ中です</div>' + body);
     } else if (msg.type === 'free') {
       // 空いた。開き直すと、今度はこの端末が操作する側になる。
       settled = true;
       showOverlay('<div class="big">順番が来ました</div><div class="sub">接続しています...</div>');
       setTimeout(() => location.reload(), 500);
+    } else if (msg.type === 'kicked') {
+      settled = true;
+      showOverlay(`<div class="big">${msg.text}</div>` +
+                  '<button onclick="location.reload()">もう一度並ぶ</button>');
     } else if (msg.type === 'notice') {
       showToast(msg.text);
     } else if (msg.type === 'pong') {
-      el.rtt.textContent = (performance.now() - msg.t).toFixed(0);
+      lastRtt = Math.round(performance.now() - msg.t);
+      el.rtt.textContent = lastRtt;
     } else if (msg.type === 'status') {
       el.state.textContent = ({
         preparing: '準備中', waiting: '開始待ち', running: 'プレイ中', finished: '終了',
       })[msg.state] || msg.state;
-      if (msg.state === 'finished' && msg.result) {
+      if (msg.state === 'waiting' && !started) {
+        showStart();
+      } else if (msg.state === 'running') {
+        started = true;
+        hideOverlay();
+      } else if (msg.state === 'finished' && msg.result) {
         settled = true;
         showOverlay(
           '<div class="big">ゲーム終了</div>' +
@@ -349,26 +473,23 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => t.classList.remove('show'), 2500);
   }
-
   function showOverlay(html) {
     el.overlayText.innerHTML = html;
     el.overlay.classList.add('show');
   }
+  function hideOverlay() { el.overlay.classList.remove('show'); }
 
   function send(obj) {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
   }
 
-  // ---- 入力 --------------------------------------------------------
-  // キーは押した瞬間だけ送る。サーバーは次の tick(100ms)で適用する。
+  // ---- 入力 ------------------------------------------------------------
   const KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'Escape']);
   window.addEventListener('keydown', (e) => {
     if (!KEYS.has(e.code)) return;
     e.preventDefault();   // 矢印/Space でのページスクロールを止める
-    if (e.repeat) {
-      // キーリピートは OS 依存で速度がばらつく。実験条件を揃えるため無視する。
-      return;
-    }
+    // キーリピートは OS 依存で速度がばらつく。実験条件を揃えるため無視する。
+    if (e.repeat) return;
     send({ type: 'key', code: e.code });
   });
 
@@ -381,10 +502,9 @@
       y: Math.round((e.clientY - r.top) * cv.height / r.height),
     };
   }
-  function bindMouse(cv, getOffsetX) {
-    // pointer イベントはマウスとタッチの両方で届く。タッチには「ホバー」が
-    // 無いので、押した位置へカーソルを動かしてからクリックとして送る
-    // (指示パネルはホバー中のカードを見て選択を判定するため)。
+  function bindPointer(cv, getOffsetX) {
+    // タッチには「ホバー」が無いので、押した位置へカーソルを動かしてから
+    // クリックとして送る(指示パネルはホバー中のカードで選択を判定する)。
     cv.addEventListener('pointermove', (e) => {
       if (e.pointerType !== 'mouse') return;
       const p = toSurface(cv, e, getOffsetX());
@@ -398,36 +518,38 @@
       send({ type: 'mousedown', x: p.x, y: p.y });
     });
   }
-  // 画面上のボタン。キーボードと同じく、押した瞬間に1回だけ送る。
-  // 押しっぱなしでの連続入力はしない(キーボード側もキーリピートを
-  // 無視しているので、操作方法で条件がずれないようにそろえる)。
+
+  // 画面上のボタン。押した瞬間に1回だけ送る(押しっぱなしで連続しないのは
+  // キーボード側でキーリピートを無視しているのとそろえるため)。
+  // 複数の指で同時に触っても取りこぼさないよう、ボタンごとに pointer を捕まえる。
   document.querySelectorAll('#pad button').forEach((btn) => {
     btn.addEventListener('pointerdown', (e) => {
       e.preventDefault();
+      try { btn.setPointerCapture(e.pointerId); } catch (err) {}
       btn.classList.add('pressed');
+      if (navigator.vibrate) { try { navigator.vibrate(8); } catch (err) {} }
       send({ type: 'key', code: btn.dataset.code });
     });
     const release = () => btn.classList.remove('pressed');
     btn.addEventListener('pointerup', release);
-    btn.addEventListener('pointerleave', release);
     btn.addEventListener('pointercancel', release);
+    btn.addEventListener('lostpointercapture', release);
     btn.addEventListener('contextmenu', (e) => e.preventDefault());
   });
+  // ボタンの隙間を触ったときに、ページが拡大・スクロールしないように。
+  pad.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
 
-  bindMouse(gameCv, () => 0);
-  bindMouse(panelCv, () => baseW);
+  bindPointer(gameCv, () => 0);
+  bindPointer(panelCv, () => baseW);
 
-  // ---- 実験条件の表示 -----------------------------------------------
+  // ---- 実験条件の表示 -------------------------------------------------
   fetch('/api/config').then(r => r.json()).then(c => {
     el.cfg.textContent = `map=${c.map} / ${c.agent0} vs ${c.agent1} / orders=${c.orders}`;
   }).catch(() => {});
 
-  setCanvas(gameCv, baseW, baseH);
-  // 向きを変えたとき(縦↔横)に大きさを合わせ直す。
-  window.addEventListener('resize', () => {
-    setCanvas(gameCv, baseW, baseH);
-    if (!panelCv.classList.contains('hidden')) setCanvas(panelCv, panelCv.width, panelCv.height);
-  });
+  applyPrefs();
+  // 向きを変えたとき(縦↔横)やアドレスバーの出入りで、大きさを合わせ直す。
+  window.addEventListener('resize', () => { updateCompact(); applyPrefs(); });
 })();
 </script>
 </body>
