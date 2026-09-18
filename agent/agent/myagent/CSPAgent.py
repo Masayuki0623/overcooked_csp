@@ -5020,7 +5020,11 @@ class CSPAgent:
                     })
 
             if cook_needed:
-                dur = self._task_duration_frames(env, 'cook', dish_name, order_idx)
+                # 材料は置き場(assigned_counter)に集めてから鍋へ運ぶ。置き場を
+                # 渡さないと「鍋の隣の台から」と見積もられ、置き場から鍋までの
+                # 移動(この地図で8歩前後)がまるごと抜けていた。
+                dur = self._task_duration_frames(
+                    env, 'cook', dish_name, order_idx, assigned_counter)
                 if dur is not None:
                     tasks.append({
                         'id': ('cook', dish_name, order_uid),
@@ -5522,7 +5526,15 @@ class CSPAgent:
         for i in range(num_tasks):
             t = tasks[i]
             verb = t['verb']
-            if verb == 'cook':
+            if verb == 'chop':
+                # 共有台まで運んでもらった材料を刻む工程は、運び終わるまで
+                # 始められない。この制約が無かったため、計画上は材料が届く
+                # 前から刻み始めていた(実測: 運搬の完了 3.6秒に対し、刻む
+                # 工程の開始が 0.4秒)。
+                carry_id = ('carry', t['obj'], t['order'])
+                if carry_id in vars_by_tid:
+                    model.Add(starts[i] >= vars_by_tid[carry_id]['end'])
+            elif verb == 'cook':
                 order_vars = vars_by_order.get(t['order'], [])
                 chops = [v for v in order_vars if v['task']['verb'] == 'chop']
                 for c in chops:
