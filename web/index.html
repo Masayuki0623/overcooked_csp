@@ -371,6 +371,77 @@
     }).catch(() => { drawing = false; });
   }
 
+  // ---- 盤面をこの端末で描く ---------------------------------------------
+  // サーバーは画像ではなく「どの絵をどこに描くか」の命令列だけを送ってくる
+  // (pygame が描くときに使ったものと同じ)。ここで同じ順に描き直すので、
+  // 見た目はローカル版と同じになる。?mode=png にすると従来の画像方式。
+  const MODE = new URLSearchParams(location.search).get('mode') === 'png' ? 'png' : 'draw';
+  const defs = new Map();   // 番号 -> 命令
+  let seq = [];             // いまのコマで描く命令の番号の列
+  const sprites = new Map();
+
+  function sprite(name) {
+    let im = sprites.get(name);
+    if (!im) {
+      im = new Image();
+      // 初めて使う絵は読み込み待ちになる。読み込めたら描き直す。
+      im.onload = () => paint();
+      im.src = '/graphics/' + encodeURIComponent(name) + '.png';
+      sprites.set(name, im);
+    }
+    return im;
+  }
+  function rgb(e, i) { return `rgb(${e[i]},${e[i + 1]},${e[i + 2]})`; }
+
+  function paint() {
+    const c = gameCtx;
+    c.imageSmoothingEnabled = false;   // ドット絵をぼかさない(pygame と同じ)
+    for (const id of seq) {
+      const e = defs.get(id);
+      if (!e) continue;
+      switch (e[0]) {
+        case 'F':   // ['F', r, g, b]
+          c.fillStyle = rgb(e, 1);
+          c.fillRect(0, 0, gameCv.width, gameCv.height);
+          break;
+        case 'R': { // ['R', r, g, b, x, y, w, h, 線幅]
+          const lw = e[8];
+          if (lw > 0) {
+            // pygame の枠線は四角の内側に引かれる
+            c.strokeStyle = rgb(e, 1);
+            c.lineWidth = lw;
+            c.strokeRect(e[4] + lw / 2, e[5] + lw / 2, e[6] - lw, e[7] - lw);
+          } else {
+            c.fillStyle = rgb(e, 1);
+            c.fillRect(e[4], e[5], e[6], e[7]);
+          }
+          break;
+        }
+        case 'I': { // ['I', 絵の名前, x, y, w, h]
+          const im = sprite(e[1]);
+          if (im.complete && im.naturalWidth) c.drawImage(im, e[2], e[3], e[4], e[5]);
+          break;
+        }
+        case 'T':   // ['T', 文字, r, g, b, x, y, 大きさ]
+          c.fillStyle = rgb(e, 2);
+          c.font = `${e[7]}px Times, "Times New Roman", serif`;
+          c.textBaseline = 'top';
+          c.fillText(e[1], e[5], e[6]);
+          break;
+      }
+    }
+  }
+
+  function onDraw(msg) {
+    if (msg.reset) { defs.clear(); seq = []; }
+    for (const k in msg.defs) defs.set(+k, msg.defs[k]);
+    // 先頭 keep 個(ほとんど動かない背景)は前のコマと同じ。残りだけ届く。
+    seq = seq.slice(0, msg.keep).concat(msg.tail);
+    recvTimes.push(performance.now());
+    el.fps.textContent = rate(recvTimes);
+    paint();
+  }
+
   // ---- 接続 ------------------------------------------------------------
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const ws = new WebSocket(`${proto}://${location.host}/ws`);
@@ -380,6 +451,7 @@
   ws.onopen = () => {
     el.conn.textContent = '接続済み';
     el.dot.classList.add('on');
+    send({ type: 'hello', mode: MODE });
     setInterval(() => {
       // 直前に測った往復時間も一緒に送る。サーバー側で、参加者が実際に
       // どれだけ待たされているかを記録するため。
@@ -414,7 +486,9 @@
     if (typeof ev.data !== 'string') { drawBlob(ev.data); return; }
     const msg = JSON.parse(ev.data);
 
-    if (msg.type === 'meta') {
+    if (msg.type === 'draw') {
+      onDraw(msg);
+    } else if (msg.type === 'meta') {
       applyMeta(msg);
     } else if (msg.type === 'busy') {
       // 別の人がプレイ中。残り時間を見せて待ってもらう。

@@ -98,7 +98,7 @@ python agent/agent/play_main.py --map quick --agent Greedy
 
 ## ブラウザからのプレイ (`server.py`)
 
-`server.py` を起動すると、ブラウザからプレイできます。pygame をウィンドウなし（`SDL_VIDEODRIVER=dummy`）で動かし、描画結果をWebSocketでブラウザへ送り、ブラウザのキー入力をpygameのイベントに戻す方式です。ゲームの描画・指示パネル・イベント処理はローカル版と同じコードがそのまま動きます。
+`server.py` を起動すると、ブラウザからプレイできます。pygame をウィンドウなし（`SDL_VIDEODRIVER=dummy`）で動かし、pygame が描くときに使った命令（どの絵をどこに描くか）だけをWebSocketで送ってブラウザで描き直し、ブラウザのキー入力をpygameのイベントに戻す方式です。ゲームの描画・指示パネル・イベント処理はローカル版と同じコードがそのまま動き、見た目も同じになります。送る量は1コマ約200バイトです（画像で送ると約9KB）。指示パネルを開いている間だけは画像で送ります。URLに `?mode=png` を付けると、常に画像で送る従来の方式になります。
 
 ```bash
 pip install fastapi uvicorn

@@ -13,8 +13,14 @@
 仕組み:
   - SDL_VIDEODRIVER=dummy にして pygame をウィンドウなしで動かす。
     描画・指示パネル・イベント処理は一切変更せず、そのまま動く。
-  - 描画結果(display Surface)を PNG にして WebSocket でブラウザへ送る。
-    ring マップは 320x400px しかないため、10Hz でも約 1Mbps で収まる。
+  - 画面は、pygame が描くときに使った命令(どの絵をどこに描くか)だけを
+    WebSocket で送り、ブラウザで同じ順に描き直す。同じ命令には番号を振り、
+    前のコマと同じ部分は送らないので、1コマ約 200 バイト(約 15kbps)。
+    画像で送ると 1コマ約 9KB(約 700kbps)で、Tailscale Funnel 経由では
+    送る量がそのまま操作の遅れになっていた(往復 137ms、家の中で直接
+    つなぐと 5ms)。
+    指示パネルは命令を残さないので、開いている間だけ画像で送る。
+    ?mode=png で開くと、従来どおり常に画像で送る。
   - ブラウザのキー入力/クリックを pygame のイベントに変換して post する。
     GamePlay._run_human の pygame.event.get() がそのまま拾ってくれる。
 
@@ -45,6 +51,7 @@ except ImportError:      # 無くても動く(画面が少し重くなるだけ)
     Image = None
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 ROOT = Path(__file__).resolve().parent
 # pip install -e されていない環境でも動くように、パッケージの場所を通しておく。
@@ -60,6 +67,8 @@ from agent.gameplay import (  # noqa: E402
 from gym_cooking.utils.order_preset import preset_names  # noqa: E402
 
 WEB_DIR = ROOT / 'web'
+# ゲームの絵(pygame が使うのと同じ PNG)。ブラウザ側で描くときに読み込む。
+GRAPHICS_DIR = ROOT / 'testbed-cooking' / 'gym_cooking' / 'misc' / 'game' / 'graphics'
 
 # 枠を取ってからスタートを押すまでの猶予(秒)。
 START_TIMEOUT_S = 120
@@ -112,6 +121,85 @@ def encode_frame(surface):
     return buf.getvalue()
 
 
+def _num(v):
+    return int(round(float(v)))
+
+
+def _rgb(c):
+    return [_num(c[0]), _num(c[1]), _num(c[2])]
+
+
+def normalize_elements(elements):
+    """pygame が1枚を描くのに使った命令を、JSON で送れる短い形にする。
+
+    Game.on_render は描いたものを順に記録している(get_visualization)。
+    画像そのものではなくこの命令列を送り、ブラウザで同じ絵を同じ順に
+    描き直せば、見た目はローカル版とまったく同じになる。
+      ['F', r, g, b]                   塗りつぶし
+      ['R', r, g, b, x, y, w, h, 線幅]  四角(線幅 0 は塗り)
+      ['I', 絵の名前, x, y, w, h]        画像
+      ['T', 文字, r, g, b, x, y, 大きさ] 文字
+    """
+    out = []
+    for kind, a in elements:
+        if kind == 'Fill':
+            out.append(['F'] + _rgb(a['color']))
+        elif kind == 'Rect':
+            x, y, w, h = a['box']
+            out.append(['R'] + _rgb(a['color'])
+                       + [_num(x), _num(y), _num(w), _num(h), _num(a.get('width', 0))])
+        elif kind == 'Image':
+            x, y = a['location']
+            w, h = a['size']
+            out.append(['I', a['path'], _num(x), _num(y), _num(w), _num(h)])
+        elif kind == 'Text':
+            x, y = a['location']
+            out.append(['T', str(a['text'])] + _rgb(a['color'])
+                       + [_num(x), _num(y), _num(a.get('px', 12))])
+    return out
+
+
+class DrawEncoder:
+    """描画命令の列を、前のコマとの差分にして送る(接続ごとに1つ持つ)。
+
+    同じ命令(同じ場所の同じ絵)は何度も出てくるので、初めて出たときだけ
+    中身を送って番号を振り、以後は番号だけを送る。さらに、前のコマと先頭
+    から一致している部分(床やカウンターなど、ほとんど動かない背景)は
+    「何個目まで同じ」とだけ伝える。1コマあたり数百バイトに収まる。
+    """
+
+    RESET_AT = 50000   # 番号表がこれより大きくなったら作り直す
+
+    def __init__(self):
+        self.ids = {}
+        self.prev = []
+
+    def encode(self, elements):
+        reset = False
+        if len(self.ids) > self.RESET_AT:
+            self.ids, self.prev, reset = {}, [], True
+        defs = {}
+        seq = []
+        for e in elements:
+            key = json.dumps(e, ensure_ascii=False, separators=(',', ':'))
+            i = self.ids.get(key)
+            if i is None:
+                i = len(self.ids)
+                self.ids[key] = i
+                defs[i] = e
+            seq.append(i)
+        keep = 0
+        for a, b in zip(self.prev, seq):
+            if a != b:
+                break
+            keep += 1
+        self.prev = seq
+        msg = {'type': 'draw', 'defs': defs, 'keep': keep, 'tail': seq[keep:]}
+        if reset:
+            msg['reset'] = True
+        return msg
+
+
 class RemoteMouse:
     """ブラウザから送られてきたカーソル位置を pygame へ橋渡しする。
 
@@ -155,6 +243,14 @@ class WebGamePlay:
         self._frame_version = 0
         self._frame_size = (0, 0)
         self._frame_lock = threading.Lock()
+
+        # 最新の描画命令(ブラウザ側で描くとき用)。指示パネルを出している
+        # 間は pygame が別の方法で描くので None にして、画像で送る。
+        self._draw = None
+        self._draw_version = 0
+        # pygame のフォント -> 文字の大きさ(px)。描画命令には大きさが
+        # 残らないので、put_text を包んで書き足す。
+        self._font_px = {}
 
         # 最初のブラウザ接続を待ってからゲームを開始する。
         # 誰も見ていない間に注文の時間が進んでしまうのを防ぐ。
@@ -293,6 +389,18 @@ class WebGamePlay:
             return original_request(trigger=trigger, allow_text_fallback=False)
 
         game._request_instruction = request_instruction
+
+        self._font_px = {id(game.small_font): 12, id(game.font): 16,
+                         id(game.large_font): 40}
+        original_put_text = game.put_text
+
+        def put_text(font, text, color, loc):
+            original_put_text(font, text, color, loc)
+            elements = game.get_visualization()
+            if elements and elements[-1][0] == 'Text':
+                elements[-1][1]['px'] = self._font_px.get(id(font), 12)
+
+        game.put_text = put_text
         self.state = 'waiting'
 
     def run_forever(self):
@@ -367,8 +475,20 @@ class WebGamePlay:
                 snapshot = surface.copy()
             except pygame.error:
                 return
+            # ゲーム画面だけを描いたコマなら、描画命令も取っておく。
+            # 指示パネルを出しているとき(画面が横に広がる)は、パネルが
+            # 命令を残さないので画像で送る。
+            draw = None
+            game = self.game
+            if game is not None and snapshot.get_size() == (game.width, game.height):
+                try:
+                    draw = normalize_elements(game.get_visualization())
+                except Exception:
+                    draw = None
             with self._pending_lock:
                 self._pending_surface = snapshot
+                self._draw = draw
+                self._draw_version += 1
             self.perf['rendered'] += 1
             self._frame_ready.set()
 
@@ -429,6 +549,17 @@ class WebGamePlay:
         self._frame_ready.clear()
         return self.capture()
 
+    def wait_frame(self, timeout=0.5):
+        """次の1枚が描かれるまで待つ(画像にはしない)。executor から呼ぶ。"""
+        if not self._frame_ready.wait(timeout):
+            return False
+        self._frame_ready.clear()
+        return True
+
+    def latest_draw(self):
+        with self._pending_lock:
+            return self._draw_version, self._draw
+
     def latest_frame(self):
         with self._frame_lock:
             return self._frame_version, self._frame, self._frame_size
@@ -464,6 +595,7 @@ class WebGamePlay:
 # ----------------------------------------------------------------------
 session: WebGamePlay | None = None
 app = FastAPI(title='Overcooked CSP Web')
+app.mount('/graphics', StaticFiles(directory=str(GRAPHICS_DIR)), name='graphics')
 
 
 @app.get('/')
@@ -620,11 +752,16 @@ async def ws(sock: WebSocket):
     my_game = session.game_id
     acquired_at = time.time()
     last_seen = [time.time()]
+    # 'draw' = 盤面の描画命令だけを送り、ブラウザで描く(既定)
+    # 'png'  = 描いた画像を送る(従来の方式。?mode=png で選べる)
+    mode = ['draw']
 
     loop = asyncio.get_running_loop()
     sent_version = 0
+    sent_draw_version = 0
     sent_size = None
     last_state = None
+    encoder = DrawEncoder()
 
     async def pump_input():
         """ブラウザからの入力を pygame イベントへ流し続ける。"""
@@ -645,6 +782,8 @@ async def ws(sock: WebSocket):
                 session.post_mouse_down(msg.get('x', 0), msg.get('y', 0))
             elif kind == 'start':
                 session.start(token)
+            elif kind == 'hello':
+                mode[0] = 'png' if msg.get('mode') == 'png' else 'draw'
             elif kind == 'ping':
                 # RTT 計測用。クライアントの送信時刻をそのまま返す。
                 if msg.get('rtt') is not None:
@@ -658,11 +797,14 @@ async def ws(sock: WebSocket):
 
     async def stream():
         """描画ができるたびに画面を送る。状態の変化もここで知らせる。"""
-        nonlocal sent_version, sent_size, last_state
+        nonlocal sent_version, sent_draw_version, sent_size, last_state
         while True:
-            # 次の描画を待って PNG 化する。待ちもエンコードも executor 側なので
+            # 次の描画を待つ。待ち(と画像モードでの PNG 化)は executor 側なので
             # イベントループは塞がらず、入力(ping/キー)は待たされない。
-            await loop.run_in_executor(None, session.wait_and_capture)
+            if mode[0] == 'png':
+                await loop.run_in_executor(None, session.wait_and_capture)
+            else:
+                await loop.run_in_executor(None, session.wait_frame)
 
             # 枠を取ったままスタートされないと、後ろの人がずっと待たされる。
             if (session.state == 'waiting'
@@ -677,6 +819,26 @@ async def ws(sock: WebSocket):
                 await send_text({'type': 'status', 'state': 'finished',
                                  'result': session.results.get(my_game)})
                 return
+
+            draw_version, draw = session.latest_draw()
+            if mode[0] == 'draw' and draw is not None:
+                # 盤面の描画命令だけを送り、ブラウザで描いてもらう。
+                base = (session.game.width, session.game.height)
+                if sent_size != base:
+                    sent_size = base
+                    await send_text({'type': 'meta', 'w': base[0], 'h': base[1],
+                                     'base_w': base[0], 'base_h': base[1]})
+                if draw_version != sent_draw_version:
+                    sent_draw_version = draw_version
+                    await send_text(encoder.encode(draw))
+                    session.perf['sent'] += 1
+                await send_status_and_notices()
+                continue
+
+            if mode[0] == 'draw':
+                # 指示パネルを出している間は、パネルが描画命令を残さないので
+                # 画像で送る(ゲームは止まっているので、重さは問題にならない)。
+                await loop.run_in_executor(None, session.capture)
 
             version, data, size = session.latest_frame()
 
@@ -695,13 +857,16 @@ async def ws(sock: WebSocket):
                 await asyncio.wait_for(sock.send_bytes(data), SEND_TIMEOUT_S)
                 session.perf['sent'] += 1
 
-            for text in session.take_notices():
-                await send_text({'type': 'notice', 'text': text})
+            await send_status_and_notices()
 
-            if session.state != last_state:
-                last_state = session.state
-                await send_text({'type': 'status', 'state': session.state,
-                                 'result': session.result})
+    async def send_status_and_notices():
+        nonlocal last_state
+        for text in session.take_notices():
+            await send_text({'type': 'notice', 'text': text})
+        if session.state != last_state:
+            last_state = session.state
+            await send_text({'type': 'status', 'state': session.state,
+                             'result': session.result})
 
     async def watchdog():
         """何も言わずに消えた端末(電波切れ等)を見つける。"""
