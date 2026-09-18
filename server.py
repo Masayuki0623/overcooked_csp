@@ -38,6 +38,7 @@ import argparse
 import asyncio
 import io
 import json
+import re
 import sys
 import threading
 import time
@@ -64,11 +65,42 @@ from agent.gameplay import (  # noqa: E402
     INSTRUCTION_TIMINGS,
     INSTRUCTION_TIMING_FREE,
 )
-from gym_cooking.utils.order_preset import preset_names  # noqa: E402
+from gym_cooking.utils.order_preset import (  # noqa: E402
+    enumerate_order_recipes, preset_names)
 
 WEB_DIR = ROOT / 'web'
 # ゲームの絵(pygame が使うのと同じ PNG)。ブラウザ側で描くときに読み込む。
 GRAPHICS_DIR = ROOT / 'testbed-cooking' / 'gym_cooking' / 'misc' / 'game' / 'graphics'
+
+# 遊ぶ前に選べる地図とレシピ。地図の中身は play_test.MAP_SETTINGS を参照。
+MAP_CHOICES = [
+    ('exp_partition', '仕切り', '左右が仕切られていて行き来できない。材料は仕切りの台で受け渡す'),
+    ('exp_bottleneck', 'ボトルネック', '仕切りの真ん中に1マスだけ通れる穴がある'),
+    ('exp_ring', 'リング', '真ん中の島のまわりをぐるっと回れる'),
+]
+RECIPE_CHOICES = [
+    ('experiment1', '野菜のみ', 'サラダ2品 + スープ1品'),
+    ('experiment2', '野菜 + フルーツ', 'サラダ + スープ + ジュース'),
+]
+_JP_FOOD = {'Lettuce': 'レタス', 'Onion': '玉ねぎ', 'Tomato': 'トマト',
+            'Apple': 'リンゴ', 'Orange': 'オレンジ', 'Banana': 'バナナ'}
+_JP_DISH = {'Salad': 'サラダ', 'Soup': 'スープ', 'Juice': 'ジュース'}
+
+
+def recipe_label(name):
+    """'OnionLettuceSoup' -> '玉ねぎ・レタスのスープ'。"""
+    words = re.findall(r'[A-Z][a-z]*', name)
+    dish = _JP_DISH.get(words[-1], words[-1]) if words else name
+    if words and words[0] == 'Full':
+        foods = 'レタス・玉ねぎ・トマト'
+    else:
+        foods = '・'.join(_JP_FOOD.get(w, w) for w in words[:-1])
+    return f'{foods}の{dish}'
+
+
+def order_sets_for(preset):
+    return enumerate_order_recipes(preset)
+
 
 # 枠を取ってからスタートを押すまでの猶予(秒)。
 START_TIMEOUT_S = 120
@@ -264,6 +296,9 @@ class WebGamePlay:
         # 終わった回の結果は、その回の参加者へ届けるために番号で残す。
         self.game_id = 0
         self.results = {}
+        # 遊ぶ人がスタート画面で選んだ地図・レシピ・注文の組み合わせ。
+        # 選ばれた内容でゲームを組み立ててから始める。
+        self.selection = None
         self._hooks_installed = False
 
         # 配信経路のどこでコマが落ちているかを見るための計数。/api/perf で読む。
@@ -290,11 +325,31 @@ class WebGamePlay:
                 return True
             return False
 
-    def start(self, token):
-        """操作する人がスタートを押した。"""
+    def start(self, token, choice=None):
+        """操作する人がスタートを押した。選んだステージで組み立てて始める。"""
         with self._player_lock:
-            if self.player is token and self.state == 'waiting':
-                self.client_connected.set()
+            if self.player is not token or self.state != 'waiting':
+                return
+            self.selection = self._resolve_choice(choice or {})
+            self.client_connected.set()
+
+    def _resolve_choice(self, choice):
+        """画面で選ばれた内容を、組み立てに使える形にする。おかしな値は既定に戻す。"""
+        maps = [m for m, _, _ in MAP_CHOICES]
+        presets = [r for r, _, _ in RECIPE_CHOICES]
+        map_name = choice.get('map') if choice.get('map') in maps else maps[0]
+        preset = choice.get('preset') if choice.get('preset') in presets else presets[-1]
+        sets = order_sets_for(preset)
+        case = choice.get('case')
+        if not isinstance(case, int) or not (0 <= case < len(sets)):
+            # おまかせ: 組み合わせの中から毎回ランダムに選ぶ
+            import random
+            case = random.randrange(len(sets))
+            picked_by = 'random'
+        else:
+            picked_by = 'chosen'
+        return {'map': map_name, 'preset': preset, 'case': case,
+                'recipes': list(sets[case]), 'picked_by': picked_by}
 
     def note_client_rtt(self, rtt_ms):
         """参加者の端末で測った往復時間を残す。/api/perf で見る。
@@ -351,12 +406,18 @@ class WebGamePlay:
             deadline=a.deadline,
         )
 
+        sel = self.selection
+        map_name = sel['map'] if sel else a.map
+        orders = sel['recipes'] if sel else a.orders
         self.game, self.env, self.replay = play_main.init_env_replay(
-            a.map, a.agent0, a.agent1, a.task,
+            map_name, a.agent0, a.agent1, a.task,
             a.no_reschedule, a.debug,
-            a.orders, a.order_seed,
+            orders, a.order_seed,
             a.instruction_request_timing,
         )
+        if sel:
+            # 何を選んで遊んだかをリプレイにも残す
+            self.replay['web_selection'] = dict(sel)
         return self.game
 
     def prepare(self):
@@ -401,14 +462,24 @@ class WebGamePlay:
                 elements[-1][1]['px'] = self._font_px.get(id(font), 12)
 
         game.put_text = put_text
-        self.state = 'waiting'
 
     def run_forever(self):
-        """メインスレッドで呼ぶ。1人遊び終わるたびに、次のゲームを用意する。"""
+        """メインスレッドで呼ぶ。1人遊び終わるたびに、次のゲームを用意する。
+
+        遊ぶ人が地図とレシピを選んでスタートを押してから組み立てる。
+        """
         while True:
-            self.prepare()
+            self.game = None
+            self.env = None
+            self.selection = None
+            self.state = 'waiting'
             print(f'[server] #{self.game_id} ブラウザからの接続を待っています...')
             self.client_connected.wait()
+
+            self.prepare()
+            sel = self.selection or {}
+            print(f"[server] #{self.game_id} 選択: {sel.get('map')} / {sel.get('preset')} "
+                  f"/ {sel.get('recipes')}")
 
             self.state = 'running'
             self.perf.update(rendered=0, encoded=0, sent=0, started=time.time(),
@@ -605,11 +676,30 @@ async def index():
                         headers={'Cache-Control': 'no-store'})
 
 
+@app.get('/api/options')
+async def options():
+    """スタート画面で選べる地図・レシピ・注文の組み合わせ。"""
+    recipes = []
+    for preset, label, desc in RECIPE_CHOICES:
+        sets = order_sets_for(preset)
+        recipes.append({
+            'id': preset, 'label': label, 'desc': desc,
+            'combos': [{'case': i, 'label': ' / '.join(recipe_label(r) for r in rs)}
+                       for i, rs in enumerate(sets)],
+        })
+    return JSONResponse({
+        'maps': [{'id': m, 'label': label, 'desc': desc} for m, label, desc in MAP_CHOICES],
+        'recipes': recipes,
+    })
+
+
 @app.get('/api/config')
 async def config():
     a = session.args
+    sel = session.selection or {}
     return JSONResponse({
-        'map': a.map,
+        'selection': sel,
+        'map': sel.get('map', a.map),
         'agent0': a.agent0,
         'agent1': a.agent1,
         'sc_2agent': a.sc_2agent,
@@ -781,7 +871,9 @@ async def ws(sock: WebSocket):
             elif kind == 'mousedown':
                 session.post_mouse_down(msg.get('x', 0), msg.get('y', 0))
             elif kind == 'start':
-                session.start(token)
+                session.start(token, {
+                    'map': msg.get('map'), 'preset': msg.get('preset'),
+                    'case': msg.get('case')})
             elif kind == 'hello':
                 mode[0] = 'png' if msg.get('mode') == 'png' else 'draw'
             elif kind == 'ping':
@@ -865,8 +957,14 @@ async def ws(sock: WebSocket):
             await send_text({'type': 'notice', 'text': text})
         if session.state != last_state:
             last_state = session.state
+            sel = session.selection or {}
             await send_text({'type': 'status', 'state': session.state,
-                             'result': session.result})
+                             'result': session.result,
+                             'selection': {
+                                 'map': dict((m, l) for m, l, _ in MAP_CHOICES).get(sel.get('map')),
+                                 'preset': dict((r, l) for r, l, _ in RECIPE_CHOICES).get(sel.get('preset')),
+                                 'orders': [recipe_label(r) for r in sel.get('recipes', [])],
+                             } if sel else None})
 
     async def watchdog():
         """何も言わずに消えた端末(電波切れ等)を見つける。"""
@@ -927,8 +1025,10 @@ def parse_arguments():
                    help='待ち受けアドレス。LAN の別端末から繋ぐなら 0.0.0.0')
     p.add_argument('--port', type=int, default=8000)
 
-    p.add_argument('--map', type=str, default='ring',
-                   choices=['ring', 'bottleneck', 'partition', 'quick', 'juice', 'experiment'])
+    p.add_argument('--map', type=str, default='exp_partition',
+                   choices=['ring', 'bottleneck', 'partition', 'quick', 'juice', 'experiment',
+                            'exp_partition', 'exp_bottleneck', 'exp_ring'],
+                   help='スタート画面で選ばれなかったときの地図')
     agents = ['human', 'HLA', 'SMOA', 'FMOA', 'NEA', 'Random',
               'TSPSolver', 'Greedy', 'CSP', 'Task', 'choponly']
     p.add_argument('--agent0', type=str, default='CSP', choices=agents)

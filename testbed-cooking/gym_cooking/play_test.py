@@ -25,6 +25,16 @@ MAP_SETTINGS = dict(
     # 実験用。仕切りで左右に分断し、AI側にスープ用野菜・フルーツ・鍋、
     # 人間側にサラダ用野菜・ミキサー・提供口を置いた非対称マップ。
     experiment=dict(level="experiment", max_num_orders=3,),
+    # 仕事量をそろえた実験用の地図(tools/layout_search.py で探した配置)。
+    # 器具と材料の置き場所は3つとも同じで、左右のつながり方だけが違う。
+    # 左が AI 側(鍋・ミキサー・提供口・玉ねぎ・リンゴ)、右が人間側
+    # (レタス・トマト・オレンジ・バナナ)。まな板・皿・コップは両側にある。
+    #   exp_partition  : 仕切りで完全に分かれていて、行き来できない
+    #   exp_bottleneck : 仕切りの真ん中に1マスだけ通れる穴がある
+    #   exp_ring       : 真ん中が島になっていて、ぐるっと回れる
+    exp_partition=dict(level="exp_partition", max_num_orders=3,),
+    exp_bottleneck=dict(level="exp_bottleneck", max_num_orders=3,),
+    exp_ring=dict(level="exp_ring", max_num_orders=3,),
 )
 
 if __name__ == '__main__':

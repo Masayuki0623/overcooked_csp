@@ -156,19 +156,26 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--level', default='experiment')
     ap.add_argument('--model', default='greedy')
+    ap.add_argument('--preset', default='experiment2',
+                    help='注文のプリセット(experiment1 = 野菜のみ、experiment2 = 野菜+フルーツ)')
+    ap.add_argument('--cases', default='experiment', choices=['experiment', 'all'],
+                    help="'all' はプリセットの組み合わせを全部")
     args = ap.parse_args()
 
     H.MAX_SECONDS_OVERRIDE = 100.0
-    sets = enumerate_order_recipes('experiment2')
+    sets = enumerate_order_recipes(args.preset)
+    cases = (list(range(len(sets))) if args.cases == 'all' or args.preset != 'experiment2'
+             else experiment_case_indices(args.preset))
     rows = []
-    for case in experiment_case_indices('experiment2'):
+    for case in cases:
         r = run_trial(args.level, sets[case], args.model, seed=case * 31 + 7)
         rows.append(r)
-        print('case%2d 提供%d %.1f秒  働いた AI %.1f秒 / 人 %.1f秒' % (
-            case, r['served'], r['makespan'], r['work_s'][0], r['work_s'][1]), flush=True)
+        print('case%2d 提供%d %.1f秒  働いた AI %.1f秒 / 人 %.1f秒%s  %s' % (
+            case, r['served'], r['makespan'], r['work_s'][0], r['work_s'][1],
+            '' if r['completed'] else '  <<< 未完', '|'.join(sets[case])), flush=True)
     s = summarize(rows)
-    print('\n%s / %s: 完走 %d/%d  所要 平均%.1f秒' % (
-        args.level, args.model, s['completed'], s['n'], s['makespan']))
+    print('\n%s / %s / %s: 完走 %d/%d  所要 平均%.1f秒' % (
+        args.level, args.preset, args.model, s['completed'], s['n'], s['makespan']))
     print('  働いた時間  AI %.1f秒  人 %.1f秒   → AI の割合 %.0f%%' % (
         s['ai_work'], s['human_work'], 100 * s['ai_share']))
     print('  手待ち      AI %.1f秒  人 %.1f秒' % (s['ai_idle'], s['human_idle']))

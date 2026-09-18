@@ -947,6 +947,14 @@ class CSPAgent:
         if not agents or len(agents) < 2:
             return actions
 
+        actions = self._break_oscillation(env, actions)
+
+        if self.partner_is_external or self.human_counterpart_mode:
+            # 相手は人(または人間役)で、こちらからは動かせない。以下の処理は
+            # 相手側の行動(ai_1)を書き換えて譲らせるが、その行動は使われない
+            # ので効かない。AI の側だけで譲る。
+            return self._yield_to_partner(env, actions)
+
         positions = [tuple(a.location) for a in agents[:2]]
         moved = positions != getattr(self, '_last_agent_positions', None)
         self._last_agent_positions = list(positions)
@@ -989,6 +997,117 @@ class CSPAgent:
                 return actions
 
         return actions
+
+    # 道を譲るときの設定
+    YIELD_AFTER_BLOCKED = 2      # 進めないのがこのフレーム数続いたら譲る
+    YIELD_WAIT_FRAMES = 3        # よけた後に待つフレーム数
+    CORRIDOR_STANDOFF = 5        # 通路で相手を通せんぼしているとみなすまで
+
+    OSCILLATION_PAUSE = 3   # 行ったり来たりを検知したら止まるフレーム数
+
+    def _break_oscillation(self, env, actions):
+        """2マスの間を行ったり来たりし続けていたら、少し立ち止まる。
+
+        2人とも「相手のいるマスを避けて」道を選ぶので、すれ違うとき同じ
+        瞬間に同じ側へ避け、次の瞬間また同じ側へ戻る。対称なのでいつまでも
+        抜けられない(実測: リングの地図で15秒間往復し、その間にスープが
+        焦げて鍋が使えなくなった)。こちら(AI)だけが止まって対称を崩す。
+        2人とも CSP が動かすときは 0番だけが止まる。
+        """
+        own = self.own_agent_idx
+        key = f'ai_{own}'
+        me = tuple(env.agents[own].location)
+        st = self.__dict__.setdefault('_osc_state', {'hist': [], 'pause': 0})
+        st['hist'] = (st['hist'] + [me])[-6:]
+        if st['pause'] > 0:
+            st['pause'] -= 1
+            actions[key] = (0, 0)
+            return actions
+        h = st['hist']
+        if (len(h) == 6 and h[0] == h[2] == h[4] and h[1] == h[3] == h[5]
+                and h[0] != h[1]):
+            st['pause'] = self.OSCILLATION_PAUSE - 1
+            st['hist'] = []
+            actions[key] = (0, 0)
+            self._emit_counter_debug(f"[CSPAgent] 行ったり来たりを検知: {h[0]}<->{h[1]} で立ち止まる")
+        return actions
+
+    def _walkable(self, env, cell):
+        x, y = cell
+        return (0 <= x < env.world_width and 0 <= y < env.world_height
+                and env.to_grid[x][y] == 1)
+
+    def _yield_to_partner(self, env, actions):
+        """相手が人のとき、狭い所でぶつかったら AI が道を譲る。
+
+        この環境では、2人が同じマスへ入ろうとすると両方止まり、すれ違い
+        (位置の入れ替え)もできない。狭い通路で向かい合うと、どちらかが
+        下がらない限り永久に止まる(実測: ボトルネックの地図で開始4秒から
+        最後まで2人とも動けなかった)。人は譲ってくれるとは限らないので、
+        AI が譲る。
+          (1) 進もうとして進めず、行き先に相手がいる/相手の隣 → よけて待つ
+          (2) 通路で待っていて、隣の相手が動けていない → よけて道を空ける
+        """
+        own = self.own_agent_idx
+        other = 1 - own
+        key = f'ai_{own}'
+        me = tuple(env.agents[own].location)
+        you = tuple(env.agents[other].location)
+        act = actions.get(key, (0, 0))
+
+        st = self.__dict__.setdefault('_yield_state', {
+            'last_me': None, 'last_you': None, 'blocked': 0, 'standoff': 0, 'wait': 0})
+
+        # よけた後は、しばらくその場で待って相手を通す
+        if st['wait'] > 0:
+            st['wait'] -= 1
+            st['last_me'], st['last_you'] = me, you
+            actions[key] = (0, 0)
+            return actions
+
+        target = (me[0] + act[0], me[1] + act[1])
+        near = abs(me[0] - you[0]) + abs(me[1] - you[1]) <= 2
+
+        # (1) 床へ進もうとしたのに位置が変わっていない
+        #     (台や器具へ向かっているなら操作中なので対象外)
+        if (act != (0, 0) and me == st['last_me'] and near
+                and (self._walkable(env, target) or target == you)):
+            st['blocked'] += 1
+        else:
+            st['blocked'] = 0
+
+        # (2) 通路(通れる隣のマスが2つ以下)で立ち止まり、隣の相手も動けていない
+        neighbours = [(me[0] + dx, me[1] + dy) for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))]
+        corridor = sum(1 for n in neighbours if self._walkable(env, n)) <= 2
+        adjacent = abs(me[0] - you[0]) + abs(me[1] - you[1]) == 1
+        if (act == (0, 0) and corridor and adjacent
+                and me == st['last_me'] and you == st['last_you']):
+            st['standoff'] += 1
+        else:
+            st['standoff'] = 0
+
+        st['last_me'], st['last_you'] = me, you
+
+        if st['blocked'] >= self.YIELD_AFTER_BLOCKED or st['standoff'] >= self.CORRIDOR_STANDOFF:
+            step = self._step_away(env, me, you, target)
+            st['blocked'] = st['standoff'] = 0
+            st['wait'] = self.YIELD_WAIT_FRAMES
+            actions[key] = step or (0, 0)
+            self._emit_counter_debug(
+                f"[CSPAgent] 相手に道を譲る: {me} -> {step} (相手 {you})")
+        return actions
+
+    def _step_away(self, env, me, you, blocked_target):
+        """相手から一番離れる向きの、空いている隣のマスへの1歩。無ければ None。"""
+        best, best_d = None, -1
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            n = (me[0] + dx, me[1] + dy)
+            if n == you or n == blocked_target or not self._walkable(env, n):
+                continue
+            d = abs(n[0] - you[0]) + abs(n[1] - you[1])
+            if d > best_d:
+                best, best_d = (dx, dy), d
+        return best
 
     def _find_escape_step(self, env, pos, avoid):
         """pos にいるエージェントが avoid 以外の隣接マスへ1歩どく方向を返す。"""

@@ -129,6 +129,24 @@
   }
   #overlay button.primary { background: #2f6f4b; border-color: #3f8a60; font-size: 18px; padding: 14px 40px; }
 
+  /* ---- ステージ選択 ---- */
+  #overlay .stage-pick { width: min(520px, 100%); text-align: left; }
+  #overlay .stage-pick .big { text-align: center; }
+  .pick { margin-top: 18px; }
+  .pick .lab { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  .pick .opts { display: flex; gap: 8px; flex-wrap: wrap; }
+  #overlay .pick .opts button {
+    margin: 0; flex: 1 1 0; min-width: 90px; padding: 10px 8px; font-size: 15px;
+  }
+  #overlay .pick .opts button.on { background: #3b4350; border-color: #8a96a8; }
+  .pick .hint { font-size: 12.5px; color: var(--muted); margin-top: 6px; min-height: 1.4em; }
+  .pick select {
+    width: 100%; font: inherit; font-size: 14px; color: var(--text);
+    background: var(--btn-bg); border: 1px solid var(--btn-line); border-radius: 8px;
+    padding: 10px;
+  }
+  #overlay .stage-pick .go { text-align: center; }
+
   #toast {
     position: fixed; left: 50%; top: 64px; transform: translateX(-50%);
     background: var(--btn-bg); border: 1px solid var(--btn-line); border-radius: 8px;
@@ -471,15 +489,71 @@
                 '<button onclick="location.reload()">再読み込み</button>');
   };
 
-  function showStart() {
+  // ---- ステージ選択 ----------------------------------------------------
+  // 地図・レシピ・注文の組み合わせを選んでからスタートする。前回選んだ
+  // ものはこの端末に覚えておく(次に開いたとき同じ選択から始められる)。
+  const PICK_STORE = 'overcooked-stage-v1';
+  let options = null;
+  let pick = { map: null, preset: null, case: '' };
+  try { Object.assign(pick, JSON.parse(localStorage.getItem(PICK_STORE) || '{}')); } catch (e) {}
+  const optionsReady = fetch('/api/options').then(r => r.json()).then(o => { options = o; })
+    .catch(() => {});
+
+  function esc(t) {
+    return String(t).replace(/[&<>"]/g, (c) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'})[c]);
+  }
+
+  function renderPick() {
+    if (!options) return;
+    if (!options.maps.some(m => m.id === pick.map)) pick.map = options.maps[0].id;
+    if (!options.recipes.some(r => r.id === pick.preset)) pick.preset = options.recipes[options.recipes.length - 1].id;
+    const recipe = options.recipes.find(r => r.id === pick.preset);
+    if (pick.case !== '' && !recipe.combos.some(c => String(c.case) === String(pick.case))) pick.case = '';
+    const map = options.maps.find(m => m.id === pick.map);
+
+    const btns = (list, key) => list.map(x =>
+      `<button type="button" data-key="${key}" data-val="${esc(x.id)}" class="${pick[key] === x.id ? 'on' : ''}">${esc(x.label)}</button>`).join('');
+    const combos = ['<option value="">おまかせ(毎回ランダム)</option>']
+      .concat(recipe.combos.map(c =>
+        `<option value="${c.case}" ${String(pick.case) === String(c.case) ? 'selected' : ''}>${esc(c.label)}</option>`))
+      .join('');
+
     showOverlay(
-      '<div class="big">準備ができました</div>' +
-      '<div class="sub">ボタンを押すとゲームが始まります</div>' +
-      '<button class="primary" id="start">スタート</button>');
-    document.getElementById('start').addEventListener('click', () => {
-      send({ type: 'start' });
-      showOverlay('<div class="big">まもなく始まります</div>');
+      '<div class="stage-pick">' +
+      '<div class="big">ステージを選んでください</div>' +
+      `<div class="pick"><div class="lab">地図</div><div class="opts">${btns(options.maps, 'map')}</div>` +
+      `<div class="hint">${esc(map.desc)}</div></div>` +
+      `<div class="pick"><div class="lab">レシピ</div><div class="opts">${btns(options.recipes, 'preset')}</div>` +
+      `<div class="hint">${esc(recipe.desc)}</div></div>` +
+      `<div class="pick"><div class="lab">注文の組み合わせ(${recipe.combos.length} 通り)</div>` +
+      `<select id="pick-case">${combos}</select></div>` +
+      '<div class="go"><button class="primary" id="start">スタート</button></div>' +
+      '</div>');
+
+    el.overlayText.querySelectorAll('.opts button').forEach((b) => b.addEventListener('click', () => {
+      pick[b.dataset.key] = b.dataset.val;
+      if (b.dataset.key === 'preset') pick.case = '';
+      savePick();
+      renderPick();
+    }));
+    document.getElementById('pick-case').addEventListener('change', (e) => {
+      pick.case = e.target.value;
+      savePick();
     });
+    document.getElementById('start').addEventListener('click', () => {
+      send({ type: 'start', map: pick.map, preset: pick.preset,
+             case: pick.case === '' ? null : Number(pick.case) });
+      showOverlay('<div class="big">準備しています</div><div class="sub">数秒かかります</div>');
+    });
+  }
+  function savePick() {
+    try { localStorage.setItem(PICK_STORE, JSON.stringify(pick)); } catch (e) {}
+  }
+
+  function showStart() {
+    if (options) { renderPick(); return; }
+    showOverlay('<div class="big">読み込み中...</div>');
+    optionsReady.then(renderPick);
   }
 
   ws.onmessage = (ev) => {
@@ -499,8 +573,8 @@
       if (msg.state === 'running' && msg.remaining != null) {
         body = '<div class="sub">終わりしだい、自動で始まります</div>' +
                `<div class="count">${msg.remaining}</div><div class="sub">秒ほどで終わる予定</div>`;
-      } else if (msg.state === 'waiting') {
-        body = '<div class="sub">別の人がまもなく始めるところです。<br>このままお待ちください。</div>';
+      } else if (msg.state === 'waiting' || msg.state === 'preparing') {
+        body = '<div class="sub">別の人がステージを選んでいるところです。<br>このままお待ちください。</div>';
       } else {
         body = '<div class="sub">次のゲームを準備しています。<br>このままお待ちください。</div>';
       }
@@ -523,9 +597,16 @@
       el.state.textContent = ({
         preparing: '準備中', waiting: '開始待ち', running: 'プレイ中', finished: '終了',
       })[msg.state] || msg.state;
+      if (msg.selection) {
+        const sel = msg.selection;
+        el.cfg.textContent = `${sel.map} / ${sel.preset} / ${sel.orders.join('、')}`;
+      }
       if (msg.state === 'waiting' && !started) {
         showStart();
       } else if (msg.state === 'running') {
+        if (!started && msg.selection) {
+          showToast(`${msg.selection.map} / ${msg.selection.preset}: ${msg.selection.orders.join('、')}`);
+        }
         started = true;
         hideOverlay();
       } else if (msg.state === 'finished' && msg.result) {
@@ -545,7 +626,7 @@
     t.textContent = text;
     t.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => t.classList.remove('show'), 2500);
+    toastTimer = setTimeout(() => t.classList.remove('show'), Math.max(2500, text.length * 90));
   }
   function showOverlay(html) {
     el.overlayText.innerHTML = html;
@@ -617,9 +698,6 @@
   bindPointer(panelCv, () => baseW);
 
   // ---- 実験条件の表示 -------------------------------------------------
-  fetch('/api/config').then(r => r.json()).then(c => {
-    el.cfg.textContent = `map=${c.map} / ${c.agent0} vs ${c.agent1} / orders=${c.orders}`;
-  }).catch(() => {});
 
   applyPrefs();
   // 向きを変えたとき(縦↔横)やアドレスバーの出入りで、大きさを合わせ直す。

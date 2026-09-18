@@ -140,6 +140,9 @@ def resolve_orders(orders, order_seed=None):
     """
     if orders is None:
         return {}
+    if isinstance(orders, (list, tuple)):
+        # 具体的なレシピ名の並び(Web 版で注文の組み合わせを選んだとき)
+        return {'order_recipes': tuple(orders)}
     if is_order_preset(orders):
         rng = random.Random(order_seed) if order_seed is not None else random
         recipes = generate_order_recipes(orders, rng=rng)
