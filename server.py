@@ -124,15 +124,53 @@ class WebGamePlay:
         # 誰も見ていない間に注文の時間が進んでしまうのを防ぐ。
         self.client_connected = threading.Event()
 
+        # 操作できるのは1人だけ。後から来た人には「別の人がプレイ中」と
+        # 残り時間を見せて待ってもらう。player はいま操作している接続の目印。
+        self.player = None
+        self._player_lock = threading.Lock()
+        # 何回目のゲームか。1回終わるごとに次のゲームを用意し直す。
+        # 終わった回の結果は、その回の参加者へ届けるために番号で残す。
+        self.game_id = 0
+        self.results = {}
+        self._hooks_installed = False
+
         # 配信経路のどこでコマが落ちているかを見るための計数。/api/perf で読む。
         self.perf = {'rendered': 0, 'encoded': 0, 'sent': 0, 'started': time.time()}
-        self.state = 'waiting'        # waiting -> running -> finished
+        # preparing -> waiting -> running -> finished -> preparing ...
+        self.state = 'preparing'
         self.result = None
 
         # ブラウザへ出す短いお知らせ(「いま指示できる作業はありません」等)。
         # ゲーム側のスレッドが積み、WebSocket 側が取り出して送る。
         self._notices = []
         self._notices_lock = threading.Lock()
+
+    def try_acquire(self, token):
+        """空いていれば、この接続を操作する人にする。"""
+        with self._player_lock:
+            if self.player is None and self.state in ('waiting', 'running'):
+                self.player = token
+                self.client_connected.set()
+                return True
+            return False
+
+    def release(self, token):
+        with self._player_lock:
+            if self.player is token:
+                self.player = None
+
+    def slot_free(self):
+        return self.player is None and self.state in ('waiting', 'running')
+
+    def remaining_seconds(self):
+        """いまのゲームの残り時間(ゲーム内の秒)。遊んでいなければ None。"""
+        env = self.env
+        if self.state != 'running' or env is None:
+            return None
+        limit = getattr(getattr(env, 'arglist', None), 'max_num_timesteps', 0) or 0
+        if not limit:
+            return None
+        return max(0.0, float(limit) - float(getattr(env, 'current_time', 0.0)))
 
     def notify(self, text):
         with self._notices_lock:
@@ -165,31 +203,81 @@ class WebGamePlay:
         )
         return self.game
 
+    def prepare(self):
+        """次の1ゲームを組み立て、Web 版に要る差し替えを入れる。"""
+        self.state = 'preparing'
+        self.take_notices()
+        game = self.build()
+
+        # pygame の初期化後に pygame.mouse / display を差し替えたいので、フックしておく。
+        original_on_init = game.on_init
+
+        def on_init():
+            ret = original_on_init()
+            self.on_init_done()
+            return ret
+
+        game.on_init = on_init
+
+        # 指示の候補が1つも無いとき、ローカル版は文字入力の窓(Tk)を開く。
+        # その窓はサーバーの PC の画面に出るため、ブラウザからは閉じられず、
+        # ゲームが一時停止したまま止まる。Web 版では開かない。
+        original_request = game._request_instruction
+
+        def request_instruction(trigger='space', allow_text_fallback=True):
+            # 指示できるのは「AI がいま着手できる作業」だけ。1つも無いときに
+            # 何も起きないと、ボタンが壊れているように見えるので知らせる。
+            if not game._get_unexecuted_task_candidates():
+                self.notify('いま AI に指示できる作業はありません')
+                return None
+            return original_request(trigger=trigger, allow_text_fallback=False)
+
+        game._request_instruction = request_instruction
+        self.state = 'waiting'
+
     def run_forever(self):
-        """メインスレッドで呼ぶ。ブラウザ接続を待ってからゲーム本体を回す。"""
-        print('[server] ブラウザからの接続を待っています...')
-        self.client_connected.wait()
+        """メインスレッドで呼ぶ。1人遊び終わるたびに、次のゲームを用意する。"""
+        while True:
+            self.prepare()
+            print(f'[server] #{self.game_id} ブラウザからの接続を待っています...')
+            self.client_connected.wait()
 
-        self.state = 'running'
-        self.perf.update(rendered=0, encoded=0, sent=0, started=time.time())
-        print('[server] ゲームを開始します')
-        try:
-            success = self.game.on_execute()
-        finally:
-            self.state = 'finished'
-            self._save_replay()
+            self.state = 'running'
+            self.perf.update(rendered=0, encoded=0, sent=0, started=time.time())
+            print(f'[server] #{self.game_id} ゲームを開始します')
+            success = False
+            try:
+                success = self.game.on_execute()
+            finally:
+                self.state = 'finished'
+                self._save_replay()
 
-        order = self.env.order_scheduler
-        self.result = {
-            'success': bool(success),
-            'served': getattr(order, 'successful_orders', 0),
-            'failed': getattr(order, 'failed_orders', 0),
-            'reward': getattr(order, 'reward', 0),
-        }
-        print(f'[server] ゲーム終了: {self.result}')
+            order = self.env.order_scheduler
+            self.result = {
+                'success': bool(success),
+                'served': getattr(order, 'successful_orders', 0),
+                'failed': getattr(order, 'failed_orders', 0),
+                'reward': getattr(order, 'reward', 0),
+            }
+            print(f'[server] #{self.game_id} ゲーム終了: {self.result}')
+
+            # 結果を残してから番号を進める(遊んだ人の接続は、番号が
+            # 変わったのを見て結果を受け取り、画面を結果表示に切り替える)。
+            self.results[self.game_id] = self.result
+            with self._player_lock:
+                self.player = None
+            self.client_connected.clear()
+            self.game_id += 1
 
     def on_init_done(self):
-        """pygame の初期化後に呼ぶ(display が出来てから差し替える)。"""
+        """pygame の初期化後に呼ぶ(display が出来てから差し替える)。
+
+        ゲームを作り直すたびに呼ばれるが、差し替えはモジュールの関数に
+        対して行うので、1回だけでよい(2回やると二重に包まれる)。
+        """
+        if self._hooks_installed:
+            return
+        self._hooks_installed = True
         self.mouse = RemoteMouse()
         self._install_frame_hook()
 
@@ -429,10 +517,32 @@ async def instructions():
     return JSONResponse({'count': len(out), 'instructions': out})
 
 
+async def wait_in_line(sock: WebSocket):
+    """別の人が遊んでいる間、残り時間を知らせ続ける。空いたら知らせて切る。"""
+    try:
+        while True:
+            if session.slot_free():
+                await sock.send_text(json.dumps({'type': 'free'}))
+                return
+            remaining = session.remaining_seconds()
+            await sock.send_text(json.dumps({
+                'type': 'busy',
+                'state': session.state,
+                'remaining': None if remaining is None else round(remaining),
+            }))
+            await asyncio.sleep(1.0)
+    except (WebSocketDisconnect, RuntimeError):
+        pass
+
+
 @app.websocket('/ws')
 async def ws(sock: WebSocket):
     await sock.accept()
-    session.client_connected.set()
+    token = object()
+    if not session.try_acquire(token):
+        await wait_in_line(sock)
+        return
+    my_game = session.game_id
 
     loop = asyncio.get_running_loop()
     sent_version = 0
@@ -465,6 +575,14 @@ async def ws(sock: WebSocket):
             # 次の描画を待って PNG 化する。待ちもエンコードも executor 側なので
             # イベントループは塞がらず、入力(ping/キー)は待たされない。
             await loop.run_in_executor(None, session.wait_and_capture)
+
+            # この人の回が終わった。結果を渡して、次の人に枠を譲る。
+            if session.game_id != my_game:
+                await sock.send_text(json.dumps(
+                    {'type': 'status', 'state': 'finished',
+                     'result': session.results.get(my_game)}))
+                break
+
             version, data, size = session.latest_frame()
 
             if size != sent_size and size != (0, 0):
@@ -494,6 +612,9 @@ async def ws(sock: WebSocket):
         pass
     finally:
         task.cancel()
+        # 途中で閉じた(再読み込みした)ときも枠を空ける。同じ人が
+        # 開き直せば、続きから操作できる。
+        session.release(token)
 
 
 def start_server_thread(host, port):
@@ -555,32 +676,6 @@ def main():
 
     args = parse_arguments()
     session = WebGamePlay(args)
-    session.build()
-
-    # GamePlay.on_init のあとに pygame.mouse を差し替えたいので、フックしておく。
-    original_on_init = session.game.on_init
-
-    def on_init():
-        ret = original_on_init()
-        session.on_init_done()
-        return ret
-
-    session.game.on_init = on_init
-
-    # 指示の候補が1つも無いとき、ローカル版は文字入力の窓(Tk)を開く。
-    # その窓はサーバーの PC の画面に出るため、ブラウザからは閉じられず、
-    # ゲームが一時停止したまま止まる。Web 版では開かない。
-    original_request = session.game._request_instruction
-
-    def request_instruction(trigger='space', allow_text_fallback=True):
-        # 指示できるのは「AI がいま着手できる作業」だけ。1つも無いときに
-        # 何も起きないと、ボタンが壊れているように見えるので知らせる。
-        if not session.game._get_unexecuted_task_candidates():
-            session.notify('いま AI に指示できる作業はありません')
-            return None
-        return original_request(trigger=trigger, allow_text_fallback=False)
-
-    session.game._request_instruction = request_instruction
 
     start_server_thread(args.host, args.port)
 
@@ -597,15 +692,6 @@ def main():
         session.run_forever()
     except KeyboardInterrupt:
         print('\n[server] 中断しました')
-        return
-
-    # 終了後もアンケートへの導線を出せるよう、サーバーは動かしたままにする。
-    print('[server] 終了しました。Ctrl+C でサーバーを止められます。')
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        pass
 
 
 if __name__ == '__main__':

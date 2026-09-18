@@ -122,6 +122,14 @@
     padding: 24px;
   }
   #overlay.show { display: flex; }
+  #overlay .big { font-size: 20px; font-weight: 600; margin-bottom: 10px; }
+  #overlay .sub { color: var(--muted); font-size: 14px; line-height: 1.8; }
+  #overlay .count { font-size: 40px; font-weight: 700; margin: 14px 0 4px; }
+  #overlay button {
+    margin-top: 20px; font: inherit; font-size: 16px; color: var(--text);
+    background: #2a2f38; border: 1px solid #3a414c; border-bottom-width: 3px;
+    border-radius: 10px; padding: 12px 24px;
+  }
   #toast {
     position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
     background: #2a2f38; border: 1px solid #3a414c; border-radius: 8px;
@@ -280,10 +288,15 @@
     }, 1000);
   };
 
+  // 結果表示や順番待ちの表示を出したあとは、切断の案内で上書きしない。
+  let settled = false;
+
   ws.onclose = () => {
     el.conn.textContent = '切断されました';
     el.dot.classList.remove('on');
-    showOverlay('サーバーとの接続が切れました。<br>ページを再読み込みしてください。');
+    if (settled) return;
+    showOverlay('<div class="big">サーバーとの接続が切れました</div>' +
+                '<button onclick="location.reload()">再読み込み</button>');
   };
 
   ws.onmessage = (ev) => {
@@ -292,18 +305,38 @@
     const msg = JSON.parse(ev.data);
     if (msg.type === 'meta') {
       applyMeta(msg);
+    } else if (msg.type === 'busy') {
+      // 別の人がプレイ中。残り時間を見せて待ってもらう。
+      settled = true;
+      el.conn.textContent = '順番待ち';
+      el.state.textContent = '順番待ち';
+      const playing = msg.state === 'running' && msg.remaining != null;
+      showOverlay(
+        '<div class="big">別の人がプレイ中です</div>' +
+        (playing
+          ? `<div class="sub">終わりしだい、自動で始まります</div>` +
+            `<div class="count">${msg.remaining}</div><div class="sub">秒ほどで終わる予定</div>`
+          : '<div class="sub">次のゲームを準備しています。<br>このままお待ちください。</div>'));
+    } else if (msg.type === 'free') {
+      // 空いた。開き直すと、今度はこの端末が操作する側になる。
+      settled = true;
+      showOverlay('<div class="big">順番が来ました</div><div class="sub">接続しています...</div>');
+      setTimeout(() => location.reload(), 500);
     } else if (msg.type === 'notice') {
       showToast(msg.text);
     } else if (msg.type === 'pong') {
       el.rtt.textContent = (performance.now() - msg.t).toFixed(0);
     } else if (msg.type === 'status') {
       el.state.textContent = ({
-        waiting: '開始待ち', running: 'プレイ中', finished: '終了',
+        preparing: '準備中', waiting: '開始待ち', running: 'プレイ中', finished: '終了',
       })[msg.state] || msg.state;
       if (msg.state === 'finished' && msg.result) {
+        settled = true;
         showOverlay(
-          `ゲーム終了<br><br>提供 ${msg.result.served} 件 / 失敗 ${msg.result.failed} 件` +
-          `<br>スコア ${msg.result.reward}`);
+          '<div class="big">ゲーム終了</div>' +
+          `<div class="sub">提供 ${msg.result.served} 件 / 失敗 ${msg.result.failed} 件` +
+          `<br>スコア ${msg.result.reward}</div>` +
+          '<button onclick="location.reload()">もう一度遊ぶ</button>');
       }
     }
   };
