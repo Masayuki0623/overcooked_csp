@@ -631,8 +631,14 @@
     el.conn.textContent = '切断されました';
     el.dot.classList.remove('on');
     if (settled) return;
-    showOverlay('<div class="big">サーバーとの接続が切れました</div>' +
-                '<button onclick="location.reload()">再読み込み</button>');
+    playing = false;
+    el.overlay.classList.remove('countdown');
+    // 途中で切れたゲームは続けられない(サーバー側で打ち切られる)。
+    showOverlay('<div class="big">接続が切れました</div>' +
+                (started || countdownStarted
+                  ? '<div class="sub">このゲームは終了しました。<br>最初からやり直してください。</div>'
+                  : '') +
+                '<button onclick="location.reload()">最初からやり直す</button>');
   };
 
   // ---- ステージ選択 ----------------------------------------------------

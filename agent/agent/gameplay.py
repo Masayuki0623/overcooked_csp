@@ -514,6 +514,8 @@ class GamePlay(Game):
         self._q_ai.put_nowait(('Env', {"EnvState": e}))
 
         while True:
+            if getattr(self, '_quit_requested', False):
+                return
             loop_top = time.time()
             while not self._q_env.empty():
                 event = self._q_env.get_nowait()
@@ -861,6 +863,9 @@ class GamePlay(Game):
             if not self._q_control.empty():
                 event, args = self._q_control.get_nowait()
                 if event == 'Quit':
+                    # 環境のスレッドにも止まってもらう(途中で打ち切ったとき、
+                    # 残ったまま動き続けないように)。
+                    self._quit_requested = True
                     self._q_ai.put(('Quit', {}))
                     return
             # 少しだけ待つ。待たずに回すとこのスレッドが GIL を握りっぱなしになり、

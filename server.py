@@ -141,7 +141,7 @@ SEND_TIMEOUT_S = 5
 # 送り続けると、端末や途中の経路に盤面が溜まり、その分だけ操作の応答が遅れる
 # (実測: スマホで往復 900ms、送れたのは描いた分の4割)。追いつけないときは
 # 途中を飛ばして、いつも最新の盤面だけを送る。
-MAX_UNACKED_FRAMES = 2
+MAX_UNACKED_FRAMES = 3
 
 # スレッド間で GIL を渡す間隔(既定 5ms)。ローカル版と違い Web 版は
 # 環境・AI・配信・エンコードが同じプロセスで同時に動くため、既定のままだと
@@ -352,7 +352,7 @@ class WebGamePlay:
         画面を見る前に時間が進んでしまう。スタートボタンで start() を呼ぶ。
         """
         with self._player_lock:
-            if self.player is None and self.state in ('waiting', 'ready', 'running'):
+            if self.player is None and self.state == 'waiting':
                 self.player = token
                 return True
             return False
@@ -420,12 +420,26 @@ class WebGamePlay:
         del buf[:-120]
 
     def release(self, token):
+        """接続が切れた。遊んでいる途中なら、そのゲームは打ち切る。
+
+        つなぎ直しても続きからは遊べない(最初からやり直し)。途中で切れた
+        ゲームを続けると、その間 AI だけが動いた記録が残ってしまう。
+        """
         with self._player_lock:
             if self.player is token:
                 self.player = None
+                if self.state in ('preparing', 'ready', 'running'):
+                    self._abort()
+
+    def _abort(self):
+        self._aborted = True
+        game = self.game
+        if game is not None and self.state in ('ready', 'running'):
+            print(f'[server] #{self.game_id} 接続が切れたので、このゲームを打ち切ります')
+            game._q_control.put(('Quit', {}))
 
     def slot_free(self):
-        return self.player is None and self.state in ('waiting', 'ready', 'running')
+        return self.player is None and self.state == 'waiting'
 
     def remaining_seconds(self):
         """いまのゲームの残り時間(ゲーム内の秒)。遊んでいなければ None。"""
@@ -526,6 +540,9 @@ class WebGamePlay:
             self.game = None
             self.env = None
             self.selection = None
+            self._aborted = False
+            with self._pending_lock:
+                self._draw = None      # 前のゲームの盤面を残さない
             self.state = 'waiting'
             print(f'[server] #{self.game_id} ブラウザからの接続を待っています...')
             self.client_connected.wait()
@@ -546,6 +563,9 @@ class WebGamePlay:
                              client_rtt_ms=[], client_paint_ms=[], client_recv_fps=[],
                              send_wait_ms=[])
             print(f'[server] #{self.game_id} 盤面を用意しました(開始の合図待ち)')
+            if self._aborted:
+                # 組み立てている間に切れていた
+                self._abort()
             success = False
             try:
                 success = self.game.on_execute()
@@ -559,6 +579,7 @@ class WebGamePlay:
                 'served': getattr(order, 'successful_orders', 0),
                 'failed': getattr(order, 'failed_orders', 0),
                 'reward': getattr(order, 'reward', 0),
+                'aborted': bool(self._aborted),
             }
             print(f'[server] #{self.game_id} ゲーム終了: {self.result}')
 
@@ -1003,10 +1024,17 @@ async def ws(sock: WebSocket):
                                  'result': session.results.get(my_game)})
                 return
 
+            # 次のゲームを組み立てる前(開始待ち)は盤面がない。前のゲームの
+            # 盤面を送ろうとして落ち、接続が切れていた。
+            game = session.game
+            if game is None:
+                await send_status_and_notices()
+                continue
+
             draw_version, draw = session.latest_draw()
             if mode[0] == 'draw' and draw is not None:
                 # 盤面の描画命令だけを送り、ブラウザで描いてもらう。
-                base = (session.game.width, session.game.height)
+                base = (game.width, game.height)
                 if sent_size != base:
                     sent_size = base
                     await send_text({'type': 'meta', 'w': base[0], 'h': base[1],
@@ -1038,8 +1066,8 @@ async def ws(sock: WebSocket):
                 # 常にゲーム画面なので、クライアントはそこだけを切り出して
                 # 位置を動かさずに描き続けられる。
                 await send_text({'type': 'meta', 'w': size[0], 'h': size[1],
-                                 'base_w': session.game.width,
-                                 'base_h': session.game.height})
+                                 'base_w': game.width,
+                                 'base_h': game.height})
 
             if data is not None and version != sent_version:
                 sent_version = version
@@ -1080,8 +1108,8 @@ async def ws(sock: WebSocket):
     finally:
         for t in tasks:
             t.cancel()
-        # 途中で閉じた(再読み込みした)ときも枠を空ける。同じ人が
-        # 開き直せば、続きから操作できる。
+        # 途中で閉じた(再読み込みした)ときも枠を空ける。遊んでいる途中
+        # なら、そのゲームは打ち切り、開き直すと最初からになる。
         session.release(token)
         try:
             await asyncio.wait_for(sock.close(), 2)
