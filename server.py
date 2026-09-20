@@ -53,7 +53,7 @@ try:
 except ImportError:      # 無くても動く(画面が少し重くなるだけ)
     Image = None
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 ROOT = Path(__file__).resolve().parent
@@ -1012,11 +1012,50 @@ app = FastAPI(title='Overcooked CSP Web')
 app.mount('/graphics', StaticFiles(directory=str(WEB_GRAPHICS_DIR)), name='graphics')
 
 
+# いま使っている低遅延の入口(Cloudflare のトンネル)の URL。
+# tools/serve_public.py が起動のたびにここへ書く。
+PUBLIC_URL_PATH = ROOT / '.cache' / 'public_url.txt'
+
+
+def public_url():
+    try:
+        url = PUBLIC_URL_PATH.read_text(encoding='utf-8').strip()
+    except OSError:
+        return None
+    return url if url.startswith('http') else None
+
+
+def came_via_funnel(req):
+    host = (req.headers.get('host') or '').lower()
+    return 'tailscale-funnel-request' in req.headers or host.endswith('.ts.net')
+
+
 @app.get('/')
-async def index():
+async def index(req: Request):
+    # 固定 URL(Tailscale Funnel)は受付だけにして、実際に遊ぶのは
+    # そのとき立てている低遅延の入口へ送る。Funnel は中継が遠く、
+    # 同じ Wi-Fi からでも往復1秒近くかかることがあった。
+    url = public_url()
+    if url and came_via_funnel(req):
+        body = ('<!doctype html><meta charset="utf-8">'
+                '<meta name="viewport" content="width=device-width,initial-scale=1">'
+                f'<meta http-equiv="refresh" content="0;url={url}">'
+                '<title>Overcooked CSP</title>'
+                '<body style="background:#14171c;color:#e8ecf1;font-family:sans-serif;'
+                'display:flex;flex-direction:column;align-items:center;justify-content:center;'
+                'height:100vh;margin:0;text-align:center;gap:14px">'
+                '<div>遊ぶ画面へ移動しています...</div>'
+                f'<a style="color:#8fd3a8" href="{url}">自動で移動しないときはここを押してください</a>'
+                '</body>')
+        return HTMLResponse(body, headers={'Cache-Control': 'no-store'})
     # 画面を直したときに、参加者の端末に古い版が残らないようにする。
     return FileResponse(WEB_DIR / 'index.html',
                         headers={'Cache-Control': 'no-store'})
+
+
+@app.get('/api/public_url')
+async def api_public_url():
+    return JSONResponse({'url': public_url()})
 
 
 @app.get('/api/sprites')

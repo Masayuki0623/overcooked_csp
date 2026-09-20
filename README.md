@@ -133,6 +133,16 @@ tailscale funnel --bg 8000
 
 止めるときは `tailscale funnel --https=443 off` です。
 
+ただし Funnel は中継が遠く、同じ Wi-Fi からでも往復1秒近くかかることがありました（この PC から東京の中継までは 16ms なので、遅いのは中継から端末までの経路です）。そこで **固定 URL は受付だけにして、遊ぶ画面は Cloudflare のトンネル（往復 30ms 前後）へ送ります**。
+
+```bash
+winget install --id Cloudflare.cloudflared -e   # 最初の1回だけ
+python server.py --host 0.0.0.0                 # ゲームのサーバー
+python tools/serve_public.py                    # 別の窓で。トンネルを立てる
+```
+
+`tools/serve_public.py` は、立てたトンネルの URL を `.cache/public_url.txt` に書きます。固定 URL（`https://desktop-1.tail9a3ca5.ts.net/`）を開いた人は、そこへ自動で移動します。URL は起動のたびに変わりますが、参加者に伝えるのは固定 URL のままで構いません。止めるとファイルを消すので、固定 URL はそのまま遊べる画面に戻ります。家の中から遊ぶときは `http://192.168.3.7:8000/`（LAN 直）がいちばん速いです。
+
 ### 実験モード（参加者IDを入れて遊ぶ）
 
 最初の画面で「参加者ID」を入れると、実験のセッションになります。地図とレシピは選べなくなり、その参加者に割り当てた条件どおりに始まります。IDを空にすれば、これまでどおり自由に遊べます。
