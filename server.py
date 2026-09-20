@@ -36,8 +36,10 @@ os.environ.setdefault('SDL_AUDIODRIVER', 'dummy')
 
 import argparse
 import asyncio
+import csv
 import io
 import json
+import random
 import re
 import sys
 import threading
@@ -50,7 +52,7 @@ try:
     from PIL import Image
 except ImportError:      # 無くても動く(画面が少し重くなるだけ)
     Image = None
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -64,9 +66,10 @@ from agent import play_main  # noqa: E402
 from agent.gameplay import (  # noqa: E402
     INSTRUCTION_TIMINGS,
     INSTRUCTION_TIMING_FREE,
+    INSTRUCTION_TIMING_ONCE_AT_START,
 )
 from gym_cooking.utils.order_preset import (  # noqa: E402
-    enumerate_order_recipes, preset_names)
+    enumerate_order_recipes, experiment_case_indices, preset_names)
 
 WEB_DIR = ROOT / 'web'
 # ゲームの絵(pygame が使うのと同じ PNG)。ブラウザ側で描くときに読み込む。
@@ -132,6 +135,74 @@ def recipe_label(name):
 
 def order_sets_for(preset):
     return enumerate_order_recipes(preset)
+
+
+# ----------------------------------------------------------------------
+# 実験(参加者ID を入れて遊ぶとき)
+# ----------------------------------------------------------------------
+# 条件は「地図3種 × AI が指示を後回しにできる量(skip_budget)3種」の9通り。
+# 参加者は9セッション全部を遊び、順番だけ人ごとにランダムにする。
+SKIP_BUDGETS = (0, 2, 4)
+EXPERIMENT_PRESET = 'experiment2'
+ASSIGN_PATH = ROOT / 'results' / 'assignments.json'
+SURVEY_PATH = ROOT / 'results' / 'survey.csv'
+SESSION_LOG_PATH = ROOT / 'results' / 'web_sessions.csv'
+_assign_lock = threading.Lock()
+
+
+def all_conditions():
+    return [{'map': m, 'skip_budget': b} for m, _, _ in MAP_CHOICES for b in SKIP_BUDGETS]
+
+
+def _load_assignments():
+    try:
+        return json.loads(ASSIGN_PATH.read_text(encoding='utf-8'))
+    except Exception:
+        return {}
+
+
+def _save_assignments(data):
+    ASSIGN_PATH.parent.mkdir(parents=True, exist_ok=True)
+    ASSIGN_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding='utf-8')
+
+
+def assignment_for(participant):
+    """その参加者の条件の並び(9通り)と、次が何セッション目かを返す。
+
+    並びは最初に作ったときの1回だけ決め、ファイルに残す。途中でサーバーを
+    止めても同じ順番の続きから遊べる。
+    """
+    with _assign_lock:
+        data = _load_assignments()
+        rec = data.get(participant)
+        if not rec or len(rec.get('order') or []) != len(all_conditions()):
+            order = all_conditions()
+            random.shuffle(order)
+            rec = {'order': order, 'done': 0, 'created': datetime.now().isoformat(timespec='seconds')}
+            data[participant] = rec
+            _save_assignments(data)
+        return rec
+
+
+def note_session_done(participant):
+    """1セッション終わったので、次の条件へ進める。"""
+    with _assign_lock:
+        data = _load_assignments()
+        rec = data.get(participant)
+        if not rec:
+            return
+        rec['done'] = min(len(rec['order']), int(rec.get('done', 0)) + 1)
+        _save_assignments(data)
+
+
+def append_csv(path, fields, row):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    new = not path.exists()
+    with path.open('a', newline='', encoding='utf-8') as f:
+        w = csv.DictWriter(f, fieldnames=fields, extrasaction='ignore')
+        if new:
+            w.writeheader()
+        w.writerow(row)
 
 
 # 枠を取ってからスタートを押すまでの猶予(秒)。
@@ -386,7 +457,24 @@ class WebGamePlay:
             print(f'[server] #{self.game_id} ゲームを開始します')
 
     def _resolve_choice(self, choice):
-        """画面で選ばれた内容を、組み立てに使える形にする。おかしな値は既定に戻す。"""
+        """画面で選ばれた内容を、組み立てに使える形にする。おかしな値は既定に戻す。
+
+        参加者ID が入っているときは実験のセッション。地図とレシピは選ばせず、
+        その参加者に割り当てた順番どおりの条件で遊ぶ。
+        """
+        participant = str(choice.get('participant') or '').strip()
+        if participant:
+            rec = assignment_for(participant)
+            done = int(rec.get('done', 0))
+            order = rec['order']
+            cond = order[min(done, len(order) - 1)]
+            sets = order_sets_for(EXPERIMENT_PRESET)
+            cases = experiment_case_indices(EXPERIMENT_PRESET) or list(range(len(sets)))
+            case = random.choice(cases)
+            return {'map': cond['map'], 'preset': EXPERIMENT_PRESET, 'case': case,
+                    'recipes': list(sets[case]), 'picked_by': 'experiment',
+                    'participant': participant, 'session': done + 1,
+                    'sessions_total': len(order), 'skip_budget': cond['skip_budget']}
         maps = [m for m, _, _ in MAP_CHOICES]
         presets = [r for r, _, _ in RECIPE_CHOICES]
         map_name = choice.get('map') if choice.get('map') in maps else maps[0]
@@ -395,7 +483,6 @@ class WebGamePlay:
         case = choice.get('case')
         if not isinstance(case, int) or not (0 <= case < len(sets)):
             # おまかせ: 組み合わせの中から毎回ランダムに選ぶ
-            import random
             case = random.randrange(len(sets))
             picked_by = 'random'
         else:
@@ -440,6 +527,35 @@ class WebGamePlay:
                    game_t=round(float(getattr(env, 'current_time', 0.0) or 0.0), 1))
         self.timeline.append(row)
 
+    SESSION_FIELDS = ['timestamp', 'participant_id', 'session', 'map', 'skip_budget',
+                      'case', 'orders', 'served', 'failed', 'completed',
+                      'makespan_s', 'aborted', 'game_id']
+
+    def _log_session(self):
+        """実験のセッションを results/web_sessions.csv に1行ずつ残す。
+
+        アンケート(results/survey.csv)とは participant_id と session で
+        突き合わせる。
+        """
+        sel = self.selection or {}
+        if not sel.get('participant'):
+            return
+        res = self.result or {}
+        env = self.env
+        append_csv(SESSION_LOG_PATH, self.SESSION_FIELDS, {
+            'timestamp': datetime.now().isoformat(timespec='seconds'),
+            'participant_id': sel['participant'], 'session': sel.get('session'),
+            'map': sel.get('map'), 'skip_budget': sel.get('skip_budget'),
+            'case': sel.get('case'), 'orders': '|'.join(sel.get('recipes', [])),
+            'served': res.get('served'), 'failed': res.get('failed'),
+            'completed': int(bool(res.get('success'))),
+            'makespan_s': round(float(getattr(env, 'current_time', 0.0) or 0.0), 1),
+            'aborted': int(bool(res.get('aborted'))), 'game_id': self.game_id,
+        })
+        if not res.get('aborted'):
+            # 最後までやったセッションだけ数える(途中で切れた回はやり直し)
+            note_session_done(sel['participant'])
+
     def _save_timeline(self, reason):
         if not self.timeline:
             return
@@ -475,6 +591,14 @@ class WebGamePlay:
         if game is not None and self.state in ('ready', 'running'):
             print(f'[server] #{self.game_id} 接続が切れたので、このゲームを打ち切ります')
             game._q_control.put(('Quit', {}))
+            # 指示パネルを開いている間は、ゲーム側は _q_control を見ていない
+            # (パネル自身の入力待ちの中にいる)。pygame の終了イベントを
+            # 流せばパネルが閉じ、そのまま打ち切りに進む。これが無いと、
+            # パネルを出したまま切れた回が終わらず、枠が永久に空かなかった。
+            try:
+                pygame.event.post(pygame.event.Event(pygame.QUIT))
+            except Exception:
+                pass
 
     def slot_free(self):
         return self.player is None and self.state == 'waiting'
@@ -518,15 +642,26 @@ class WebGamePlay:
         if sel and not uses_fruit(orders):
             # 野菜だけの注文では、フルーツ・ミキサー・コップのない版の地図を使う
             map_name = f'{map_name}_veg'
+        # 実験のセッションでは、指示は開始直後に1回だけ(見送り不可)。
+        timing = (INSTRUCTION_TIMING_ONCE_AT_START if sel and sel.get('participant')
+                  else a.instruction_request_timing)
         self.game, self.env, self.replay = play_main.init_env_replay(
             map_name, a.agent0, a.agent1, a.task,
             a.no_reschedule, a.debug,
             orders, a.order_seed,
-            a.instruction_request_timing,
+            timing,
         )
         if sel:
             # 何を選んで遊んだかをリプレイにも残す
             self.replay['web_selection'] = dict(sel)
+        if sel and sel.get('participant'):
+            # 実験のセッション。AI が指示を後回しにできる量を条件どおりにする。
+            # 時間の締め切り(deadline_seconds)は使わない(シミュレーション側の
+            # 実験と同じ条件にそろえる)。
+            ai = getattr(self.game, 'ai', None)
+            if ai is not None:
+                ai.skip_budget = int(sel['skip_budget'])
+                ai.deadline_seconds = None
         return self.game
 
     def prepare(self):
@@ -624,8 +759,10 @@ class WebGamePlay:
                 'failed': getattr(order, 'failed_orders', 0),
                 'reward': getattr(order, 'reward', 0),
                 'aborted': bool(self._aborted),
+                'makespan_s': round(float(getattr(self.env, 'current_time', 0.0) or 0.0), 1),
             }
             print(f'[server] #{self.game_id} ゲーム終了: {self.result}')
+            self._log_session()
 
             # 結果を残してから番号を進める(遊んだ人の接続は、番号が
             # 変わったのを見て結果を受け取り、画面を結果表示に切り替える)。
@@ -896,6 +1033,86 @@ async def slot():
     })
 
 
+SURVEY_FIELDS = (['participant_id', 'session', 'timestamp']
+                 + [f'coord_{i}' for i in range(1, 7)] + ['coord_mean']
+                 + [f'trust_{i}' for i in range(1, 9)]
+                 + ['trust_mean', 'trust_dnf_count',
+                    'map', 'skip_budget', 'case', 'served', 'makespan_s'])
+
+
+@app.post('/api/survey')
+async def survey(req: Request):
+    """セッション直後のアンケートを1行ずつ results/survey.csv に足す。
+
+    協調感(1〜5の6項目)は単純平均。信頼感(0〜7の8項目)は「あてはまらない」
+    を欠損として除いた平均。どちらも点数まで CSV に入れる。
+    """
+    body = await req.json()
+    pid = str(body.get('participant_id') or '').strip()
+    if not pid:
+        return JSONResponse({'ok': False, 'error': '参加者IDがありません'}, status_code=400)
+
+    coord = []
+    for i in range(1, 7):
+        v = body.get(f'coord_{i}')
+        if not isinstance(v, (int, float)) or not (1 <= v <= 5):
+            return JSONResponse({'ok': False, 'error': f'協調感の{i}番が未回答です'},
+                                status_code=400)
+        coord.append(int(v))
+
+    trust = []
+    for i in range(1, 9):
+        v = body.get(f'trust_{i}')
+        if v in (None, '', 'dnf'):
+            trust.append(None)          # 「あてはまらない」= 欠損。0点ではない
+            continue
+        if not isinstance(v, (int, float)) or not (0 <= v <= 7):
+            return JSONResponse({'ok': False, 'error': f'信頼感の{i}番が未回答です'},
+                                status_code=400)
+        trust.append(int(v))
+    if body.get('answered_all') is not True and any(
+            body.get(f'trust_{i}') is None for i in range(1, 9)):
+        return JSONResponse({'ok': False, 'error': '信頼感に未回答があります'},
+                            status_code=400)
+
+    got = [v for v in trust if v is not None]
+    row = {
+        'participant_id': pid, 'session': body.get('session'),
+        'timestamp': datetime.now().isoformat(timespec='seconds'),
+        'coord_mean': round(sum(coord) / len(coord), 2),
+        'trust_mean': round(sum(got) / len(got), 2) if got else '',
+        'trust_dnf_count': sum(1 for v in trust if v is None),
+        'map': body.get('map'), 'skip_budget': body.get('skip_budget'),
+        'case': body.get('case'), 'served': body.get('served'),
+        'makespan_s': body.get('makespan_s'),
+    }
+    for i, v in enumerate(coord, 1):
+        row[f'coord_{i}'] = v
+    for i, v in enumerate(trust, 1):
+        row[f'trust_{i}'] = '' if v is None else v
+    append_csv(SURVEY_PATH, SURVEY_FIELDS, row)
+    print(f"[server] アンケートを保存しました: {pid} session={row['session']} "
+          f"協調 {row['coord_mean']} 信頼 {row['trust_mean']} "
+          f"あてはまらない {row['trust_dnf_count']}件")
+    return JSONResponse({'ok': True})
+
+
+@app.get('/api/assignment')
+async def assignment(participant: str = ''):
+    """参加者に割り当てた条件の並びと、次のセッション番号。"""
+    pid = participant.strip()
+    if not pid:
+        return JSONResponse({'ok': False, 'error': '参加者IDがありません'}, status_code=400)
+    rec = assignment_for(pid)
+    done = int(rec.get('done', 0))
+    total = len(rec['order'])
+    nxt = rec['order'][min(done, total - 1)]
+    label = dict((m, l) for m, l, _ in MAP_CHOICES).get(nxt['map'], nxt['map'])
+    return JSONResponse({'ok': True, 'participant_id': pid, 'done': done,
+                         'total': total, 'session': min(done + 1, total),
+                         'finished': done >= total, 'next_map_label': label})
+
+
 @app.get('/api/perf')
 async def perf():
     """どこが遅いかを切り分けるための実測値。
@@ -1024,7 +1241,8 @@ async def ws(sock: WebSocket):
             elif kind == 'start':
                 session.start(token, {
                     'map': msg.get('map'), 'preset': msg.get('preset'),
-                    'case': msg.get('case')})
+                    'case': msg.get('case'),
+                    'participant': msg.get('participant')})
             elif kind == 'ack':
                 try:
                     frame_no[1] = max(frame_no[1], int(msg.get('n', 0)))
@@ -1146,6 +1364,14 @@ async def ws(sock: WebSocket):
             sel = session.selection or {}
             await send_text({'type': 'status', 'state': session.state,
                              'result': session.result,
+                             'experiment': {
+                                 'participant_id': sel.get('participant'),
+                                 'session': sel.get('session'),
+                                 'sessions_total': sel.get('sessions_total'),
+                                 # アンケートに添える条件(画面には出さない)
+                                 'map': sel.get('map'), 'case': sel.get('case'),
+                                 'skip_budget': sel.get('skip_budget'),
+                             } if sel.get('participant') else None,
                              'selection': {
                                  'map': dict((m, l) for m, l, _ in MAP_CHOICES).get(sel.get('map')),
                                  'preset': dict((r, l) for r, l, _ in RECIPE_CHOICES).get(sel.get('preset')),

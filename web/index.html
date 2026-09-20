@@ -153,6 +153,44 @@
     padding: 10px;
   }
   #overlay .stage-pick .go { text-align: center; }
+  .pick input[type=text] {
+    width: 100%; padding: 10px 12px; font-size: 16px; border-radius: 8px;
+    background: #2a3039; color: var(--fg); border: 1px solid #47505d;
+  }
+  /* アンケート。項目が多いので、画面に収まらなければ中だけ縦に送る */
+  #overlay.form { align-items: flex-start; overflow-y: auto; }
+  #overlay .survey { width: min(560px, 100%); text-align: left; }
+  #overlay .survey .big { text-align: center; }
+  #overlay .survey h3 {
+    font-size: 15px; margin: 22px 0 4px; padding-top: 14px;
+    border-top: 1px solid #333b45;
+  }
+  #overlay .survey .lead { font-size: 13px; color: var(--muted); line-height: 1.7; }
+  #overlay .survey .q { margin-top: 14px; }
+  #overlay .survey .q .text { font-size: 15px; margin-bottom: 6px; }
+  #overlay .survey .q.todo .text { color: #ffb4b4; }
+  #overlay .survey .scale { display: flex; gap: 6px; flex-wrap: wrap; }
+  #overlay .survey .scale label {
+    flex: 1 1 0; min-width: 44px; text-align: center; font-size: 12px;
+    color: var(--muted); cursor: pointer;
+  }
+  #overlay .survey .scale label span {
+    display: block; padding: 10px 0; margin-bottom: 4px; border-radius: 8px;
+    background: #2a3039; border: 1px solid #47505d; font-size: 15px; color: var(--fg);
+  }
+  #overlay .survey .scale input { position: absolute; opacity: 0; pointer-events: none; }
+  #overlay .survey .scale input:checked + span {
+    background: #2f6f4b; border-color: #3f8a60; font-weight: 700;
+  }
+  #overlay .survey .scale label.dnf { flex: 1 1 100%; }
+  /* 0〜7 は数字だけなので細くしてよい(1行に収める) */
+  #overlay .survey .scale.num { gap: 4px; }
+  #overlay .survey .scale.num label { min-width: 0; }
+  #overlay .survey .anchors {
+    display: flex; justify-content: space-between; gap: 8px;
+    font-size: 11.5px; color: var(--muted); margin: 4px 0 6px;
+  }
+  #overlay .survey .err { color: #ffb4b4; font-size: 13.5px; min-height: 1.4em; margin-top: 10px; }
 
   #toast {
     position: fixed; left: 50%; top: 64px; transform: translateX(-50%);
@@ -458,6 +496,13 @@
 
   // 確認用: 描画にかかる時間を開発者ツールから測れるようにする
   window.__overcooked = {
+    // 見た目の確認用。アンケート画面をそのまま出す(送信もできる)。
+    showSurvey(exp, result) {
+      showSurvey(exp || { participant_id: 'test', session: 1, sessions_total: 9,
+                          map: 'exp_partition', skip_budget: 0, case: 0 },
+                 result || { served: 3, failed: 0, reward: 45, makespan_s: 42.0 },
+                 '<div class="sub">提供 3 件 / 失敗 0 件<br>スコア 45</div>');
+    },
     benchPaint(n = 100) {
       const t0 = performance.now();
       for (let i = 0; i < n; i++) paint();
@@ -649,6 +694,23 @@
   // 地図・レシピ・注文の組み合わせを選んでからスタートする。前回選んだ
   // ものはこの端末に覚えておく(次に開いたとき同じ選択から始められる)。
   const PICK_STORE = 'overcooked-stage-v1';
+  const PID_STORE = 'overcooked-participant';
+  // 実験の参加者ID。入れて始めると、地図と AI の設定は割り当てどおりになり、
+  // 終わったあとにアンケートが出る。空ならこれまでどおり自由に遊べる。
+  let participantId = '';
+  try { participantId = localStorage.getItem(PID_STORE) || ''; } catch (e) {}
+  let assignment = null;      // {session, total, next_map_label, finished}
+  function saveParticipant(v) {
+    participantId = v.trim();
+    try { localStorage.setItem(PID_STORE, participantId); } catch (e) {}
+  }
+  function loadAssignment() {
+    if (!participantId) { assignment = null; renderPick(); return; }
+    fetch(`/api/assignment?participant=${encodeURIComponent(participantId)}`)
+      .then(r => r.json())
+      .then((a) => { if (a.ok && a.participant_id === participantId) assignment = a; renderPick(); })
+      .catch(() => {});
+  }
   let options = null;
   let pick = { map: null, preset: null, case: '' };
   try { Object.assign(pick, JSON.parse(localStorage.getItem(PICK_STORE) || '{}')); } catch (e) {}
@@ -674,18 +736,41 @@
         `<option value="${c.case}" ${String(pick.case) === String(c.case) ? 'selected' : ''}>${esc(c.label)}</option>`))
       .join('');
 
+    // 実験の参加者は、地図もレシピも選ばない(割り当てどおり)。
+    const experiment = !!participantId;
+    const idBox =
+      '<div class="pick"><div class="lab">参加者ID(実験のときだけ入れてください)</div>' +
+      `<input type="text" id="pid" value="${esc(participantId)}" placeholder="例: p01" ` +
+      'autocomplete="off" autocapitalize="off" spellcheck="false">' +
+      `<div class="hint">${experiment && assignment
+        ? (assignment.finished
+            ? `${esc(participantId)} さんは ${assignment.total} セッション全部が終わっています`
+            : `${esc(participantId)} さん / セッション ${assignment.session} / ${assignment.total}`)
+        : '空のままなら、自由に遊ぶモードです'}</div></div>`;
+
     showOverlay(
       '<div class="stage-pick">' +
-      '<div class="big">ステージを選んでください</div>' +
-      `<div class="pick"><div class="lab">地図</div><div class="opts">${btns(options.maps, 'map')}</div>` +
-      `<div class="hint">${esc(map.desc)}</div></div>` +
-      `<div class="pick"><div class="lab">レシピ</div><div class="opts">${btns(options.recipes, 'preset')}</div>` +
-      `<div class="hint">${esc(recipe.desc)}</div></div>` +
-      `<div class="pick"><div class="lab">注文の組み合わせ(${recipe.combos.length} 通り)</div>` +
-      `<select id="pick-case">${combos}</select></div>` +
+      `<div class="big">${experiment ? 'セッションを始めます' : 'ステージを選んでください'}</div>` +
+      idBox +
+      (experiment ? '' :
+        `<div class="pick"><div class="lab">地図</div><div class="opts">${btns(options.maps, 'map')}</div>` +
+        `<div class="hint">${esc(map.desc)}</div></div>` +
+        `<div class="pick"><div class="lab">レシピ</div><div class="opts">${btns(options.recipes, 'preset')}</div>` +
+        `<div class="hint">${esc(recipe.desc)}</div></div>` +
+        `<div class="pick"><div class="lab">注文の組み合わせ(${recipe.combos.length} 通り)</div>` +
+        `<select id="pick-case">${combos}</select></div>`) +
       '<div class="go"><button class="primary" id="start" disabled>スタート</button>' +
       '<div class="sub" id="dl-note" style="margin-top:8px"></div></div>' +
       '</div>');
+
+    const pid = document.getElementById('pid');
+    const applyPid = () => {
+      if (pid.value.trim() === participantId) return;
+      saveParticipant(pid.value);
+      loadAssignment();
+    };
+    pid.addEventListener('change', applyPid);
+    pid.addEventListener('blur', applyPid);
 
     el.overlayText.querySelectorAll('.opts button').forEach((b) => b.addEventListener('click', () => {
       pick[b.dataset.key] = b.dataset.val;
@@ -693,15 +778,19 @@
       savePick();
       renderPick();
     }));
-    document.getElementById('pick-case').addEventListener('change', (e) => {
-      pick.case = e.target.value;
-      savePick();
-    });
+    if (!experiment) {
+      document.getElementById('pick-case').addEventListener('change', (e) => {
+        pick.case = e.target.value;
+        savePick();
+      });
+    }
     updateStartButton();
     document.getElementById('start').addEventListener('click', () => {
       if (!spritesAllLoaded) return;
+      saveParticipant(document.getElementById('pid').value);
       send({ type: 'start', map: pick.map, preset: pick.preset,
-             case: pick.case === '' ? null : Number(pick.case) });
+             case: pick.case === '' ? null : Number(pick.case),
+             participant: participantId || null });
       showOverlay('<div class="big">準備しています</div><div class="sub">数秒かかります</div>');
     });
   }
@@ -742,6 +831,7 @@
   }
 
   function showStart() {
+    if (participantId && !assignment) { loadAssignment(); }
     if (options) { renderPick(); return; }
     showOverlay('<div class="big">読み込み中...</div>');
     optionsReady.then(renderPick);
@@ -806,14 +896,113 @@
         hideOverlay();
       } else if (msg.state === 'finished' && msg.result) {
         settled = true;
-        showOverlay(
-          '<div class="big">ゲーム終了</div>' +
+        const summary =
           `<div class="sub">提供 ${msg.result.served} 件 / 失敗 ${msg.result.failed} 件` +
-          `<br>スコア ${msg.result.reward}</div>` +
-          '<button onclick="location.reload()">もう一度遊ぶ</button>');
+          `<br>スコア ${msg.result.reward}</div>`;
+        if (msg.experiment && msg.experiment.participant_id && !msg.result.aborted) {
+          showSurvey(msg.experiment, msg.result, summary);
+        } else {
+          showOverlay('<div class="big">ゲーム終了</div>' + summary +
+                      '<button onclick="location.reload()">もう一度遊ぶ</button>');
+        }
       }
     }
   };
+
+  // ---- アンケート(セッション直後) --------------------------------------
+  // パートA: 協調感(5段階・6項目)、パートB: 信頼感(8段階+「あてはまらない」・8項目)。
+  // 項目も順番もセッションごとに変えない(順序の影響を一定に保つため)。
+  const COORD_ITEMS = ['息が合っていた', '積極的に関わっていた', 'やりとりがスムーズだった',
+                       '相手に注意を払っていた', '集中していた', '対等に参加していた'];
+  const COORD_LABELS = ['全くそう思わない', 'そう思わない', 'どちらでもない',
+                        'そう思う', '強くそう思う'];
+  const TRUST_ITEMS = ['信頼できる', '能力がある', '予測できる', '熟練している',
+                       '頼りになる', '有能である', '一貫している', '几帳面である'];
+
+  function showSurvey(exp, result, summary) {
+    playing = false;
+    const coordQs = COORD_ITEMS.map((text, i) => {
+      const n = i + 1;
+      const opts = COORD_LABELS.map((lab, k) =>
+        `<label><input type="radio" name="coord_${n}" value="${k + 1}">` +
+        `<span>${k + 1}</span>${esc(lab)}</label>`).join('');
+      return `<div class="q" id="q-coord_${n}"><div class="text">${n}. ${esc(text)}</div>` +
+             `<div class="scale">${opts}</div></div>`;
+    }).join('');
+
+    const trustQs = TRUST_ITEMS.map((text, i) => {
+      const n = i + 1;
+      // 0 と 7 だけにラベルを付ける(原版の形式)。数字の下に長い言葉を
+      // 入れると縦に伸びるので、両端の言葉は目盛りの下にまとめて置く。
+      let opts = '';
+      for (let v = 0; v <= 7; v++) {
+        opts += `<label><input type="radio" name="trust_${n}" value="${v}">` +
+                `<span>${v}</span></label>`;
+      }
+      return `<div class="q" id="q-trust_${n}"><div class="text">${n}. ${esc(text)}</div>` +
+             `<div class="scale num">${opts}</div>` +
+             '<div class="anchors"><span>0 = 全くあてはまらない</span>' +
+             '<span>7 = 非常にあてはまる</span></div>' +
+             `<div class="scale"><label class="dnf"><input type="radio" name="trust_${n}" ` +
+             'value="dnf"><span>あてはまらない</span></label></div></div>';
+    }).join('');
+
+    el.overlay.classList.add('form');
+    showOverlay(
+      '<div class="survey">' +
+      '<div class="big">ゲーム終了</div>' + summary +
+      `<div class="sub">セッション ${exp.session} / ${exp.sessions_total}` +
+      `(${esc(exp.participant_id)})<br>最後にアンケートにお答えください(1分ほど)。</div>` +
+      '<h3>パートA:今回のやりとりについて</h3>' +
+      '<div class="lead">今回のやりとりの中で、以下のことがどの程度あったと感じましたか。<br>' +
+      '1 = 全くそう思わない 〜 5 = 強くそう思う</div>' + coordQs +
+      '<h3>パートB:AIパートナーについて</h3>' +
+      '<div class="lead">一緒にプレイしたAIパートナーについて、以下の特性がどの程度あてはまりますか。' +
+      '判断できない、または当てはめるのが適切でないと感じる場合は「あてはまらない」を選んでください。<br>' +
+      '0 = 全くあてはまらない 〜 7 = 非常にあてはまる</div>' + trustQs +
+      '<div class="err" id="sv-err"></div>' +
+      '<div class="go"><button class="primary" id="sv-send">送信する</button></div>' +
+      '</div>');
+
+    document.getElementById('sv-send').addEventListener('click', () => {
+      const err = document.getElementById('sv-err');
+      const body = {
+        participant_id: exp.participant_id, session: exp.session,
+        map: exp.map, skip_budget: exp.skip_budget, case: exp.case,
+        served: result.served, makespan_s: result.makespan_s, answered_all: true,
+      };
+      const missing = [];
+      const read = (name) => {
+        const el2 = el.overlayText.querySelector(`input[name="${name}"]:checked`);
+        document.getElementById(`q-${name}`).classList.toggle('todo', !el2);
+        if (!el2) { missing.push(name); return null; }
+        return el2.value === 'dnf' ? null : Number(el2.value);
+      };
+      for (let i = 1; i <= 6; i++) body[`coord_${i}`] = read(`coord_${i}`);
+      for (let i = 1; i <= 8; i++) body[`trust_${i}`] = read(`trust_${i}`);
+      if (missing.length) {
+        err.textContent = `未回答が ${missing.length} 項目あります(赤い項目)`;
+        document.getElementById(`q-${missing[0]}`).scrollIntoView({ block: 'center' });
+        return;
+      }
+      err.textContent = '送信しています...';
+      const btn = document.getElementById('sv-send');
+      btn.disabled = true;
+      fetch('/api/survey', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                             body: JSON.stringify(body) })
+        .then(r => r.json())
+        .then((r) => {
+          if (!r.ok) throw new Error(r.error || '保存できませんでした');
+          el.overlay.classList.remove('form');
+          const last = exp.session >= exp.sessions_total;
+          showOverlay('<div class="big">ありがとうございました</div>' +
+            `<div class="sub">${last ? '全セッションが終わりました。' :
+              `次はセッション ${exp.session + 1} / ${exp.sessions_total} です。`}</div>` +
+            (last ? '' : '<button onclick="location.reload()">次のセッションへ</button>'));
+        })
+        .catch((e) => { err.textContent = String(e.message || e); btn.disabled = false; });
+    });
+  }
 
   let toastTimer = null;
   function showToast(text) {
