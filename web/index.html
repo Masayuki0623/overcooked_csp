@@ -386,6 +386,8 @@
   }
 
   function applyMeta(msg) {
+    if (msg.grid) grid = msg.grid;
+    if (msg.tile) tilePx = msg.tile;
     baseW = msg.base_w; baseH = msg.base_h;
     fullW = msg.w;      fullH = msg.h;
     fit(gameCv, baseW, baseH);
@@ -482,6 +484,7 @@
     let bgLen = bgIds.length;
     if (same < bgIds.length || !bgIds.length || lastKeep > bgIds.length + 40) {
       bgLen = Math.min(lastKeep || same, seq.length);
+      if (meRange) bgLen = Math.min(bgLen, meRange[0]);
       if (bgCanvas.width !== gameCv.width) bgCanvas.width = gameCv.width;
       if (bgCanvas.height !== gameCv.height) bgCanvas.height = gameCv.height;
       bgCtx.clearRect(0, 0, bgCanvas.width, bgCanvas.height);
@@ -491,11 +494,31 @@
     const c = gameCtx;
     c.imageSmoothingEnabled = false;
     c.drawImage(bgCanvas, 0, 0);
-    drawRange(c, gameCv, bgLen, seq.length);
+
+    // 自分のキャラは、サーバーの位置ではなく先読みした位置に描く。
+    // ずれていない(届いた位置と同じ)ときは、そのまま順に描くだけ。
+    const dx = (predPos && mePos) ? predPos[0] - mePos[0] : 0;
+    const dy = (predPos && mePos) ? predPos[1] - mePos[1] : 0;
+    if (meRange && (dx || dy)) {
+      const [from, to] = meRange;
+      drawRange(c, gameCv, bgLen, Math.max(bgLen, from));
+      drawRange(c, gameCv, Math.max(bgLen, to), seq.length);
+      c.save();
+      c.translate(dx * tilePx, dy * tilePx);
+      drawRange(c, gameCv, Math.max(bgLen, from), Math.max(bgLen, to));
+      c.restore();
+    } else {
+      drawRange(c, gameCv, bgLen, seq.length);
+    }
   }
 
   // 確認用: 描画にかかる時間を開発者ツールから測れるようにする
   window.__overcooked = {
+    // 先読みの様子(確認用)
+    predict() {
+      return { server: mePos, pred: predPos, pending: pendingInputs.length,
+               sent: sentInputs, queued: keyQueue.length, range: meRange };
+    },
     // 見た目の確認用。アンケート画面をそのまま出す(送信もできる)。
     showSurvey(exp, result) {
       showSurvey(exp || { participant_id: 'test', session: 1, sessions_total: 9,
@@ -606,8 +629,8 @@
   // 最初の盤面を描き終えたか(カウントダウンはその後に始める)
   let boardDrawn = false;
   const boardWaiters = [];
-  function markBoardDrawn() {
-    if (boardDrawn || !seq.length) return;
+  function markBoardDrawn(force) {
+    if (boardDrawn || (!seq.length && !force)) return;
     boardDrawn = true;
     boardWaiters.splice(0).forEach((f) => f());
   }
@@ -620,6 +643,7 @@
     seq = seq.slice(0, msg.keep).concat(msg.tail);
     lastKeep = msg.keep;
     if (msg.n) pendingAck = msg.n;
+    applyMe(msg.me);
     recvTimes.push(performance.now());
     el.fps.textContent = rate(recvTimes);
     schedulePaint();
@@ -628,13 +652,91 @@
   // 届いた盤面は、画面の書き換え1回ぶんにまとめて描く。端末の処理が
   // 追いつかないとき、古い盤面を順に描いて遅れが溜まっていくのを防ぐ。
   // 描くのにかかった時間はサーバーへ報告する(遅さの切り分け用)。
+  // ---- 自分のキャラの先読み ---------------------------------------------
+  // 押した瞬間に端末側で1マス動かして見せ、サーバーから届いた位置で
+  // 合わせ直す。こうすると、通信が遅れても「押してから動くまで」は
+  // 遅れない(遅れて見えるのは相手の動きだけになる)。
+  const STEP_MS = 100;          // ゲームは 1秒に10回進む。それより速くは動けない
+  const MAX_QUEUE = 3;          // 押しすぎた分は捨てる(サーバー側と同じ)
+  const DIRS = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] };
+  let grid = null;              // 通れるマス('.' が通れる)
+  let tilePx = 40;
+  let mePos = null;             // サーバーが知らせてきた自分の位置
+  let otherPos = null;
+  let predPos = null;           // 先読みした自分の位置
+  let meRange = null;           // 自分のキャラを描く命令の範囲
+  let sentInputs = 0;           // 送ったキーの数
+  const pendingInputs = [];     // まだサーバーが処理していないキー
+  const keyQueue = [];          // これから送るキー(1秒に10個まで)
+  let lastSendAt = 0;
+
+  function walkable(x, y) {
+    if (!grid) return false;
+    const row = grid[y];
+    return !!row && row[x] === '.';
+  }
+  function replayPending(from) {
+    // サーバーの位置から、まだ届いていない操作を順に当てはめる
+    let [x, y] = from;
+    for (const d of pendingInputs) {
+      const nx = x + d[0], ny = y + d[1];
+      if (walkable(nx, ny) && !(otherPos && nx === otherPos[0] && ny === otherPos[1])) {
+        x = nx; y = ny;
+      }
+    }
+    return [x, y];
+  }
+  function applyMe(me) {
+    if (!me || !me.pos) { meRange = null; return; }
+    mePos = me.pos;
+    otherPos = me.other || null;
+    meRange = me.range || null;
+    // サーバーが処理した分は、先読みの控えから消す
+    const unhandled = Math.max(0, sentInputs - (me.done || 0));
+    if (pendingInputs.length > unhandled) {
+      pendingInputs.splice(0, pendingInputs.length - unhandled);
+    }
+    predPos = replayPending(mePos);
+  }
+  function pushKey(code) {
+    // 移動キーは、先読みしてから送る。押しすぎた分は捨てる(サーバーの
+    // 受け口も同じだけしか溜めないので、そろえておくとズレない)。
+    if (!DIRS[code]) { sendNow({ type: 'key', code }); return; }
+    if (keyQueue.length >= MAX_QUEUE) return;
+    keyQueue.push(code);
+    flushKeys();
+  }
+  function flushKeys() {
+    if (!keyQueue.length) return;
+    const now = performance.now();
+    if (now - lastSendAt < STEP_MS) {
+      setTimeout(flushKeys, STEP_MS - (now - lastSendAt));
+      return;
+    }
+    lastSendAt = now;
+    const code = keyQueue.shift();
+    const d = DIRS[code];
+    if (predPos && grid) {
+      pendingInputs.push(d);
+      predPos = replayPending(mePos || predPos);
+      schedulePaint();
+    }
+    sendNow({ type: 'key', code });
+    sentInputs += 1;
+    if (keyQueue.length) setTimeout(flushKeys, STEP_MS);
+  }
+
   let paintQueued = false;
   const paintMs = [];
   let pendingAck = 0;     // 描き終えたらサーバーに返す盤面の番号
   function schedulePaint() {
     if (paintQueued) return;
     paintQueued = true;
-    requestAnimationFrame(() => {
+    let done = false;
+    const run = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
       paintQueued = false;
       const t0 = performance.now();
       paint();
@@ -643,8 +745,13 @@
       markBoardDrawn();
       // 描き終えたことを伝える。サーバーはこの返事が来るまで、次の盤面を
       // 先に送りすぎない(遅れが溜まらないようにするため)。
-      if (pendingAck) { send({ type: 'ack', n: pendingAck }); pendingAck = 0; }
-    });
+      if (pendingAck) { sendNow({ type: 'ack', n: pendingAck }); pendingAck = 0; }
+    };
+    // 画面の書き換えに合わせて描く。省電力などで書き換えが止まっている
+    // 端末では、これが呼ばれないまま固まってしまう(返事も返らず盤面が
+    // 届かなくなる)ので、少し待っても来なければ自分で描く。
+    const timer = setTimeout(run, 250);
+    requestAnimationFrame(run);
   }
 
   // ---- 接続 ------------------------------------------------------------
@@ -812,6 +919,9 @@
   function startCountdown() {
     if (countdownStarted) return;
     countdownStarted = true;
+    // 盤面が描けたことを確かめてから始めるが、何らかの事情で描画が
+    // 進まない端末でも止まったままにならないよう、2秒で先へ進める。
+    setTimeout(() => markBoardDrawn(true), 2000);
     whenSpritesLoaded(() => whenBoardDrawn(() => {
       paint();
       let n = 3;
@@ -890,6 +1000,11 @@
         startCountdown();
       } else if (msg.state === 'running') {
         el.overlay.classList.remove('countdown');
+        if (!playing) {
+          sentInputs = 0;
+          pendingInputs.length = 0;
+          keyQueue.length = 0;
+        }
         playing = true;
 
         started = true;
@@ -1021,9 +1136,16 @@
   // ゲームが始まるまで(カウントダウン中も)は移動・指示を送らない。
   // 送ると、止まっている間に溜まり、始まった瞬間に勝手に動いてしまう。
   let playing = false;
-  function send(obj) {
-    if (obj.type === 'key' && !playing) return;
+  function sendNow(obj) {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
+  }
+  function send(obj) {
+    if (obj.type === 'key') {
+      if (!playing) return;
+      pushKey(obj.code);       // 移動は先読みしてから送る
+      return;
+    }
+    sendNow(obj);
   }
 
   // ---- 入力 ------------------------------------------------------------

@@ -213,11 +213,28 @@ START_TIMEOUT_S = 120
 PLAYER_SILENCE_TIMEOUT_S = 10
 # 1回の送信を待つ上限(秒)。これを超えたら相手は居ないとみなす。
 SEND_TIMEOUT_S = 5
+# 返事待ちで送れる盤面の数の下限と上限。往復時間に合わせて、この間で決める。
+# 少なすぎると、往復の遅い回線では「1往復に数コマ」しか送れず盤面がカクつく
+# (実測: 往復 1秒のスマホで毎秒3コマ)。多すぎると盤面が溜まって遅れる。
+MIN_UNACKED_FRAMES = 3
+MAX_UNACKED_FRAMES_CAP = 8
 # 端末が「描いた」と返事をしていない盤面が、これだけ溜まっていたら次は送らない。
 # 送り続けると、端末や途中の経路に盤面が溜まり、その分だけ操作の応答が遅れる
 # (実測: スマホで往復 900ms、送れたのは描いた分の4割)。追いつけないときは
 # 途中を飛ばして、いつも最新の盤面だけを送る。
 MAX_UNACKED_FRAMES = 3
+
+
+def unacked_limit(rtt_ms):
+    """往復時間から、返事待ちで送ってよい盤面の数を決める。
+
+    盤面は 0.1 秒ごとなので、往復時間のぶんだけ「途中にある」状態が
+    ふつう。窓をそれに合わせると、遅い回線でも毎秒のコマ数が落ちない。
+    """
+    if not rtt_ms:
+        return MAX_UNACKED_FRAMES
+    return max(MIN_UNACKED_FRAMES,
+               min(MAX_UNACKED_FRAMES_CAP, int(rtt_ms / 100) + 1))
 
 # スレッド間で GIL を渡す間隔(既定 5ms)。ローカル版と違い Web 版は
 # 環境・AI・配信・エンコードが同じプロセスで同時に動くため、既定のままだと
@@ -387,6 +404,7 @@ class WebGamePlay:
         # 最新の描画命令(ブラウザ側で描くとき用)。指示パネルを出している
         # 間は pygame が別の方法で描くので None にして、画像で送る。
         self._draw = None
+        self._draw_me = None
         self._draw_version = 0
         # pygame のフォント -> 文字の大きさ(px)。描画命令には大きさが
         # 残らないので、put_text を包んで書き足す。
@@ -409,6 +427,7 @@ class WebGamePlay:
         self.selection = None
         self._hooks_installed = False
 
+        self._me_range = None          # 人のキャラを描いた命令の範囲
         self.timeline = []             # 1秒ごとの通信の様子(ゲーム後にファイルへ)
         self.connection_info = None
         self.disconnect_reason = None
@@ -670,6 +689,9 @@ class WebGamePlay:
         self.take_notices()
         game = self.build()
 
+        self._me_range = None
+        self._install_agent_hook(game)
+
         # pygame の初期化後に pygame.mouse / display を差し替えたいので、フックしておく。
         original_on_init = game.on_init
 
@@ -784,6 +806,60 @@ class WebGamePlay:
         self.mouse = RemoteMouse()
         self._install_frame_hook()
 
+    def _install_agent_hook(self, game):
+        """人が操作するキャラを描いた範囲を、コマごとに覚えておく。
+
+        端末は押した瞬間に自分のキャラだけ先に動かして見せる(先読み)。
+        そのとき、サーバーが送ってきた位置のキャラは消して、自分で
+        先読みした位置に描き直す必要がある。どの命令がそのキャラの分かは
+        描いた順でしか分からないので、描いている間に範囲を控えておく。
+        """
+        idx = getattr(game, 'idx_human', None)
+        if idx is None or idx >= len(game.sim_agents):
+            return
+        me = game.sim_agents[idx]
+        original = game.draw_agent
+
+        def draw_agent(agent):
+            plot = game.get_visualization()
+            start = len(plot)
+            original(agent)
+            if agent is me or getattr(agent, 'name', None) == me.name:
+                self._me_range = (start, len(plot))
+
+        game.draw_agent = draw_agent
+
+    def walkable_grid(self):
+        """通れるマスの地図。端末の先読みで「そこへ動けるか」を見るのに使う。"""
+        env = self.env
+        world = getattr(env, 'world', None)
+        if world is None:
+            return None
+        blocked = set()
+        for name, objs in world.objects.items():
+            for o in objs:
+                if getattr(o, 'collidable', False):
+                    blocked.add(tuple(o.location))
+        return [''.join('#' if (x, y) in blocked else '.' for x in range(world.width))
+                for y in range(world.height)]
+
+    def me_state(self):
+        """人のキャラの位置・相手の位置・処理済みの入力数。"""
+        game, env = self.game, self.env
+        idx = getattr(game, 'idx_human', None)
+        if game is None or env is None or idx is None:
+            return None
+        agents = env.sim_agents
+        if idx >= len(agents):
+            return None
+        other = agents[1 - idx] if len(agents) > 1 else None
+        return {
+            'pos': list(agents[idx].location),
+            'other': list(other.location) if other is not None else None,
+            'done': int(getattr(game, 'human_inputs_done', 0)),
+            'range': list(self._me_range) if self._me_range else None,
+        }
+
     def _install_frame_hook(self):
         """描画が完了した瞬間だけフレームを取り込むようにする。
 
@@ -813,15 +889,18 @@ class WebGamePlay:
             # 指示パネルを出しているとき(画面が横に広がる)は、パネルが
             # 命令を残さないので画像で送る。
             draw = None
+            me = None
             game = self.game
             if game is not None and snapshot.get_size() == (game.width, game.height):
                 try:
                     draw = normalize_elements(game.get_visualization())
+                    me = self.me_state()
                 except Exception:
                     draw = None
             with self._pending_lock:
                 self._pending_surface = snapshot
                 self._draw = draw
+                self._draw_me = me
                 self._draw_version += 1
             self.perf['rendered'] += 1
             self._frame_ready.set()
@@ -893,7 +972,7 @@ class WebGamePlay:
 
     def latest_draw(self):
         with self._pending_lock:
-            return self._draw_version, self._draw
+            return self._draw_version, self._draw, self._draw_me
 
     def latest_frame(self):
         with self._frame_lock:
@@ -1220,6 +1299,7 @@ async def ws(sock: WebSocket):
     last_state = None
     encoder = DrawEncoder()
     frame_no = [0, 0]      # [送った盤面の番号, 端末が描いたと返事した番号]
+    last_rtt = [None]      # 端末が測った往復時間(ms)
 
     async def pump_input():
         """ブラウザからの入力を pygame イベントへ流し続ける。"""
@@ -1259,6 +1339,10 @@ async def ws(sock: WebSocket):
                 # RTT 計測用。クライアントの送信時刻をそのまま返す。
                 if msg.get('rtt') is not None:
                     session.note_client_rtt(msg.get('rtt'))
+                    try:
+                        last_rtt[0] = float(msg['rtt'])
+                    except (TypeError, ValueError):
+                        pass
                 session.note_client_stat('client_paint_ms', msg.get('paint_ms'))
                 session.note_client_stat('client_recv_fps', msg.get('recv_fps'))
                 session.note_timeline({
@@ -1310,20 +1394,27 @@ async def ws(sock: WebSocket):
                 await send_status_and_notices()
                 continue
 
-            draw_version, draw = session.latest_draw()
+            draw_version, draw, me = session.latest_draw()
             if mode[0] == 'draw' and draw is not None:
                 # 盤面の描画命令だけを送り、ブラウザで描いてもらう。
                 base = (game.width, game.height)
                 if sent_size != base:
                     sent_size = base
+                    # 先読みに要るもの(1マスの大きさ・通れるマスの地図)も一緒に渡す
                     await send_text({'type': 'meta', 'w': base[0], 'h': base[1],
-                                     'base_w': base[0], 'base_h': base[1]})
+                                     'base_w': base[0], 'base_h': base[1],
+                                     'tile': getattr(game, 'scale', 40),
+                                     'grid': session.walkable_grid()})
                 if (draw_version != sent_draw_version
-                        and frame_no[0] - frame_no[1] < MAX_UNACKED_FRAMES):
+                        and frame_no[0] - frame_no[1] < unacked_limit(last_rtt[0])):
                     sent_draw_version = draw_version
                     frame_no[0] += 1
                     msg = encoder.encode(draw)
                     msg['n'] = frame_no[0]
+                    if me:
+                        # 端末が先読みした自分の位置を、サーバーの位置に
+                        # 合わせ直すための情報。
+                        msg['me'] = me
                     t_send = time.time()
                     await send_text(msg)
                     session.note_client_stat('send_wait_ms', (time.time() - t_send) * 1000)

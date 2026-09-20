@@ -159,6 +159,7 @@ class GamePlay(Game):
 
         # human_agent_idx は None の場合もある（両方AIの旧モードなど）
         self.idx_human = human_agent_idx
+        self.human_inputs_done = 0   # 人の入力を処理した数(Web 版の先読み補正用)
         self.ai = get_agent(self.agent_set, self.replay)
 
         # concurrent control variables
@@ -500,6 +501,8 @@ class GamePlay(Game):
         # ことがあり、「ボタンを押しても動かない」ように見える原因だった。
         # 押しすぎて後から遅れて動き続けないよう、溜めるのは少しだけにする。
         human_backlog = collections.deque(maxlen=HUMAN_INPUT_BACKLOG)
+        # 人の入力をいくつ処理したか。Web 版が先読みの補正に使う。
+        self.human_inputs_done = 0
 
         self.on_render(paused=paused)
         info = self.env.get_ai_info()
@@ -522,6 +525,11 @@ class GamePlay(Game):
                 event_type, args = event
                 if event_type == 'Action':
                     if args['agent'] == "human" and idx_human is not None:
+                        if len(human_backlog) == human_backlog.maxlen:
+                            # 溜まりすぎて捨てる分も「処理した」と数える。
+                            # Web 版は、この数を見て端末側の先読みと実際の
+                            # 位置を合わせている(数え落とすとズレたままになる)。
+                            self.human_inputs_done += 1
                         human_backlog.append(args['action'])
                     elif args['agent'] == "ai" and self.ai_agent_idx is not None:
                         action_dict[self.sim_agents[self.ai_agent_idx].name] = args['action']
@@ -547,6 +555,7 @@ class GamePlay(Game):
             if not paused:
                 if idx_human is not None and human_backlog:
                     action_dict[self.sim_agents[idx_human].name] = human_backlog.popleft()
+                    self.human_inputs_done += 1
                 ad = {k: v if v is not None else (
                     0, 0) for k, v in action_dict.items()}
                 if self.debug_mode:
