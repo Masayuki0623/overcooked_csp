@@ -2150,6 +2150,47 @@ class CSPAgent:
                 ready.add((verb, obj))
         return ready
 
+    def _pot_still_cooking(self, env, dish_name):
+        """その料理が、まだ鍋で煮えている最中か。"""
+        want = {p.capitalize() for p in dish_ingredients(dish_name)}
+        if not want:
+            return False
+        try:
+            for pot_pos in env.get_pos_by_obj_gs(gs='Pot') or []:
+                name = str(getattr(env.pos_obj.get(pot_pos), 'full_name', '') or '')
+                if 'Cooking' not in name:
+                    continue
+                have = {p.replace('Cooking', '') for p in name.split('-')}
+                if have == want:
+                    return True
+        except Exception:
+            return False
+        return False
+
+    def _find_startable_other_task(self, env, agent_idx, skip_tid, schedule):
+        """いま着手できる別の作業を、自分の計画から探す。
+
+        煮上がりを待つだけの時間に、運ぶ・刻むといった手をつけられる
+        作業があるならそちらを先にやる。
+        """
+        blocked = self.blocked_tasks.get(agent_idx, {})
+        for cand in schedule:
+            tid = cand.get('id')
+            if not tid or tid == skip_tid or tid in blocked:
+                continue
+            if tid in self.completed_task_ids:
+                continue
+            verb, obj, _uid = tid
+            if verb in ('chop', 'carry'):
+                return cand
+            if verb in ('cook', 'serve_salad'):
+                if self._cook_dependency_ready_from_world(env, obj):
+                    return cand
+            if verb == 'mix':
+                if self._cook_dependency_ready_from_world(env, obj):
+                    return cand
+        return None
+
     def _find_ready_serve_task(self, env, agent_idx):
         """鍋が塞がって cook が進めないとき、鍋を空けられる serve タスクを探す。
 
@@ -2933,6 +2974,18 @@ class CSPAgent:
                 # 18秒間なにもしなかった)。
                 me_hold = getattr(getattr(env.agents[agent_idx], 'holding', None),
                                   'full_name', None) or ''
+
+                # 鍋がまだ煮えている最中なら、そこで待たずに先に別の作業をする。
+                # 鍋に入れる工程は「入れたら終わり」で、煮えている 15 秒は
+                # 他のことに使えるはずだった(実測: 皿を持って鍋の前で待機)。
+                if (verb in ('serve', 'handover') and dish_kind_of(obj) == KIND_SOUP
+                        and self._pot_still_cooking(env, obj)
+                        and (not me_hold or 'Plate' in me_hold)):
+                    alt = self._find_startable_other_task(env, agent_idx, tid, sc)
+                    if alt is not None:
+                        task = alt
+                        tid = task['id']
+                        verb, obj, order_uid = tid
                 if verb not in ('serve', 'handover') and (not me_hold or 'Plate' in me_hold):
                     # 何かを運んでいる途中では割り込まない(持ち物を捨てて
                     # 取りに戻る無駄が出るため)。手が空いているか、皿を
