@@ -25,11 +25,13 @@ from gym_cooking.envs.overcooked_environment import OvercookedEnvironment, MapSe
 from gym_cooking.utils.order_preset import (  # noqa: E402
     enumerate_order_recipes, experiment_case_indices)
 from gym_cooking.utils.replay import Replay  # noqa: E402
-import run_human_model_experiment as H  # noqa: E402
+import run_human_model_experiment as H
+from gym_cooking.utils import config as game_config
+from gym_cooking.utils.interact import resolve_action  # noqa: E402
 from human_models import HumanModel  # noqa: E402
 from detect_freeze import snapshot, pot_is_cooking  # noqa: E402
 
-STEP = 0.1
+STEP = 0.1      # main() で入力の速さに合わせて変える
 
 
 def make_env(level, recipes, max_seconds=100.0):
@@ -82,6 +84,8 @@ def run_trial(level, recipes, model, seed=0, max_seconds=100.0):
         before = [(tuple(a.location), getattr(a.holding, 'full_name', None))
                   for a in env.sim_agents]
         progress_before = _appliance_progress(env)
+        for a in env.sim_agents:
+            acts[a.name] = resolve_action(a, env.world, acts[a.name])
         env.step(acts, passed_time=STEP)
         progress_after = _appliance_progress(env)
         frames += 1
@@ -160,7 +164,13 @@ def main():
                     help='注文のプリセット(experiment1 = 野菜のみ、experiment2 = 野菜+フルーツ)')
     ap.add_argument('--cases', default='experiment', choices=['experiment', 'all'],
                     help="'all' はプリセットの組み合わせを全部")
+    ap.add_argument('--input-hz', type=int, default=None,
+                    help='1秒あたりに行動できる回数(既定は config.INPUT_HZ)')
     args = ap.parse_args()
+    if args.input_hz:
+        game_config.set_input_hz(args.input_hz)
+    global STEP
+    STEP = game_config.seconds_per_step()
 
     H.MAX_SECONDS_OVERRIDE = 100.0
     sets = enumerate_order_recipes(args.preset)

@@ -2,11 +2,43 @@ from gym_cooking.utils.core import *
 from gym_cooking.utils.event import Event
 import numpy as np
 
+# 「向いている先へ手を出す」行動。方向にはならない値を使う。
+INTERACT = (2, 2)
+
+
+def resolve_action(agent, world, action):
+    """「その方向へ進む」を、新しい規則の行動に読み替える。
+
+    人は自分で向きとインタラクトを操作するが、AI や自動で動かす相手役は
+    「目的の物の方向へ進む」形で行動を出す。その行動を
+      床なら    : そのまま進む
+      台などなら: まだ向いていなければ向く / 向いていれば手を出す
+    に直す。
+    """
+    if not action:
+        return action
+    d = tuple(action)
+    if d in ((0, 0), INTERACT):
+        return action
+    target = world.inbounds((agent.location[0] + d[0], agent.location[1] + d[1]))
+    gs = world.get_gridsquare_at(target)
+    if gs is None or isinstance(gs, Floor):
+        return d
+    if tuple(getattr(agent, 'facing', (0, 1))) != d:
+        return d          # まず向く(この手では手は出ない)
+    return INTERACT
+
 
 def interact(agent, world, current_time) -> Event:
     """Carries out interaction for this agent taking this action in this world.
 
     The action that needs to be executed is stored in `agent.action`.
+
+    行動は2種類。
+      方向 (dx, dy) : その向きを向く。床なら1マス進む。床でなければ向くだけ。
+      INTERACT      : 向いている先の物に手を出す(拾う/置く/刻む/入れる等)。
+    以前は「台の方向へ進もうとする」ことが手を出すことを兼ねていたが、
+    人が長押しで歩けるようにしたため、手を出すのは別の行動に分けた。
     """
 
     # agent does nothing (i.e. no arrow key)
@@ -14,16 +46,30 @@ def interact(agent, world, current_time) -> Event:
         # return None
         return Event(playerA=agent.name, event='No-op', location=agent.location, time=current_time)
 
-    action_x, action_y = world.inbounds(tuple(np.asarray(agent.location) + np.asarray(agent.action)))
-    gs = world.get_gridsquare_at((action_x, action_y))
+    if agent.action == INTERACT:
+        facing = getattr(agent, 'facing', (0, 1))
+        action_x, action_y = world.inbounds(tuple(np.asarray(agent.location) + np.asarray(facing)))
+        gs = world.get_gridsquare_at((action_x, action_y))
+        if isinstance(gs, Floor):
+            # 向いている先が床なら、手を出す相手がいない
+            return Event(playerA=agent.name, event='No-op', location=agent.location,
+                         time=current_time)
+    else:
+        agent.facing = tuple(agent.action)
+        action_x, action_y = world.inbounds(tuple(np.asarray(agent.location) + np.asarray(agent.action)))
+        gs = world.get_gridsquare_at((action_x, action_y))
 
-    # if floor in front --> move to that square
-    if isinstance(gs, Floor):  # and gs.holding is None:
-        agent.move_to(gs.location)
-        return Event(playerA=agent.name, event='Move', location=agent.location, time=current_time)
+        # if floor in front --> move to that square
+        if isinstance(gs, Floor):  # and gs.holding is None:
+            agent.move_to(gs.location)
+            return Event(playerA=agent.name, event='Move', location=agent.location, time=current_time)
+
+        # 床でなければ、向きを変えるだけ(手は出さない)
+        return Event(playerA=agent.name, event='No-op', location=agent.location,
+                     time=current_time)
 
     # if holding something
-    elif agent.holding is not None:
+    if agent.holding is not None:
         # if delivery in front --> deliver
         if isinstance(gs, Delivery):
             obj = agent.holding

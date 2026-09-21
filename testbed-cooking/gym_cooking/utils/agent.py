@@ -17,6 +17,7 @@ class SimAgent:
         self.location = location
         self.holding = None
         self.action = (0, 0)
+        self.facing = (0, 1)     # 向いている方向(手を出す先)
         self.has_delivered = False
 
     def __str__(self):

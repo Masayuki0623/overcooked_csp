@@ -1,5 +1,8 @@
 # modules for game
 from gym_cooking.misc.game.game import Game
+from gym_cooking.utils.core import Floor
+from gym_cooking.utils.interact import INTERACT, resolve_action
+from gym_cooking.utils import config
 from gym_cooking.misc.game.utils import *
 from gym_cooking.utils.gui import popup_text, popup_task_choice
 from gym_cooking.utils.replay import Replay
@@ -141,7 +144,7 @@ class GamePlay(Game):
             self._log_file = None
 
         # fps of human and ai
-        self.fps = 10
+        self.fps = config.INPUT_HZ
         self.fps_ai = agent_set.speed
 
         # --debug では詳細トレースの出力だけで AI の判断1回が数百msかかる。
@@ -248,6 +251,24 @@ class GamePlay(Game):
             self.screen.blit(snapshot, (0, 0))
             pygame.display.flip()
 
+    def _translate_ai_actions(self, action_dict, idx_human):
+        """AI の「その方向へ進む」を、新しい規則の行動に読み替える。
+
+        台や器具の方向へ進もうとしても、もう手は出ない(向きが変わるだけ)。
+        AI 側の作りは「目的の物の方向へ進む」ままにしておき、ここで
+        「まだ向いていなければ向く」「向いていれば手を出す」に直す。
+        人の操作はそのまま通す(人は自分でスペースを押す)。
+        """
+        world = self.env.world
+        for i, agent in enumerate(self.sim_agents):
+            if i == idx_human:
+                continue
+            action = action_dict.get(agent.name)
+            try:
+                action_dict[agent.name] = resolve_action(agent, world, action)
+            except Exception:
+                pass
+
     def on_event(self, event):
         if event.type == pygame.QUIT:
             self._q_control.put(('Quit', {}))
@@ -265,6 +286,13 @@ class GamePlay(Game):
                     ('Action', {"agent": "human", "action": action}))
 
             if pygame.key.name(event.key) == "space":
+                # 向いている先に手を出す(拾う/置く/刻む/入れる)。
+                # 以前は「台の方向へ進む」が手を出すことを兼ねていたが、
+                # 長押しで歩けるようにしたので別のキーに分けた。
+                self._q_env.put(('Action', {"agent": "human", "action": INTERACT}))
+                self._q_ai.put(('Action', {"agent": "human", "action": INTERACT}))
+
+            if pygame.key.name(event.key) in ("return", "enter"):
                 if self.instruction_request_timing != INSTRUCTION_TIMING_FREE:
                     # free 以外はタイミングを実験条件として固定している。
                     # free 以外はタイミングを実験条件として固定しているので、
@@ -553,6 +581,7 @@ class GamePlay(Game):
                     chat_out = ""  # AI Outputの画面表示を無効化
 
             if not paused:
+                self._translate_ai_actions(action_dict, idx_human)
                 if idx_human is not None and human_backlog:
                     action_dict[self.sim_agents[idx_human].name] = human_backlog.popleft()
                     self.human_inputs_done += 1

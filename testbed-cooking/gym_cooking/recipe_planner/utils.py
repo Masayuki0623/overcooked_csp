@@ -62,7 +62,7 @@ class Fresh(Predicate):
 class Chopping(Predicate):
     def __init__(self, obj, **kwargs):
         Predicate.__init__(self, 'Chopping', (obj,))
-        self._rest_steps = CHOPPING_NUM_STEPS
+        self._rest_steps = chopping_steps()
     
     def update_one_step(self, **kwargs):
         Predicate.update_one_step(self, passed=1)
@@ -91,7 +91,7 @@ class Mixing(Predicate):
     """
     def __init__(self, obj, **kwargs):
         Predicate.__init__(self, 'Mixing', (obj,))
-        self._rest_steps = BLENDING_NUM_STEPS
+        self._rest_steps = blending_steps()
 
     def update_one_step(self, **kwargs):
         Predicate.update_one_step(self, passed=1)

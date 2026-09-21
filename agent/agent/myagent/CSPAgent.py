@@ -4,7 +4,13 @@ import time
 from dataclasses import dataclass
 from copy import deepcopy
 from ortools.sat.python import cp_model
+from gym_cooking.utils import config as game_config
 from gym_cooking.utils.config import BLENDING_NUM_STEPS
+
+# 台や器具に手を出すには「その方を向く」+「手を出す」の2手が要る。
+# 以前は「その方向へ進む」だけで手を出せたので1手だった。同じ相手に
+# 続けて手を出すとき(刻むなど)は、向きはそのままなので1手ずつ。
+INTERACT_FRAMES = 2
 from .csp.model import CSPModel
 from .csp.solver import solve as solve_csp
 from .TaskAgent import TaskAgent
@@ -131,7 +137,7 @@ class CSPAgent:
         self.frames_per_action = 1 
 
         # FPS
-        self.fps = 10
+        self.fps = game_config.INPUT_HZ
         # 期限 (frames)
         self.deadline_seconds = deadline_seconds
         self.deadline_frames = int(75 * self.fps) if deadline_seconds is None else int(deadline_seconds * self.fps)
@@ -3965,7 +3971,11 @@ class CSPAgent:
             
             if min_total is None:
                 return None
-            return int(min_total + 8 + pickup_cost + 1 + 1)
+            # 材料を取る + まな板に置く + 刻む + 刻んだ物を取る + 置き場に置く。
+            # 刻んでいる間と、刻んだ物を取るときは、まな板を向いたままなので
+            # 向き直す手は要らない。
+            return int(min_total + INTERACT_FRAMES * 3 + 1
+                       + game_config.chopping_steps() + pickup_cost - 1)
 
         elif verb == 'carry':
             # 材料を取って共有テーブルまで運ぶ。
@@ -3982,7 +3992,8 @@ class CSPAgent:
                     best = d
             if best is None:
                 return None
-            return int(best + 2)
+            # 材料を取る + 置き場に置く
+            return int(best + INTERACT_FRAMES * 2)
 
         elif verb == 'cook':
             pot_pos_list = resources['pots']
@@ -4015,7 +4026,8 @@ class CSPAgent:
 
             d = self.astar_distance(env, start_pos, pot_pos)
             if d is None: return None
-            return int(d + 2)
+            # 置き場の材料を取る + 鍋に入れる
+            return int(d + INTERACT_FRAMES * 2)
 
         elif verb == 'serve_salad':
             # サラダ: 置き場の刻んだ食材を取る → 皿タイルへ寄って皿に乗せる → 提供口。
@@ -4043,7 +4055,7 @@ class CSPAgent:
 
             if d1 is None or d2 is None: return None
             # 食材の取得 + 皿に乗せる + 提供 の3インタラクト分
-            return int(d1 + d2 + 3)
+            return int(d1 + d2 + INTERACT_FRAMES * 3)
 
         elif verb == 'serve':
             pot_pos_list = resources['pots']
@@ -4057,7 +4069,8 @@ class CSPAgent:
             d2 = self.astar_distance(env, pot_pos, delivery_pos)
 
             if d1 is None or d2 is None: return None
-            return int(d1 + d2 + 3)
+            # 皿を取る + 鍋から盛る + 提供する の3インタラクト
+            return int(d1 + d2 + INTERACT_FRAMES * 3)
 
         elif verb == 'mix':
             # 置き場の刻んだフルーツを取ってミキサーへ入れ、規定回数まわす。
@@ -4068,8 +4081,8 @@ class CSPAgent:
             start_pos = assigned_counter or self._find_shared_counter(env, blender) or blender
             d = self.astar_distance(env, start_pos, blender)
             if d is None: return None
-            # 材料を取る + 入れる + 混ぜる回数
-            return int(d + 2 + BLENDING_NUM_STEPS)
+            # 材料を取る + 入れる + 混ぜる回数(混ぜている間は向きはそのまま)
+            return int(d + INTERACT_FRAMES * 2 + game_config.blending_steps())
 
         elif verb == 'serve_juice':
             # ミキサーの中身をコップに注いで提供口へ。serve(鍋->皿)と同じ形。
@@ -4082,7 +4095,7 @@ class CSPAgent:
             d2 = self.astar_distance(env, blender, delivery_pos)
             if d1 is None or d2 is None: return None
             # コップを取る + 注ぐ + 提供する の3インタラクト
-            return int(d1 + d2 + 3)
+            return int(d1 + d2 + INTERACT_FRAMES * 3)
 
         elif verb == 'handover':
             # 仕切りの向こうへ渡すための工程。皿を取り、鍋から盛り、受け渡し台に置く。
@@ -4097,7 +4110,7 @@ class CSPAgent:
             d2 = self.astar_distance(env, pot_pos, counter)
             if d1 is None or d2 is None: return None
             # 皿を取る + 鍋から盛る + 台に置く の3インタラクト
-            return int(d1 + d2 + 3)
+            return int(d1 + d2 + INTERACT_FRAMES * 3)
 
         elif verb == 'serve_from_counter':
             # 受け渡し台に置かれた完成品を取って提供口へ運ぶだけ。
@@ -4107,7 +4120,7 @@ class CSPAgent:
             d = self.astar_distance(env, counter, delivery_pos)
             if d is None: return None
             # 台から取る + 提供する の2インタラクト
-            return int(d + 2)
+            return int(d + INTERACT_FRAMES * 2)
         else:
             return None
     def get_assigned_counters(self):

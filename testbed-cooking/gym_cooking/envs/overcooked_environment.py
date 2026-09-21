@@ -6,7 +6,7 @@ import gym_cooking.recipe_planner.recipe as RECIPY
 
 # Other core modules
 import gym_cooking
-from gym_cooking.utils.interact import interact
+from gym_cooking.utils.interact import INTERACT, interact
 from gym_cooking.utils.world import World
 from gym_cooking.utils.core import *
 from gym_cooking.utils.agent import SimAgent
@@ -380,6 +380,12 @@ class OvercookedEnvironment(gym.Env):
         Collisions happens if agent collide amongst themselves or with world objects."""
         # Tracks whether agents can execute their action.
         execute = [True, True]
+
+        # 手を出す行動は動かないので、その場に留まる扱いにする
+        if tuple(agent1_action) == INTERACT:
+            agent1_action = (0, 0)
+        if tuple(agent2_action) == INTERACT:
+            agent2_action = (0, 0)
 
         # Collision between agents and world objects.
         agent1_next_loc = tuple(np.asarray(
