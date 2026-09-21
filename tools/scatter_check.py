@@ -111,7 +111,13 @@ def main():
     ap.add_argument('--only', default=None, help='"case:回" で1試行だけ')
     ap.add_argument('--max-seconds', type=float, default=100.0)
     ap.add_argument('--min-freeze', type=float, default=3.0)
+    ap.add_argument('--input-hz', type=int, default=None,
+                    help='1秒あたりに行動できる回数(既定は config.INPUT_HZ)')
     args = ap.parse_args()
+    if args.input_hz:
+        game_config.set_input_hz(args.input_hz)
+        global STEP
+        STEP = game_config.seconds_per_step()
 
     H.MAX_SECONDS_OVERRIDE = args.max_seconds
     sets = enumerate_order_recipes('experiment2')

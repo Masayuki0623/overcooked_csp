@@ -176,6 +176,8 @@ class CSPAgent:
         # エージェントを「進んでいない」と誤って諦めさせてしまう。
         self.progress_stall_seconds = COOKING_TIME_SECONDS + 10.0
         self.blocked_cooldown_frames = 300    # 30秒だけ避ける
+        self._task_history = {}               # 直近に選んだ作業(揺れ止め用)
+        self._pinned_task = {}                # 固定中の作業 {agent: (tid, 期限)}
         self.blocked_tasks = {0: {}, 1: {}}   # agent -> {task_id: 残りフレーム}
         # 注文ごとに固定した合流地点(仕切りのある地図のみ)
         self._fixed_counters = {}
@@ -1871,6 +1873,22 @@ class CSPAgent:
 
         carry_task = self.carry_task_by_agent[agent_idx] if self.sc_2agent else self.carry_task_by_agent
 
+        def fresh(task):
+            """覚えていた工程の置き場を、いまの割り当てに合わせ直して返す。
+
+            置き場は世界の様子で決まり直る。覚えたときの置き場を持ったまま
+            使うと、「いまの置き場から取り上げて、古い置き場へ置く」を
+            延々と繰り返すことがある(実測: 同じ台で 100 秒間ずっと
+            拾い置きし、1品も出せなかった)。
+            """
+            out = deepcopy(task)
+            uid = out.get('id', (None, None, None))[2]
+            if uid is not None and uid != -1:
+                now = self._get_assigned_counter(uid)
+                if now is not None:
+                    out['assigned_counter'] = now
+            return out
+
         # 覚えている行き先が、もう計画に無い(済んだ)なら使わない。
         # スープが鍋に入って煮えた後も「鍋に入れる」を覚えたまま、
         # 手の材料を持って鍋が空くのを待ち続け、煮えたスープを誰も盛らずに
@@ -1891,7 +1909,8 @@ class CSPAgent:
             stale_adhoc_cook = (c_id and c_id[2] == -1 and c_id[0] == 'cook'
                                 and c_id[1] not in live_cook_dishes)
             if stale_adhoc_cook or (
-                    c_id and c_id[2] != -1 and c_id[0] in ('cook', 'mix', 'serve_salad')
+                    c_id and c_id[2] != -1
+                    and c_id[0] in ('cook', 'mix', 'serve_salad', 'handover')
                     and c_id not in live):
                 carry_task = None
                 if self.sc_2agent:
@@ -1903,7 +1922,11 @@ class CSPAgent:
             if carried_ing is None or not holding_name.startswith('Chopped') or task is None:
                 return False
             verb, obj, _ = task['id']
-            if verb not in ('cook', 'serve_salad'):
+            # 受け渡し(handover)やミキサー(mix)も、材料を持って向かう工程。
+            # ここに入れておかないと、計画が2つの注文の間で揺れたときに
+            # 「拾う→置く」を延々と繰り返す(実測: 5Hz で刻んだトマトを
+            # 100秒間そこで拾い置きし続け、1品も出せなかった)。
+            if verb not in ('cook', 'serve_salad', 'handover', 'mix'):
                 return False
             needed_parts = dish_ingredients(obj)
             return carried_ing in needed_parts
@@ -1918,7 +1941,14 @@ class CSPAgent:
             c_verb, c_obj, _ = carry_task['id']
             if (c_verb in ('cook', 'serve_salad', 'mix')
                     and sorted(dish_ingredients(c_obj)) == chopped_combo_parts):
-                return deepcopy(carry_task)
+                return fresh(carry_task)
+
+        # 1つの材料を持っているときも、いったん決めた行き先を守る。
+        # 同じ材料を使う注文が2つある(サラダとスープ等)と、計画を立て直す
+        # たびに行き先が入れ替わり、その場で「拾う→置く」を繰り返していた
+        # (実測: 5Hz で 100秒間ずっと拾い置きし、1品も出せなかった)。
+        if carry_task and matches_single_chopped(carry_task):
+            return fresh(carry_task)
 
         if scheduled_task:
             verb, obj, _ = scheduled_task['id']
@@ -1952,9 +1982,9 @@ class CSPAgent:
             if verb in ('cook', 'serve_salad') and chopped_combo_parts:
                 carry_parts = sorted(dish_ingredients(obj))
                 if carry_parts == chopped_combo_parts:
-                    return deepcopy(carry_task)
+                    return fresh(carry_task)
             if matches_single_chopped(carry_task):
-                return deepcopy(carry_task)
+                return fresh(carry_task)
             food_names = (f"Fresh{obj.capitalize()}", f"Chopped{obj.capitalize()}")
             # 複数の食材がマージ済みのものを持っているときは、単品の chop タスクでは
             # 扱えない(process_chop_task は「1食材を切って置く」しかできず、
@@ -2135,6 +2165,41 @@ class CSPAgent:
                 if self._get_counter_food_names(env, pot) == expected:
                     return candidate
         return None
+
+    # 同じ2つの作業を行ったり来たりし始めたら、しばらく片方に固定する時間(秒)
+    OSCILLATION_WINDOW_S = 2.0
+    OSCILLATION_PIN_S = 4.0
+
+    def _steady_task(self, env, agent_idx, task, schedule):
+        """作業が行き来して進まなくなるのを止める。
+
+        同じ材料を2つの注文が使えるとき(サラダのトマトとスープのトマト等)、
+        計画を立て直すたびに行き先が入れ替わることがある。実行側はその
+        たびに「拾う」「置く」を切り替えるので、その場から動かなくなる
+        (実測: 100秒間ずっと拾い置きし、1品も出せなかった)。
+        行き来を見つけたら、いま選んでいる方にしばらく固定する。
+        """
+        if task is None:
+            return task
+        now = float(getattr(env, 'time', 0.0) or 0.0)
+        hist = self._task_history.setdefault(agent_idx, [])
+        pin = self._pinned_task.get(agent_idx)
+        if pin and now < pin[1]:
+            return deepcopy(pin[2])
+        tid = task['id']
+        hist.append((tid, now))
+        del hist[:-8]
+        recent = [t for t, at in hist if now - at <= self.OSCILLATION_WINDOW_S]
+        uniq = {t for t in recent}
+        # 直近に2種類しか出ておらず、切り替わりが3回以上なら行き来とみなす
+        flips = sum(1 for a, b in zip(recent, recent[1:]) if a != b)
+        if len(uniq) == 2 and flips >= 3:
+            self._pinned_task[agent_idx] = (tid, now + self.OSCILLATION_PIN_S, task)
+            self._emit_counter_debug(
+                f'[揺れ止め] AI{agent_idx} が {uniq} を行き来したので '
+                f'{tid} に {self.OSCILLATION_PIN_S} 秒固定')
+            hist.clear()
+        return task
 
     def _find_takeover_task_for_deps(self, missing_deps, agent_idx, env=None):
         """待ちの原因になっている前提タスクを、自分で引き受けるために探す。
@@ -2830,7 +2895,13 @@ class CSPAgent:
                         continue
 
                 # -------------------------------------------------------------
-                
+
+                # ここまでで実際に行う作業が決まる。行き来して進まなくなる
+                # ときは、この時点で片方に固定する。
+                task = self._steady_task(env, agent_idx, task, sc)
+                tid = task['id']
+                verb, obj, order_uid = tid
+
                 ta = self.task_agents[agent_idx]
                 task_name = None
                 ta.protected_counters = {
