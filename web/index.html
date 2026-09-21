@@ -509,6 +509,16 @@
 
     // 自分のキャラは先読みした位置に、相手は届いた位置に描く。どちらも
     // 1手ぶんの時間をかけて隣のマスへ滑らせる(見た目だけの連続移動)。
+    // 自分のキャラの絵を、先読みした向きのものに差し替える
+    paintSwap = null;
+    if (meRange && predFacing && meFacing
+        && (predFacing[0] !== meFacing[0] || predFacing[1] !== meFacing[1])) {
+      const e = defs.get(seq[meRange[0]]);
+      if (e && e[0] === 'I' && /^agent-/.test(e[1])) {
+        paintSwap = { idx: meRange[0], name: facingSprite(e[1], predFacing) };
+      }
+    }
+
     const segs = [];
     const meAnim = animOffset('me');
     const otherAnim = animOffset('other');
@@ -559,7 +569,8 @@
     // 先読みの様子(確認用)
     predict() {
       return { server: mePos, pred: predPos, pending: pendingInputs.length,
-               sent: sentInputs, queued: keyQueue.length, range: meRange };
+               sent: sentInputs, queued: keyQueue.length, range: meRange,
+               facing: meFacing, predFacing, swap: paintSwap };
     },
     // 見た目の確認用。アンケート画面をそのまま出す(送信もできる)。
     showSurvey(exp, result) {
@@ -606,7 +617,9 @@
           break;
         }
         case 'I': { // ['I', 絵の名前, x, y, w, h]
-          const im = sprite(e[1]);
+          // 自分のキャラの絵だけは、先読みした向きの絵に差し替える
+          // (向きが変わるのも、通信を待たずにその場で見えるように)。
+          const im = sprite(paintSwap && k === paintSwap.idx ? paintSwap.name : e[1]);
           if (im.complete && im.naturalWidth) c.drawImage(im, e[2], e[3], e[4], e[5]);
           break;
         }
@@ -831,6 +844,14 @@
     // 離したことをサーバーにも伝える。長押しの間に「置く/取る」を何度も
     // 繰り返さないよう、ゲーム側が押しっぱなしかどうかを見ている。
     if (code === INTERACT_CODE) sendNow({ type: 'key', code, up: true });
+  }
+
+  let paintSwap = null;         // 差し替える絵 {idx, name}
+  const FACE_NAMES = { '0,1': 'front', '0,-1': 'back', '1,0': 'right', '-1,0': 'left' };
+  function facingSprite(name, facing) {
+    const dir = FACE_NAMES[facing.join(',')];
+    if (!dir) return name;
+    return name.replace(/-(front|back|left|right)$/, '') + '-' + dir;
   }
 
   let paintQueued = false;
