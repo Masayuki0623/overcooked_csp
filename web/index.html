@@ -60,7 +60,9 @@
   /* ---- 操作ボタン ---- */
   #pad {
     display: flex; align-items: center; justify-content: space-between;
-    gap: 24px; margin-top: 16px; width: min(100%, 560px); touch-action: none;
+    /* 十字キーと「使う」の間は必ず離す(隣り合っていると押し間違える) */
+    gap: clamp(28px, 10vw, 80px);
+    margin-top: 16px; width: min(100%, 560px); touch-action: none;
   }
   #pad.dpad-right { flex-direction: row-reverse; }
   .dpad {
@@ -117,7 +119,8 @@
   /* 指示パネルはゲーム画面の上に重ねる(選んでいる間はゲームが止まっている) */
   body.compact #panel { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
   body.compact #pad {
-    justify-content: space-between; gap: 18px; margin-top: 8px; width: 100%;
+    justify-content: space-between; gap: clamp(28px, 10vw, 80px);
+    margin-top: 8px; width: 100%;
     padding-bottom: calc(env(safe-area-inset-bottom) + var(--lift));
   }
 
@@ -325,11 +328,12 @@
   } catch (e) { /* 保存できない環境(プライベートモード等)では既定値のまま */ }
 
   // 画面幅に収まるボタンの大きさの上限。横一列に、十字キー3つ分と
-  // 「使う」ボタン(1.4倍)、その間の隙間が並ぶ(= ボタン幅のおよそ
-  // 4.4 倍 + 余白 60px)。はみ出すと端のボタンが画面の外に出て
-  // 押せなくなるので、それ以上は大きくしない。
+  // 「使う」ボタン(1.4倍)が並び、その間に必ず隙間(画面幅の1割)を空ける。
+  // はみ出すと端のボタンが画面の外に出て押せなくなるので、それ以上は
+  // 大きくしない。
   function maxButtonSize() {
-    return Math.floor((window.innerWidth - 60) / 4.4);
+    const gap = Math.min(80, Math.max(28, window.innerWidth * 0.1));
+    return Math.floor((window.innerWidth - 40 - gap) / 4.4);
   }
 
   function applyPrefs() {
