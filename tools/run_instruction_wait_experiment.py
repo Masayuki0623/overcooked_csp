@@ -29,6 +29,7 @@ os.environ.setdefault('SDL_AUDIODRIVER', 'dummy')
 from gym_cooking.utils.order_preset import (  # noqa: E402
     enumerate_order_recipes, experiment_case_indices)
 from gym_cooking.utils.replay import Replay  # noqa: E402
+from gym_cooking.utils.interact import resolve_action  # noqa: E402
 
 import run_human_model_experiment as H  # noqa: E402
 from human_models import HumanModel  # noqa: E402
@@ -213,6 +214,10 @@ def run_trial(case, recipes, quality, skip_budget, human_model='greedy'):
                                        env.sim_agents[0].location)
         actions[env.sim_agents[human_idx].name] = h_action or (0, 0)
         human.record(H.state_for(env, human_idx), h_action or (0, 0))
+
+        for _a in env.sim_agents:
+
+            actions[_a.name] = resolve_action(_a, env.world, actions[_a.name])
 
         env.step(actions, passed_time=STEP_SECONDS)
         if not env.order_scheduler.current_orders:

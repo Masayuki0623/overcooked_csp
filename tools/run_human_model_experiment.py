@@ -39,6 +39,8 @@ from gym_cooking.play_test import MAP_SETTINGS  # noqa: E402
 from gym_cooking.utils.order_preset import (  # noqa: E402
     enumerate_order_recipes, generate_order_recipes)
 from gym_cooking.utils.replay import Replay  # noqa: E402
+from gym_cooking.utils.interact import resolve_action  # noqa: E402
+from gym_cooking.utils import config as game_config  # noqa: E402
 from agent.executor.low import EnvState  # noqa: E402
 from agent.myagent.CSPAgent import CSPAgent  # noqa: E402
 
@@ -213,7 +215,11 @@ def run_trial(map_name, preset, seed, human_model, quality, skip_budget, recipes
         watcher.note_human_task(h_tid)
         human.record(state_for(env, human_idx), h_action or (0, 0))
 
-        _s, _r, _done, info = env.step(actions, passed_time=0.1)
+        for _a in env.sim_agents:
+
+            actions[_a.name] = resolve_action(_a, env.world, actions[_a.name])
+
+        _s, _r, _done, info = env.step(actions, passed_time=game_config.seconds_per_step())
         # 「働いているのか、壁に向かって空振りしているのか」は行動だけでは
         # 区別できない(どちらも位置が変わらない)。世界に実際に起きた出来事を
         # 数えるのが確実なので、人間役が起こしたイベントを積算する。

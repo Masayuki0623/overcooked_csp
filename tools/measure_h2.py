@@ -26,6 +26,7 @@ os.environ.setdefault('SDL_AUDIODRIVER', 'dummy')
 
 from gym_cooking.utils.order_preset import enumerate_order_recipes  # noqa: E402
 from gym_cooking.utils.replay import Replay  # noqa: E402
+from gym_cooking.utils.interact import resolve_action  # noqa: E402
 import run_human_model_experiment as H  # noqa: E402
 from human_models import HumanModel  # noqa: E402
 
@@ -47,6 +48,8 @@ def baseline(case, recipes, model):
             ha, _ = human.act(H.state_for(env, 1), env.sim_agents[0].location)
         acts[env.sim_agents[1].name] = ha or (0, 0)
         human.record(H.state_for(env, 1), ha or (0, 0))
+        for _a in env.sim_agents:
+            acts[_a.name] = resolve_action(_a, env.world, acts[_a.name])
         env.step(acts, passed_time=0.1)
         if not env.order_scheduler.current_orders:
             break

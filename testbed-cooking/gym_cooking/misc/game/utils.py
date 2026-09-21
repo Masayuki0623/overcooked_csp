@@ -7,6 +7,7 @@ class Color:
     COUNTER = (220, 170, 110)   # tan/gray
     COUNTER_BORDER = (114, 93, 51)  # darker tan
     DELIVERY = (96, 96, 96)  # grey
+    AGENT_FACING = (60, 130, 200)   # 向いている先の枠
 
 
 KeyToTuple = {

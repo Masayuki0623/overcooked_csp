@@ -1,0 +1,44 @@
+{
+ "test1": {
+  "order": [
+   {
+    "map": "exp_partition",
+    "skip_budget": 4
+   },
+   {
+    "map": "exp_bottleneck",
+    "skip_budget": 0
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 2
+   },
+   {
+    "map": "exp_ring",
+    "skip_budget": 4
+   },
+   {
+    "map": "exp_ring",
+    "skip_budget": 2
+   },
+   {
+    "map": "exp_ring",
+    "skip_budget": 0
+   },
+   {
+    "map": "exp_bottleneck",
+    "skip_budget": 4
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 0
+   },
+   {
+    "map": "exp_bottleneck",
+    "skip_budget": 2
+   }
+  ],
+  "done": 0,
+  "created": "2026-09-20T18:33:59"
+ }
+}

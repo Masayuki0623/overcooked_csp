@@ -73,6 +73,11 @@
   .dpad .left  { grid-column: 1; grid-row: 2; }
   .dpad .right { grid-column: 3; grid-row: 2; }
   .dpad .down  { grid-column: 2; grid-row: 3; }
+  .dpad .act   { grid-column: 2; grid-row: 2; }
+  #pad .dpad .act {
+    background: #2f6f4b; border-color: #3f8a60;
+    font-size: calc(var(--btn) * 0.3);
+  }
   .actions { display: flex; flex-direction: column; gap: 10px; }
   #pad button {
     font: inherit; font-size: calc(var(--btn) * 0.38); color: var(--text);
@@ -245,16 +250,18 @@
     <button class="left"  data-code="ArrowLeft"  aria-label="左">◀</button>
     <button class="right" data-code="ArrowRight" aria-label="右">▶</button>
     <button class="down"  data-code="ArrowDown"  aria-label="下">▼</button>
+    <button class="act"   data-code="Space" data-repeat="1" aria-label="使う">使う</button>
   </div>
   <div class="actions">
-    <button data-code="Space">AIに指示</button>
+    <button data-code="Enter">AIに指示</button>
     <button data-code="Escape">閉じる</button>
   </div>
 </div>
 
 <div class="keys">
   <kbd>↑</kbd> <kbd>↓</kbd> <kbd>←</kbd> <kbd>→</kbd> で移動 / 向いている先へインタラクト<br>
-  <kbd>Space</kbd> でAIへの指示パネル（パネル内はカードをクリック / タップ）<br>
+  <kbd>Space</kbd> で向いている先に手を出す（拾う / 置く / 刻む）<br>
+  <kbd>Enter</kbd> でAIへの指示パネル（パネル内はカードをクリック / タップ）<br>
   画面下のボタンでも同じ操作ができます。ボタンの大きさや位置は「⚙ 設定」で変えられます
 </div>
 
@@ -388,6 +395,7 @@
   function applyMeta(msg) {
     if (msg.grid) grid = msg.grid;
     if (msg.tile) tilePx = msg.tile;
+    if (msg.hz) stepMs = 1000 / msg.hz;
     baseW = msg.base_w; baseH = msg.base_h;
     fullW = msg.w;      fullH = msg.h;
     fit(gameCv, baseW, baseH);
@@ -495,20 +503,50 @@
     c.imageSmoothingEnabled = false;
     c.drawImage(bgCanvas, 0, 0);
 
-    // 自分のキャラは、サーバーの位置ではなく先読みした位置に描く。
-    // ずれていない(届いた位置と同じ)ときは、そのまま順に描くだけ。
-    const dx = (predPos && mePos) ? predPos[0] - mePos[0] : 0;
-    const dy = (predPos && mePos) ? predPos[1] - mePos[1] : 0;
-    if (meRange && (dx || dy)) {
-      const [from, to] = meRange;
-      drawRange(c, gameCv, bgLen, Math.max(bgLen, from));
-      drawRange(c, gameCv, Math.max(bgLen, to), seq.length);
-      c.save();
-      c.translate(dx * tilePx, dy * tilePx);
-      drawRange(c, gameCv, Math.max(bgLen, from), Math.max(bgLen, to));
-      c.restore();
-    } else {
-      drawRange(c, gameCv, bgLen, seq.length);
+    // 自分のキャラは先読みした位置に、相手は届いた位置に描く。どちらも
+    // 1手ぶんの時間をかけて隣のマスへ滑らせる(見た目だけの連続移動)。
+    const segs = [];
+    const meAnim = animOffset('me');
+    const otherAnim = animOffset('other');
+    if (meRange) {
+      segs.push({
+        from: meRange[0], to: meRange[1],
+        dx: (predPos && mePos ? predPos[0] - mePos[0] : 0) + meAnim[0],
+        dy: (predPos && mePos ? predPos[1] - mePos[1] : 0) + meAnim[1],
+        skip: meMark,
+      });
+    }
+    if (otherRange) {
+      segs.push({ from: otherRange[0], to: otherRange[1],
+                  dx: otherAnim[0], dy: otherAnim[1], mark: null });
+    }
+    segs.sort((a, b) => a.from - b.from);
+
+    let cursor = bgLen;
+    for (const g of segs) {
+      const from = Math.max(cursor, g.from), to = Math.max(cursor, g.to);
+      if (from > cursor) drawRange(c, gameCv, cursor, from);
+      if (to > from) {
+        if (g.dx || g.dy) {
+          c.save();
+          c.translate(g.dx * tilePx, g.dy * tilePx);
+          drawRange(c, gameCv, from, to, g.skip);
+          c.restore();
+        } else {
+          drawRange(c, gameCv, from, to, g.skip);
+        }
+      }
+      cursor = to;
+    }
+    if (cursor < seq.length) drawRange(c, gameCv, cursor, seq.length);
+
+    // 向いている先の枠は、先読みした向きで描き直す(押した瞬間に変わる)
+    if (meRange && meMark !== null && predPos && predFacing) {
+      const mx = (predPos[0] + predFacing[0] + meAnim[0]) * tilePx;
+      const my = (predPos[1] + predFacing[1] + meAnim[1]) * tilePx;
+      c.strokeStyle = 'rgb(60,130,200)';
+      c.lineWidth = 2;
+      c.strokeRect(mx + 2, my + 2, tilePx - 4, tilePx - 4);
     }
   }
 
@@ -539,9 +577,10 @@
     sizes: () => ({ total: seq.length, background: bgIds.length }),
   };
 
-  function drawRange(c, cv, from, to) {
+  function drawRange(c, cv, from, to, skip) {
     c.imageSmoothingEnabled = false;   // ドット絵をぼかさない(pygame と同じ)
     for (let k = from; k < to; k++) {
+      if (k === skip) continue;
       const e = defs.get(seq[k]);
       if (!e) continue;
       switch (e[0]) {
@@ -656,15 +695,35 @@
   // 押した瞬間に端末側で1マス動かして見せ、サーバーから届いた位置で
   // 合わせ直す。こうすると、通信が遅れても「押してから動くまで」は
   // 遅れない(遅れて見えるのは相手の動きだけになる)。
-  const STEP_MS = 100;          // ゲームは 1秒に10回進む。それより速くは動けない
+  let stepMs = 200;             // 1手の長さ(サーバーから届く入力の速さで決まる)
   const MAX_QUEUE = 3;          // 押しすぎた分は捨てる(サーバー側と同じ)
   const DIRS = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] };
+  const INTERACT_CODE = 'Space';
   let grid = null;              // 通れるマス('.' が通れる)
   let tilePx = 40;
   let mePos = null;             // サーバーが知らせてきた自分の位置
+  let meFacing = [0, 1];
   let otherPos = null;
   let predPos = null;           // 先読みした自分の位置
+  let predFacing = [0, 1];      // 先読みした向き
   let meRange = null;           // 自分のキャラを描く命令の範囲
+  let meMark = null;            // そのうち「向いている先の枠」の位置
+  let otherRange = null;        // 相手(AI)のキャラの範囲
+  // 見た目だけの移動アニメ。マス目の仕組みは変えず、1手ぶんの時間をかけて
+  // 隣のマスへ滑らせる(一瞬で飛ぶと目で追えないため)。
+  const anim = { me: null, other: null };
+  function startAnim(which, from, to) {
+    if (!from || !to || (from[0] === to[0] && from[1] === to[1])) return;
+    anim[which] = { dx: from[0] - to[0], dy: from[1] - to[1], t0: performance.now() };
+  }
+  function animOffset(which) {
+    const a = anim[which];
+    if (!a) return [0, 0];
+    const p = (performance.now() - a.t0) / stepMs;
+    if (p >= 1) { anim[which] = null; return [0, 0]; }
+    const k = 1 - p;
+    return [a.dx * k, a.dy * k];
+  }
   let sentInputs = 0;           // 送ったキーの数
   const pendingInputs = [];     // まだサーバーが処理していないキー
   const keyQueue = [];          // これから送るキー(1秒に10個まで)
@@ -675,33 +734,51 @@
     const row = grid[y];
     return !!row && row[x] === '.';
   }
-  function replayPending(from) {
-    // サーバーの位置から、まだ届いていない操作を順に当てはめる
+  function replayPending(from, facing) {
+    // サーバーの位置から、まだ届いていない操作を順に当てはめる。
+    // 台の方を向いただけの操作(進めない方向)も、向きだけは反映する。
     let [x, y] = from;
+    let f = facing ? facing.slice() : [0, 1];
     for (const d of pendingInputs) {
+      if (d === INTERACT_CODE) continue;     // 手を出す操作は位置も向きも変えない
+      f = d;
       const nx = x + d[0], ny = y + d[1];
       if (walkable(nx, ny) && !(otherPos && nx === otherPos[0] && ny === otherPos[1])) {
         x = nx; y = ny;
       }
     }
-    return [x, y];
+    return [[x, y], f];
   }
   function applyMe(me) {
-    if (!me || !me.pos) { meRange = null; return; }
+    if (!me || !me.pos) { meRange = null; otherRange = null; return; }
+    const prevOther = otherPos;
     mePos = me.pos;
+    meFacing = me.facing || meFacing;
     otherPos = me.other || null;
     meRange = me.range || null;
+    meMark = (me.mark === null || me.mark === undefined) ? null : me.mark;
+    otherRange = me.other_range || null;
+    // 相手(AI)の動きは、届いた位置の間を滑らせて見せる
+    startAnim('other', prevOther, otherPos);
     // サーバーが処理した分は、先読みの控えから消す
     const unhandled = Math.max(0, sentInputs - (me.done || 0));
     if (pendingInputs.length > unhandled) {
       pendingInputs.splice(0, pendingInputs.length - unhandled);
     }
-    predPos = replayPending(mePos);
+    const before = predPos;
+    const out = replayPending(mePos, meFacing);
+    predPos = out[0];
+    predFacing = out[1];
+    // 先読みが外れて位置が変わったときも、飛ばずに滑らせる
+    if (before && (before[0] !== predPos[0] || before[1] !== predPos[1])) {
+      startAnim('me', before, predPos);
+    }
   }
   function pushKey(code) {
-    // 移動キーは、先読みしてから送る。押しすぎた分は捨てる(サーバーの
-    // 受け口も同じだけしか溜めないので、そろえておくとズレない)。
-    if (!DIRS[code]) { sendNow({ type: 'key', code }); return; }
+    // 移動と「手を出す」は、1手ぶんの間隔で送る(サーバーの受け口も同じ
+    // 速さでしか処理しないので、そろえておくとズレない)。それ以外の
+    // キー(指示パネル等)はそのまま送る。
+    if (!DIRS[code] && code !== INTERACT_CODE) { sendNow({ type: 'key', code }); return; }
     if (keyQueue.length >= MAX_QUEUE) return;
     keyQueue.push(code);
     flushKeys();
@@ -709,22 +786,43 @@
   function flushKeys() {
     if (!keyQueue.length) return;
     const now = performance.now();
-    if (now - lastSendAt < STEP_MS) {
-      setTimeout(flushKeys, STEP_MS - (now - lastSendAt));
+    if (now - lastSendAt < stepMs) {
+      setTimeout(flushKeys, stepMs - (now - lastSendAt));
       return;
     }
     lastSendAt = now;
     const code = keyQueue.shift();
-    const d = DIRS[code];
     if (predPos && grid) {
-      pendingInputs.push(d);
-      predPos = replayPending(mePos || predPos);
+      const before = predPos;
+      pendingInputs.push(DIRS[code] || INTERACT_CODE);
+      const out = replayPending(mePos || predPos, meFacing);
+      predPos = out[0];
+      predFacing = out[1];
+      startAnim('me', before, predPos);
       schedulePaint();
     }
     sendNow({ type: 'key', code });
     sentInputs += 1;
-    if (keyQueue.length) setTimeout(flushKeys, STEP_MS);
+    if (keyQueue.length) setTimeout(flushKeys, stepMs);
   }
+
+  // 長押しで歩き続ける。離すまで 1手ぶんの間隔で送る。
+  const held = new Set();
+  let holdTimer = null;
+  function holdStart(code) {
+    if (held.has(code)) return;
+    held.add(code);
+    pushKey(code);
+    if (holdTimer === null) holdTimer = setInterval(holdTick, Math.max(30, stepMs / 2));
+  }
+  function holdTick() {
+    if (!held.size) { clearInterval(holdTimer); holdTimer = null; return; }
+    if (performance.now() - lastSendAt < stepMs) return;
+    // 複数押しているときは、最後に押した方向へ進む
+    const code = [...held][held.size - 1];
+    if (keyQueue.length === 0) pushKey(code);
+  }
+  function holdEnd(code) { held.delete(code); }
 
   let paintQueued = false;
   const paintMs = [];
@@ -746,6 +844,8 @@
       // 描き終えたことを伝える。サーバーはこの返事が来るまで、次の盤面を
       // 先に送りすぎない(遅れが溜まらないようにするため)。
       if (pendingAck) { sendNow({ type: 'ack', n: pendingAck }); pendingAck = 0; }
+      // 滑らせている途中は、盤面が届かなくても描き続ける
+      if (anim.me || anim.other) schedulePaint();
     };
     // 画面の書き換えに合わせて描く。省電力などで書き換えが止まっている
     // 端末では、これが呼ばれないまま固まってしまう(返事も返らず盤面が
@@ -1149,14 +1249,19 @@
   }
 
   // ---- 入力 ------------------------------------------------------------
-  const KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'Escape']);
+  const KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
+                        'Space', 'Enter', 'Escape']);
   window.addEventListener('keydown', (e) => {
     if (!KEYS.has(e.code)) return;
     e.preventDefault();   // 矢印/Space でのページスクロールを止める
-    // キーリピートは OS 依存で速度がばらつく。実験条件を揃えるため無視する。
+    // 押しっぱなしは OS のキーリピートに任せず、こちらで一定の間隔にする
+    // (実験条件をそろえるため。速さは入力の速さ n Hz と同じ)。
     if (e.repeat) return;
+    if (DIRS[e.code] || e.code === 'Space') { if (playing) holdStart(e.code); return; }
     send({ type: 'key', code: e.code });
   });
+  window.addEventListener('keyup', (e) => { holdEnd(e.code); });
+  window.addEventListener('blur', () => { held.clear(); });
 
   // マウス座標はサーバー側 Surface の座標へ戻して送る。
   // パネルは display の右側に置かれているので、x に baseW を足す。
@@ -1188,14 +1293,17 @@
   // キーボード側でキーリピートを無視しているのとそろえるため)。
   // 複数の指で同時に触っても取りこぼさないよう、ボタンごとに pointer を捕まえる。
   document.querySelectorAll('#pad button').forEach((btn) => {
+    const code = btn.dataset.code;
+    const repeats = DIRS[code] || btn.dataset.repeat;
     btn.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       try { btn.setPointerCapture(e.pointerId); } catch (err) {}
       btn.classList.add('pressed');
       if (navigator.vibrate) { try { navigator.vibrate(8); } catch (err) {} }
-      send({ type: 'key', code: btn.dataset.code });
+      if (repeats && playing) holdStart(code);
+      else send({ type: 'key', code });
     });
-    const release = () => btn.classList.remove('pressed');
+    const release = () => { btn.classList.remove('pressed'); holdEnd(code); };
     btn.addEventListener('pointerup', release);
     btn.addEventListener('pointercancel', release);
     btn.addEventListener('lostpointercapture', release);

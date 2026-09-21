@@ -242,6 +242,27 @@ class Game:
         self.draw('agent-{}'.format(agent.color),
                   self.tile_size, self.scaled_location(agent.location))
         self.draw_agent_object(agent.holding)
+        self.draw_agent_facing(agent)
+
+    def draw_agent_facing(self, agent):
+        """向いている先のマスに細い枠を出す。
+
+        手を出す相手は「向いている先」で決まるので、どこに手を出すのかが
+        見えないと操作できない。キャラの絵に向きが無いので、枠で示す。
+        """
+        facing = tuple(getattr(agent, 'facing', (0, 1)))
+        if facing == (0, 0):
+            return
+        x = (agent.location[0] + facing[0]) * self.scale
+        y = (agent.location[1] + facing[1]) * self.scale
+        if not (0 <= x < self.width and 0 <= y < self.height):
+            return
+        rect = pygame.Rect(x + 1, y + 1, self.scale - 2, self.scale - 2)
+        pygame.draw.rect(self.screen, Color.AGENT_FACING, rect, 2)
+        self.__plot_elements.append(
+            ('Rect', {'color': Color.AGENT_FACING,
+                      'box': (x + 1, y + 1, self.scale - 2, self.scale - 2),
+                      'width': 2}))
 
     @staticmethod
     def _container_name(obj):

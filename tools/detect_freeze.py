@@ -27,13 +27,15 @@ os.environ.setdefault('SDL_AUDIODRIVER', 'dummy')
 from gym_cooking.utils.order_preset import (  # noqa: E402
     enumerate_order_recipes, experiment_case_indices)
 from gym_cooking.utils.replay import Replay  # noqa: E402
+from gym_cooking.utils.interact import resolve_action  # noqa: E402
 import run_human_model_experiment as H  # noqa: E402
 from human_models import HumanModel  # noqa: E402
 from agent.myagent.TaskAgent import TaskAgent  # noqa: E402
 
 QUALITIES = ('good', 'bad', 'random')
 SKIP_BUDGETS = (0, 2, 4)
-STEP = 0.1
+from gym_cooking.utils import config as game_config  # noqa: E402
+STEP = game_config.seconds_per_step()   # 1手の長さ(入力の速さで決まる)
 
 FIELDS = ['seed', 'orders', 'quality', 'skip_budget', 'human_model', 'served',
           'completed', 'makespan_s', 'freeze_count', 'freeze_max_s',
@@ -108,6 +110,8 @@ def run_trial(case, recipes, quality, budget, model, min_freeze_s):
                 ha, _ = human.act(H.state_for(env, 1), env.sim_agents[0].location)
             acts[env.sim_agents[1].name] = ha or (0, 0)
             human.record(H.state_for(env, 1), ha or (0, 0))
+            for _a in env.sim_agents:
+                acts[_a.name] = resolve_action(_a, env.world, acts[_a.name])
             env.step(acts, passed_time=STEP)
 
             now = snapshot(env)

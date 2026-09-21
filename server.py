@@ -68,6 +68,7 @@ from agent.gameplay import (  # noqa: E402
     INSTRUCTION_TIMING_FREE,
     INSTRUCTION_TIMING_ONCE_AT_START,
 )
+from gym_cooking.utils import config as game_config  # noqa: E402
 from gym_cooking.utils.order_preset import (  # noqa: E402
     enumerate_order_recipes, experiment_case_indices, preset_names)
 
@@ -428,6 +429,9 @@ class WebGamePlay:
         self._hooks_installed = False
 
         self._me_range = None          # 人のキャラを描いた命令の範囲
+        self._other_range = None       # 相手(AI)のキャラの範囲
+        self._me_mark = None           # 人の「向いている先」の枠の位置
+        self._mark_index = None
         self.timeline = []             # 1秒ごとの通信の様子(ゲーム後にファイルへ)
         self.connection_info = None
         self.disconnect_reason = None
@@ -690,6 +694,7 @@ class WebGamePlay:
         game = self.build()
 
         self._me_range = None
+        self._other_range = None
         self._install_agent_hook(game)
 
         # pygame の初期化後に pygame.mouse / display を差し替えたいので、フックしておく。
@@ -819,14 +824,27 @@ class WebGamePlay:
             return
         me = game.sim_agents[idx]
         original = game.draw_agent
+        original_facing = game.draw_agent_facing
+
+        def draw_agent_facing(agent):
+            # 向きの枠だけは、端末が自分で描き直せるように位置を控える
+            self._mark_index = len(game.get_visualization())
+            original_facing(agent)
 
         def draw_agent(agent):
             plot = game.get_visualization()
             start = len(plot)
+            self._mark_index = None
             original(agent)
-            if agent is me or getattr(agent, 'name', None) == me.name:
-                self._me_range = (start, len(plot))
+            rng = (start, len(plot))
+            mine = agent is me or getattr(agent, 'name', None) == me.name
+            if mine:
+                self._me_range = rng
+                self._me_mark = self._mark_index
+            else:
+                self._other_range = rng
 
+        game.draw_agent_facing = draw_agent_facing
         game.draw_agent = draw_agent
 
     def walkable_grid(self):
@@ -855,9 +873,12 @@ class WebGamePlay:
         other = agents[1 - idx] if len(agents) > 1 else None
         return {
             'pos': list(agents[idx].location),
+            'facing': list(getattr(agents[idx], 'facing', (0, 1))),
             'other': list(other.location) if other is not None else None,
             'done': int(getattr(game, 'human_inputs_done', 0)),
             'range': list(self._me_range) if self._me_range else None,
+            'mark': self._me_mark,
+            'other_range': list(self._other_range) if self._other_range else None,
         }
 
     def _install_frame_hook(self):
@@ -1443,6 +1464,7 @@ async def ws(sock: WebSocket):
                     await send_text({'type': 'meta', 'w': base[0], 'h': base[1],
                                      'base_w': base[0], 'base_h': base[1],
                                      'tile': getattr(game, 'scale', 40),
+                                     'hz': game_config.INPUT_HZ,
                                      'grid': session.walkable_grid()})
                 if (draw_version != sent_draw_version
                         and frame_no[0] - frame_no[1] < unacked_limit(last_rtt[0])):
@@ -1593,6 +1615,8 @@ def parse_arguments():
     p.add_argument('--instruction_request_timing', type=str,
                    default=INSTRUCTION_TIMING_FREE, choices=list(INSTRUCTION_TIMINGS))
     p.add_argument('--deadline', type=float, default=0.0)
+    p.add_argument('--input-hz', type=int, default=game_config.INPUT_HZ,
+                   help='1秒あたりに行動できる回数(既定 %(default)s)')
 
     return p.parse_args()
 
@@ -1601,6 +1625,9 @@ def main():
     global session
 
     args = parse_arguments()
+    # 1秒あたりに行動できる回数。ゲームを組み立てる前に決めておく
+    # (刻む回数や環境の1手の長さがこれで決まる)。
+    game_config.set_input_hz(args.input_hz)
     session = WebGamePlay(args)
 
     start_server_thread(args.host, args.port)
@@ -1611,7 +1638,8 @@ def main():
     print(f'  URL: http://{shown_host}:{args.port}/')
     print(f'  構成: map={args.map} agent0={args.agent0} agent1={args.agent1} '
           f'sc_2agent={args.sc_2agent} orders={args.orders} '
-          f'deadline={args.deadline} timing={args.instruction_request_timing}')
+          f'deadline={args.deadline} timing={args.instruction_request_timing} '
+          f'input_hz={args.input_hz}')
     print('=' * 60)
 
     try:

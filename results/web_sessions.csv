@@ -1,0 +1,2 @@
+timestamp,participant_id,session,map,skip_budget,case,orders,served,failed,completed,makespan_s,aborted,game_id
+2026-09-20T18:34:25,test1,1,exp_partition,4,9,OnionTomatoSalad|TomatoLettuceSoup|AppleBananaJuice,0,0,0,6.2,1,2
