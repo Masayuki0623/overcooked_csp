@@ -2926,6 +2926,23 @@ class CSPAgent:
 
                 # -------------------------------------------------------------
 
+                # 煮上がったスープがあるなら、先に出してしまう。
+                # 出さないと鍋がふさがったままで、やがて焦げる。材料待ちの
+                # 工程を抱えていると、煮上がっても鍋の前で立ち止まったまま
+                # だった(実測: 15秒で鍋に入れたあと、煮上がってからも
+                # 18秒間なにもしなかった)。
+                me_hold = getattr(getattr(env.agents[agent_idx], 'holding', None),
+                                  'full_name', None) or ''
+                if verb not in ('serve', 'handover') and (not me_hold or 'Plate' in me_hold):
+                    # 何かを運んでいる途中では割り込まない(持ち物を捨てて
+                    # 取りに戻る無駄が出るため)。手が空いているか、皿を
+                    # 持っているときだけ切り替える。
+                    ready_serve = self._find_ready_serve_task(env, agent_idx)
+                    if ready_serve is not None and ready_serve['id'] != tid:
+                        task = ready_serve
+                        tid = task['id']
+                        verb, obj, order_uid = tid
+
                 # ここまでで実際に行う作業が決まる。行き来して進まなくなる
                 # ときは、この時点で片方に固定する。
                 task = self._steady_task(env, agent_idx, task, sc)
