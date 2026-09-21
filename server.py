@@ -1149,6 +1149,7 @@ async def state():
                 'idx': i,
                 'name': a.name,
                 'pos': list(a.location),
+                'facing': list(getattr(a, 'facing', (0, 1))),
                 'holding': getattr(getattr(a, 'holding', None), 'full_name', None),
             }
             for i, a in enumerate(env.sim_agents)

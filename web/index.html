@@ -796,8 +796,19 @@
     // 速さでしか処理しないので、そろえておくとズレない)。それ以外の
     // キー(指示パネル等)はそのまま送る。
     if (!DIRS[code] && code !== INTERACT_CODE) { sendNow({ type: 'key', code }); return; }
-    if (keyQueue.length >= MAX_QUEUE) return;
-    keyQueue.push(code);
+    // 同じ入力を溜めすぎない。向きを変える操作は、待っている「使う」より
+    // 先に通す(「使う」を押しっぱなしにしていると、方向がいつまでも
+    // 届かず向きを変えられなかった)。
+    if (keyQueue.filter((c) => c === code).length >= 2) return;
+    if (DIRS[code]) {
+      const i = keyQueue.findIndex((c) => !DIRS[c]);
+      if (i >= 0) keyQueue.splice(i, 0, code);
+      else if (keyQueue.length < MAX_QUEUE) keyQueue.push(code);
+      else return;
+    } else {
+      if (keyQueue.length >= MAX_QUEUE) return;
+      keyQueue.push(code);
+    }
     flushKeys();
   }
   function flushKeys() {
@@ -841,6 +852,16 @@
   }
   function holdEnd(code) {
     if (!held.delete(code)) return;
+    // 離したら、まだ送っていない同じ入力は 1つだけ残して捨てる。
+    // 全部捨てると、軽くたたいただけのときに何も起きない(押した直後に
+    // 離すと、まだ送る前なので消えてしまう)。全部残すと、離しても
+    // 数マス進み続けて行き過ぎる。
+    let kept = false;
+    for (let i = 0; i < keyQueue.length; ) {
+      if (keyQueue[i] !== code) { i += 1; continue; }
+      if (!kept) { kept = true; i += 1; continue; }
+      keyQueue.splice(i, 1);
+    }
     // 離したことをサーバーにも伝える。長押しの間に「置く/取る」を何度も
     // 繰り返さないよう、ゲーム側が押しっぱなしかどうかを見ている。
     if (code === INTERACT_CODE) sendNow({ type: 'key', code, up: true });
@@ -1319,26 +1340,69 @@
     });
   }
 
-  // 画面上のボタン。押した瞬間に1回だけ送る(押しっぱなしで連続しないのは
-  // キーボード側でキーリピートを無視しているのとそろえるため)。
-  // 複数の指で同時に触っても取りこぼさないよう、ボタンごとに pointer を捕まえる。
-  document.querySelectorAll('#pad button').forEach((btn) => {
+  // 画面上のボタン。押している間は歩き続け、離すと止まる。
+  // 十字キーは、押したまま指を滑らせて別の方向のボタンへ移ると、そこから
+  // その方向へ歩く(いったん離して押し直さなくてよい)。指ごとに見ているので、
+  // もう一方の指で「使う」を押していても影響しない。
+  const pointerBtn = new Map();     // 指(pointerId) -> いま押しているボタン
+
+  function buttonAt(x, y) {
+    const el = document.elementFromPoint(x, y);
+    return el && el.closest ? el.closest('#pad button') : null;
+  }
+  function pressButton(id, btn) {
     const code = btn.dataset.code;
-    const repeats = DIRS[code] || btn.dataset.repeat;
-    btn.addEventListener('pointerdown', (e) => {
-      e.preventDefault();
-      try { btn.setPointerCapture(e.pointerId); } catch (err) {}
-      btn.classList.add('pressed');
-      if (navigator.vibrate) { try { navigator.vibrate(8); } catch (err) {} }
-      if (repeats && playing) holdStart(code);
-      else send({ type: 'key', code });
-    });
-    const release = () => { btn.classList.remove('pressed'); holdEnd(code); };
-    btn.addEventListener('pointerup', release);
-    btn.addEventListener('pointercancel', release);
-    btn.addEventListener('lostpointercapture', release);
-    btn.addEventListener('contextmenu', (e) => e.preventDefault());
+    pointerBtn.set(id, btn);
+    btn.classList.add('pressed');
+    if (navigator.vibrate) { try { navigator.vibrate(8); } catch (err) {} }
+    if (DIRS[code] || btn.dataset.repeat) {
+      if (playing) holdStart(code);
+    } else {
+      send({ type: 'key', code });
+    }
+  }
+  function releaseButton(id) {
+    const btn = pointerBtn.get(id);
+    if (!btn) return;
+    pointerBtn.delete(id);
+    btn.classList.remove('pressed');
+    holdEnd(btn.dataset.code);
+  }
+
+  pad.addEventListener('pointerdown', (e) => {
+    const btn = buttonAt(e.clientX, e.clientY);
+    if (!btn) return;
+    e.preventDefault();
+    // 指を滑らせても追えるよう、捕まえるのは個々のボタンではなく全体。
+    try { pad.setPointerCapture(e.pointerId); } catch (err) {}
+    pressButton(e.pointerId, btn);
   });
+  // 十字キーを押している指は、スティックのように扱う。指の位置が十字の
+  // 中心から見てどちら側かで方向が決まり、押したまま滑らせるだけで向きを
+  // 変えられる。斜めには進めないので、縦と横のうち大きい方を採る。
+  const dpadEl = document.querySelector('.dpad');
+  function stickCode(x, y) {
+    const r = dpadEl.getBoundingClientRect();
+    const dx = x - (r.left + r.width / 2);
+    const dy = y - (r.top + r.height / 2);
+    // 真ん中あたりは、どちらとも決められないので今の方向のまま
+    if (Math.abs(dx) < r.width * 0.12 && Math.abs(dy) < r.height * 0.12) return null;
+    if (Math.abs(dx) > Math.abs(dy)) return dx > 0 ? 'ArrowRight' : 'ArrowLeft';
+    return dy > 0 ? 'ArrowDown' : 'ArrowUp';
+  }
+  pad.addEventListener('pointermove', (e) => {
+    const cur = pointerBtn.get(e.pointerId);
+    if (!cur || !DIRS[cur.dataset.code]) return;   // 「使う」からは滑らせない
+    const code = stickCode(e.clientX, e.clientY);
+    if (!code || code === cur.dataset.code) return;
+    const btn = document.querySelector(`#pad button[data-code="${code}"]`);
+    if (!btn) return;
+    releaseButton(e.pointerId);
+    pressButton(e.pointerId, btn);
+  });
+  ['pointerup', 'pointercancel', 'lostpointercapture'].forEach((type) =>
+    pad.addEventListener(type, (e) => releaseButton(e.pointerId)));
+  pad.addEventListener('contextmenu', (e) => e.preventDefault());
   // ボタンの隙間を触ったときに、ページが拡大・スクロールしないように。
   pad.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
 

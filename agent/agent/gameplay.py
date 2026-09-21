@@ -645,6 +645,7 @@ class GamePlay(Game):
                 me = self.sim_agents[idx_human] if idx_human is not None else None
                 interact_applied = False
                 held_before = None
+                facing_before = tuple(getattr(me, 'facing', (0, 1))) if me else None
                 if me is not None and tuple(action_dict.get(me.name) or (0, 0)) == INTERACT:
                     if self.interact_held and self.interact_used:
                         action_dict[me.name] = (0, 0)
@@ -660,6 +661,10 @@ class GamePlay(Game):
                 self.replay.log(
                     'env.step', {'action_dict': ad, 'passed_time': seconds_per_step})
                 _, _, done, _ = self.env.step(ad, passed_time=seconds_per_step)
+                if me is not None and facing_before != tuple(getattr(me, 'facing', (0, 1))):
+                    # 向きを変えたら、また1回ぶん手を出せる。押しっぱなしで
+                    # 別の台の方を向いたときに、いちいち離さなくてよい。
+                    self.interact_used = False
                 if interact_applied and self.interact_held:
                     after = getattr(me.holding, 'full_name', None)
                     if held_before != after:
