@@ -175,7 +175,10 @@ class CSPAgent:
         # それを確実に上回る値にしないと、煮えるのを待っているだけの
         # エージェントを「進んでいない」と誤って諦めさせてしまう。
         self.progress_stall_seconds = COOKING_TIME_SECONDS + 10.0
-        self.blocked_cooldown_frames = 300    # 30秒だけ避ける
+        # 進められなかった作業を避ける長さ。秒で決める(手数で持つと、
+        # 入力の速さ n を下げたときに倍の長さになり、煮上がったスープを
+        # 60秒も取りに行かないことがあった)。
+        self.blocked_cooldown_frames = int(30 * self.fps)   # 30秒だけ避ける
         self._task_history = {}               # 直近に選んだ作業(揺れ止め用)
         self._pinned_task = {}                # 固定中の作業 {agent: (tid, 期限)}
         self.blocked_tasks = {0: {}, 1: {}}   # agent -> {task_id: 残りフレーム}
@@ -1364,10 +1367,21 @@ class CSPAgent:
         if watch[0] != signature:
             watch[0], watch[1] = signature, env_now
             return
+        if self._waiting_for_pot(tid):
+            # 鍋が煮えるのを待っているだけなら、進んでいないのではなく
+            # 待つのが正しい。ここで諦めさせると、煮上がっても皿を取りに
+            # 行かなくなる(実測: 鍋の前で立ったまま動かない)。
+            watch[1] = env_now
+            return
         if env_now - watch[1] >= self.progress_stall_seconds:
             watch[0], watch[1] = None, env_now
             self.blocked_tasks[agent_idx][tid] = self.blocked_cooldown_frames
             self.progress_stall_events += 1
+            # まれにしか起きないが、起きると数十秒動かなくなる。原因を
+            # あとから追えるよう、ここは常に記録に残す。
+            print(f'[AI] {tid} を {self.progress_stall_seconds} 秒進められず、'
+                  f'{self.blocked_cooldown_frames / max(self.fps, 1):.0f} 秒だけ諦めます',
+                  flush=True)
             self._emit_counter_debug(
                 f"[進捗監視] AI{agent_idx} は {tid} を "
                 f"{self.progress_stall_seconds} 秒進められなかったので一旦諦める "
@@ -2200,6 +2214,22 @@ class CSPAgent:
                 f'{tid} に {self.OSCILLATION_PIN_S} 秒固定')
             hist.clear()
         return task
+
+    def _waiting_for_pot(self, tid):
+        """その作業が「鍋が煮上がるのを待っている」ものかどうか。"""
+        if not tid or tid[0] not in ('serve', 'handover'):
+            return False
+        env = getattr(self, '_last_env', None)
+        if env is None or dish_kind_of(tid[1]) != KIND_SOUP:
+            return False
+        try:
+            for pot_pos in env.get_pos_by_obj_gs(gs='Pot') or []:
+                name = str(getattr(env.pos_obj.get(pot_pos), 'full_name', '') or '')
+                if 'Cooking' in name:
+                    return True
+        except Exception:
+            return False
+        return False
 
     def _find_takeover_task_for_deps(self, missing_deps, agent_idx, env=None):
         """待ちの原因になっている前提タスクを、自分で引き受けるために探す。

@@ -251,6 +251,32 @@ class GamePlay(Game):
             self.screen.blit(snapshot, (0, 0))
             pygame.display.flip()
 
+    AI_IDLE_REPORT_S = 3.0
+
+    def _note_ai_idle(self, move, reason):
+        """AI が動かない時間が続いたら、その理由を一度だけ記録に出す。
+
+        まれに、待ちの判定が外れて何十秒も止まることがある。あとから
+        原因を追えるように、止まり始めと再開を残す。
+        """
+        acts = list(move.values()) if isinstance(move, dict) else [move]
+        moving = any(a and tuple(a) != (0, 0) for a in acts)
+        now = time.time()
+        if moving:
+            if getattr(self, '_ai_idle_since', None) and getattr(self, '_ai_idle_logged', False):
+                print(f'[AI] {now - self._ai_idle_since:.1f} 秒ぶりに動き出しました', flush=True)
+            self._ai_idle_since = None
+            self._ai_idle_logged = False
+            return
+        if getattr(self, '_ai_idle_since', None) is None:
+            self._ai_idle_since = now
+            self._ai_idle_logged = False
+        elif (not self._ai_idle_logged
+              and now - self._ai_idle_since >= self.AI_IDLE_REPORT_S):
+            self._ai_idle_logged = True
+            print(f'[AI] {self.AI_IDLE_REPORT_S:.0f} 秒以上動いていません: {str(reason)[:120]}',
+                  flush=True)
+
     def _translate_ai_actions(self, action_dict, idx_human):
         """AI の「その方向へ進む」を、新しい規則の行動に読み替える。
 
@@ -841,6 +867,7 @@ class GamePlay(Game):
                 # 通常プレイでは計測も進行の引き伸ばしも一切行わない。
                 decide_started = time.time() if self.pace_env_to_ai else None
                 move, chat_ret = self.ai(env)
+                self._note_ai_idle(move, chat_ret)
                 if decide_started is not None:
                     # 環境側が「AIより速く進まない」ようにするための実測値。
                     # 再スケジュール時だけ跳ねる(CSP探索)ので、指数移動平均で均す。
