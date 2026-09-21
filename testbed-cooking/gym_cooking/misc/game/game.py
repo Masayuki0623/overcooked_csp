@@ -238,8 +238,25 @@ class Game:
         self.__plot_elements.append(
             ('Text', {'text': text, 'color': color, 'location': loc}))
 
+    # 向きごとの絵。無ければ元の1枚を使う。
+    FACING_SUFFIX = {(0, 1): 'front', (0, -1): 'back',
+                     (1, 0): 'right', (-1, 0): 'left'}
+
+    def agent_image_name(self, agent):
+        base = 'agent-{}'.format(agent.color)
+        suffix = self.FACING_SUFFIX.get(tuple(getattr(agent, 'facing', (0, 1))))
+        if not suffix:
+            return base
+        name = f'{base}-{suffix}'
+        cache = self.__dict__.setdefault('_agent_image_cache', {})
+        if name not in cache:
+            full = (Path(gym_cooking.__file__).absolute().parent
+                    / graphics_dir.replace('/', os.sep) / f'{name}.png')
+            cache[name] = full.exists()
+        return name if cache[name] else base
+
     def draw_agent(self, agent):
-        self.draw('agent-{}'.format(agent.color),
+        self.draw(self.agent_image_name(agent),
                   self.tile_size, self.scaled_location(agent.location))
         self.draw_agent_object(agent.holding)
         self.draw_agent_facing(agent)
