@@ -826,7 +826,12 @@
     const code = [...held][held.size - 1];
     if (keyQueue.length === 0) pushKey(code);
   }
-  function holdEnd(code) { held.delete(code); }
+  function holdEnd(code) {
+    if (!held.delete(code)) return;
+    // 離したことをサーバーにも伝える。長押しの間に「置く/取る」を何度も
+    // 繰り返さないよう、ゲーム側が押しっぱなしかどうかを見ている。
+    if (code === INTERACT_CODE) sendNow({ type: 'key', code, up: true });
+  }
 
   let paintQueued = false;
   const paintMs = [];
@@ -1265,7 +1270,7 @@
     send({ type: 'key', code: e.code });
   });
   window.addEventListener('keyup', (e) => { holdEnd(e.code); });
-  window.addEventListener('blur', () => { held.clear(); });
+  window.addEventListener('blur', () => { [...held].forEach(holdEnd); });
 
   // マウス座標はサーバー側 Surface の座標へ戻して送る。
   // パネルは display の右側に置かれているので、x に baseW を足す。

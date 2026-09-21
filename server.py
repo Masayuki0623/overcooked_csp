@@ -1002,12 +1002,15 @@ class WebGamePlay:
     # ------------------------------------------------------------------
     # 入力
     # ------------------------------------------------------------------
-    def post_key(self, code):
+    def post_key(self, code, up=False):
         key = KEY_MAP.get(code)
         if key is None:
             return False
+        # 離したことも伝える。長押し中に「置く/取る」を何度も繰り返さない
+        # ようにするため、ゲーム側が押しっぱなしかどうかを見ている。
         pygame.event.post(pygame.event.Event(
-            pygame.KEYDOWN, key=key, mod=0, unicode='', scancode=0))
+            pygame.KEYUP if up else pygame.KEYDOWN,
+            key=key, mod=0, unicode='', scancode=0))
         return True
 
     def post_mouse_move(self, x, y):
@@ -1373,7 +1376,7 @@ async def ws(sock: WebSocket):
 
             kind = msg.get('type')
             if kind == 'key':
-                session.post_key(msg.get('code'))
+                session.post_key(msg.get('code'), up=bool(msg.get('up')))
             elif kind == 'mousemove':
                 session.post_mouse_move(msg.get('x', 0), msg.get('y', 0))
             elif kind == 'mousedown':

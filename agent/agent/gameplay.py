@@ -163,6 +163,11 @@ class GamePlay(Game):
         # human_agent_idx は None の場合もある（両方AIの旧モードなど）
         self.idx_human = human_agent_idx
         self.human_inputs_done = 0   # 人の入力を処理した数(Web 版の先読み補正用)
+        # 「手を出す」を押しっぱなしにしているか。切るのは続けられるが、
+        # 置く・取るは1回だけにする(切り終えた物を拾った直後に、同じ
+        # 長押しでまた置いてしまうのを防ぐ)。
+        self.interact_held = False
+        self.interact_used = False
         self.ai = get_agent(self.agent_set, self.replay)
 
         # concurrent control variables
@@ -299,6 +304,11 @@ class GamePlay(Game):
         if event.type == pygame.QUIT:
             self._q_control.put(('Quit', {}))
 
+        elif event.type == pygame.KEYUP:
+            if pygame.key.name(event.key) == "space":
+                self.interact_held = False
+                self.interact_used = False
+
         elif event.type == pygame.KEYDOWN:
             if event.key in KeyToTuple.keys():
                 # Control
@@ -312,6 +322,10 @@ class GamePlay(Game):
                     ('Action', {"agent": "human", "action": action}))
 
             if pygame.key.name(event.key) == "space":
+                # 押し始めなら、この長押しでの「置く/取る」をまだ使っていない。
+                if not self.interact_held:
+                    self.interact_held = True
+                    self.interact_used = False
                 # 向いている先に手を出す(拾う/置く/刻む/入れる)。
                 # 以前は「台の方向へ進む」が手を出すことを兼ねていたが、
                 # 長押しで歩けるようにしたので別のキーに分けた。
@@ -617,6 +631,17 @@ class GamePlay(Game):
                 if idx_human is not None and human_backlog:
                     action_dict[self.sim_agents[idx_human].name] = human_backlog.popleft()
                     self.human_inputs_done += 1
+                # 長押し中に「置く/取る」を済ませていたら、離すまで手は出さない。
+                # 切る・混ぜるは持ち物が変わらないので、そのまま続けられる。
+                me = self.sim_agents[idx_human] if idx_human is not None else None
+                interact_applied = False
+                held_before = None
+                if me is not None and tuple(action_dict.get(me.name) or (0, 0)) == INTERACT:
+                    if self.interact_held and self.interact_used:
+                        action_dict[me.name] = (0, 0)
+                    else:
+                        interact_applied = True
+                        held_before = getattr(me.holding, 'full_name', None)
                 ad = {k: v if v is not None else (
                     0, 0) for k, v in action_dict.items()}
                 if self.debug_mode:
@@ -626,6 +651,11 @@ class GamePlay(Game):
                 self.replay.log(
                     'env.step', {'action_dict': ad, 'passed_time': seconds_per_step})
                 _, _, done, _ = self.env.step(ad, passed_time=seconds_per_step)
+                if interact_applied and self.interact_held:
+                    after = getattr(me.holding, 'full_name', None)
+                    if held_before != after:
+                        # 持ち物が変わった = 置く/取るをした。この長押しでは終わり。
+                        self.interact_used = True
                 if self.debug_mode:
                     a0 = self.sim_agents[0]
                     print(f"[ENVTRACE] step_end   wall={time.time():.4f} pos_after={a0.location} "
