@@ -531,6 +531,7 @@ class GamePlay(Game):
         human_backlog = collections.deque(maxlen=HUMAN_INPUT_BACKLOG)
         # 人の入力をいくつ処理したか。Web 版が先読みの補正に使う。
         self.human_inputs_done = 0
+        ai_sent = {}          # 読み替える前に AI が送ってきた行動
 
         self.on_render(paused=paused)
         info = self.env.get_ai_info()
@@ -581,6 +582,11 @@ class GamePlay(Game):
                     chat_out = ""  # AI Outputの画面表示を無効化
 
             if not paused:
+                # AI は「自分が送った行動が実際に適用されたか」を見て次の手を
+                # 出す。読み替えた後の行動(向く/手を出す)と見比べると一致せず、
+                # 最初の手出しのあと止まってしまうので、読み替える前の行動を
+                # 覚えておいて、そちらを「適用した行動」として知らせる。
+                ai_sent = {k: v for k, v in action_dict.items()}
                 self._translate_ai_actions(action_dict, idx_human)
                 if idx_human is not None and human_backlog:
                     action_dict[self.sim_agents[idx_human].name] = human_backlog.popleft()
@@ -619,7 +625,11 @@ class GamePlay(Game):
                 # _run_ai 側が「自分が送ったコマンドが本当に反映されたか」を確認するために使う
                 # (非同期キューのため、反映前に同じ状況を見て同じコマンドを二重に送ってしまい、
                 #  移動が1マス行き過ぎたり、拾う/置くを繰り返してしまう不具合があったため)。
-                self._q_ai.put(('Env', {"EnvState": dcopy(e), "applied_actions": dict(ad)}))
+                applied = dict(ad)
+                for name, before in ai_sent.items():
+                    if before is not None and name in applied:
+                        applied[name] = before
+                self._q_ai.put(('Env', {"EnvState": dcopy(e), "applied_actions": applied}))
                 action_dict = {agent.name: None for agent in self.sim_agents}
 
             # 描画は step の直後、sleep より前に行うこと。

@@ -59,8 +59,8 @@
 
   /* ---- 操作ボタン ---- */
   #pad {
-    display: flex; align-items: center; gap: 24px; margin-top: 16px;
-    touch-action: none;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 24px; margin-top: 16px; width: min(100%, 560px); touch-action: none;
   }
   #pad.dpad-right { flex-direction: row-reverse; }
   .dpad {
@@ -117,7 +117,7 @@
   /* 指示パネルはゲーム画面の上に重ねる(選んでいる間はゲームが止まっている) */
   body.compact #panel { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
   body.compact #pad {
-    justify-content: center; gap: 18px; margin-top: 8px;
+    justify-content: space-between; gap: 18px; margin-top: 8px; width: 100%;
     padding-bottom: calc(env(safe-area-inset-bottom) + var(--lift));
   }
 
@@ -255,16 +255,12 @@
     <button class="down"  data-code="ArrowDown"  aria-label="下">▼</button>
   </div>
   <button class="act" data-code="Space" data-repeat="1" aria-label="使う">使う</button>
-  <div class="actions">
-    <button data-code="Enter">AIに指示</button>
-    <button data-code="Escape">閉じる</button>
-  </div>
 </div>
 
 <div class="keys">
   <kbd>↑</kbd> <kbd>↓</kbd> <kbd>←</kbd> <kbd>→</kbd> で移動 / 向いている先へインタラクト<br>
   <kbd>Space</kbd> で向いている先に手を出す（拾う / 置く / 刻む）<br>
-  <kbd>Enter</kbd> でAIへの指示パネル（パネル内はカードをクリック / タップ）<br>
+  <kbd>Enter</kbd> でAIへの指示パネル（パネル内はカードをクリック / タップ）、<kbd>Esc</kbd> で閉じる<br>
   画面下のボタンでも同じ操作ができます。ボタンの大きさや位置は「⚙ 設定」で変えられます
 </div>
 
@@ -328,12 +324,12 @@
     if (saved) prefs = Object.assign(prefs, saved);
   } catch (e) { /* 保存できない環境(プライベートモード等)では既定値のまま */ }
 
-  // 画面幅に収まるボタンの大きさの上限。横一列に、十字キー3つ分 +
-  // 「使う」ボタン(1.4倍) + 指示のボタン(1.6倍) と隙間が並ぶ
-  // (= ボタン幅のおよそ 6.2 倍 + 余白 66px)。はみ出すと端のボタンが
-  // 画面の外に出て押せなくなるので、それ以上は大きくしない。
+  // 画面幅に収まるボタンの大きさの上限。横一列に、十字キー3つ分と
+  // 「使う」ボタン(1.4倍)、その間の隙間が並ぶ(= ボタン幅のおよそ
+  // 4.4 倍 + 余白 60px)。はみ出すと端のボタンが画面の外に出て
+  // 押せなくなるので、それ以上は大きくしない。
   function maxButtonSize() {
-    return Math.floor((window.innerWidth - 66) / 6.2);
+    return Math.floor((window.innerWidth - 60) / 4.4);
   }
 
   function applyPrefs() {
