@@ -96,6 +96,26 @@
   }
   #pad button.pressed { background: #3b4350; transform: translateY(2px); border-bottom-width: 1px; }
 
+  /* 指示の選択。ゲーム画面を隠さないよう、ボタンと同じ下側に出す */
+  #instruct { display: none; width: min(100%, 560px); margin-top: 10px; }
+  #instruct.show { display: block; }
+  #instruct .lead { font-size: 14px; margin-bottom: 4px; }
+  #instruct .who {
+    display: flex; gap: 14px; justify-content: center; align-items: center;
+    font-size: 12.5px; color: var(--muted); margin-bottom: 8px;
+  }
+  #instruct .who span { display: flex; align-items: center; gap: 5px; }
+  #instruct .who img { width: 26px; height: 26px; image-rendering: pixelated; }
+  #instruct .cards { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  #instruct .cards button {
+    font: inherit; font-size: 14px; color: var(--text); background: var(--btn-bg);
+    border: 1px solid var(--btn-line); border-bottom-width: 3px; border-radius: 10px;
+    padding: 8px 12px; display: flex; align-items: center; gap: 8px; min-height: 52px;
+  }
+  #instruct .cards button:active { background: #3b4350; transform: translateY(2px); }
+  #instruct .cards img { width: 30px; height: 30px; image-rendering: pixelated; }
+  #instruct .cards .act { color: var(--muted); font-size: 12px; }
+
   .keys { font-size: 12.5px; color: var(--muted); line-height: 1.9; margin-top: 14px; }
   kbd {
     background: var(--btn-bg); border: 1px solid var(--btn-line); border-bottom-width: 2px;
@@ -248,6 +268,12 @@
 <div id="stage">
   <canvas id="game" width="320" height="400"></canvas>
   <canvas id="panel" class="hidden" width="1" height="1"></canvas>
+</div>
+
+<div id="instruct">
+  <div class="lead">AIに最初の指示を出してください</div>
+  <div class="who" id="instruct-who"></div>
+  <div class="cards" id="instruct-cards"></div>
 </div>
 
 <div id="pad">
@@ -951,6 +977,12 @@
   // ---- ステージ選択 ----------------------------------------------------
   // 地図・レシピ・注文の組み合わせを選んでからスタートする。前回選んだ
   // ものはこの端末に覚えておく(次に開いたとき同じ選択から始められる)。
+  const INSTRUCTION_CHOICES = [
+    { id: 'once_at_start', label: '指示あり(最初に1回)',
+      desc: '始まってすぐ、AIに何をしてほしいかを1つ選びます' },
+    { id: 'no_instruction', label: '指示なし',
+      desc: 'AIは自分で段取りを決めて動きます' },
+  ];
   const PICK_STORE = 'overcooked-stage-v1';
   const PID_STORE = 'overcooked-participant';
   // 実験の参加者ID。入れて始めると、地図と AI の設定は割り当てどおりになり、
@@ -970,7 +1002,7 @@
       .catch(() => {});
   }
   let options = null;
-  let pick = { map: null, preset: null, case: '' };
+  let pick = { map: null, preset: null, case: '', instruction: 'once_at_start' };
   try { Object.assign(pick, JSON.parse(localStorage.getItem(PICK_STORE) || '{}')); } catch (e) {}
   const optionsReady = fetch('/api/options').then(r => r.json()).then(o => { options = o; })
     .catch(() => {});
@@ -1016,7 +1048,13 @@
         `<div class="pick"><div class="lab">レシピ</div><div class="opts">${btns(options.recipes, 'preset')}</div>` +
         `<div class="hint">${esc(recipe.desc)}</div></div>` +
         `<div class="pick"><div class="lab">注文の組み合わせ(${recipe.combos.length} 通り)</div>` +
-        `<select id="pick-case">${combos}</select></div>`) +
+        `<select id="pick-case">${combos}</select></div>` +
+        '<div class="pick"><div class="lab">AIへの指示</div><div class="opts">' +
+        INSTRUCTION_CHOICES.map((c) =>
+          `<button type="button" data-key="instruction" data-val="${c.id}" ` +
+          `class="${pick.instruction === c.id ? 'on' : ''}">${esc(c.label)}</button>`).join('') +
+        `</div><div class="hint">${esc((INSTRUCTION_CHOICES.find(
+            (c) => c.id === pick.instruction) || {}).desc || '')}</div></div>`) +
       '<div class="go"><button class="primary" id="start" disabled>スタート</button>' +
       '<div class="sub" id="dl-note" style="margin-top:8px"></div></div>' +
       '</div>');
@@ -1048,6 +1086,7 @@
       saveParticipant(document.getElementById('pid').value);
       send({ type: 'start', map: pick.map, preset: pick.preset,
              case: pick.case === '' ? null : Number(pick.case),
+             instruction: pick.instruction,
              participant: participantId || null });
       showOverlay('<div class="big">準備しています</div><div class="sub">数秒かかります</div>');
     });
@@ -1130,6 +1169,10 @@
       settled = true;
       showOverlay(`<div class="big">${msg.text}</div>` +
                   '<button onclick="location.reload()">もう一度並ぶ</button>');
+    } else if (msg.type === 'instruct') {
+      showInstruct(msg);
+    } else if (msg.type === 'instruct_close') {
+      hideInstruct();
     } else if (msg.type === 'notice') {
       showToast(msg.text);
     } else if (msg.type === 'pong') {
@@ -1269,6 +1312,30 @@
         .catch((e) => { err.textContent = String(e.message || e); btn.disabled = false; });
     });
   }
+
+  // ---- AIへの指示(ゲーム画面の下に出す) ---------------------------------
+  // 画面を覆わないので、盤面を見ながら選べる。時間制限は無い。
+  const instructBox = document.getElementById('instruct');
+  function showInstruct(msg) {
+    const who = (msg.players || []).map((p) =>
+      `<span><img src="/graphics/${esc(p.sprite || 'agent-blue')}-front.png" ` +
+      `onerror="this.src='/graphics/${esc(p.sprite || 'agent-blue')}.png'">` +
+      `${esc(p.name)}</span>`).join('');
+    document.getElementById('instruct-who').innerHTML = who;
+    const cards = (msg.items || []).map((it, i) =>
+      `<button type="button" data-i="${i}">` +
+      (it.icon ? `<img src="/graphics/${esc(it.icon)}.png" alt="">` : '') +
+      `<span>${esc(it.label)}<br><span class="act">${esc(it.action)}</span></span></button>`
+    ).join('');
+    const box = document.getElementById('instruct-cards');
+    box.innerHTML = cards;
+    box.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
+      sendNow({ type: 'instruct', seq: msg.seq, index: Number(b.dataset.i) });
+      hideInstruct();
+    }));
+    instructBox.classList.add('show');
+  }
+  function hideInstruct() { instructBox.classList.remove('show'); }
 
   let toastTimer = null;
   function showToast(text) {

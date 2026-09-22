@@ -66,8 +66,11 @@ from agent import play_main  # noqa: E402
 from agent.gameplay import (  # noqa: E402
     INSTRUCTION_TIMINGS,
     INSTRUCTION_TIMING_FREE,
+    INSTRUCTION_TIMING_NO_INSTRUCTION,
     INSTRUCTION_TIMING_ONCE_AT_START,
 )
+from agent.instruction_panel import (  # noqa: E402
+    card_action, card_icon_name, card_label)
 from gym_cooking.utils import config as game_config  # noqa: E402
 from gym_cooking.utils.order_preset import (  # noqa: E402
     enumerate_order_recipes, experiment_case_indices, preset_names)
@@ -428,6 +431,12 @@ class WebGamePlay:
         self.selection = None
         self._hooks_installed = False
 
+        # 指示の選択(ブラウザ側に出す)
+        self.instruction_request = None
+        self._instruction_answer = None
+        self._instruction_seq = 0
+        self._instruction_lock = threading.Lock()
+        self._instruction_done = threading.Event()
         self._me_range = None          # 人のキャラを描いた命令の範囲
         self._other_range = None       # 相手(AI)のキャラの範囲
         self._me_mark = None           # 人の「向いている先」の枠の位置
@@ -510,8 +519,13 @@ class WebGamePlay:
             picked_by = 'random'
         else:
             picked_by = 'chosen'
+        instruction = choice.get('instruction')
+        if instruction not in (INSTRUCTION_TIMING_ONCE_AT_START,
+                               INSTRUCTION_TIMING_NO_INSTRUCTION):
+            instruction = INSTRUCTION_TIMING_ONCE_AT_START
         return {'map': map_name, 'preset': preset, 'case': case,
-                'recipes': list(sets[case]), 'picked_by': picked_by}
+                'recipes': list(sets[case]), 'picked_by': picked_by,
+                'instruction': instruction}
 
     def note_client_rtt(self, rtt_ms):
         """参加者の端末で測った往復時間を残す。/api/perf で見る。
@@ -636,6 +650,53 @@ class WebGamePlay:
             return None
         return max(0.0, float(limit) - float(getattr(env, 'current_time', 0.0)))
 
+    def ask_instruction(self, candidates, env_summary):
+        """指示の候補をブラウザへ送り、選ばれるまで待つ。
+
+        ゲームのスレッドから呼ばれる(選んでいる間ゲームは止まっている)。
+        時間制限は付けない。接続が切れたときだけ、待つのをやめる。
+        """
+        items = []
+        for display, payload in candidates:
+            verb = payload.get('verb') if isinstance(payload, dict) else None
+            obj = payload.get('obj') if isinstance(payload, dict) else None
+            items.append({
+                'label': card_label(verb, obj) if verb else str(display),
+                'action': card_action(verb) if verb else '',
+                'icon': card_icon_name(verb, obj) if verb else None,
+                'verb': verb, 'obj': obj,
+            })
+        with self._instruction_lock:
+            self._instruction_answer = None
+            self._instruction_done.clear()
+            self._instruction_seq += 1
+            self.instruction_request = {
+                'seq': self._instruction_seq,
+                'items': items,
+                'players': (env_summary or {}).get('players', []),
+            }
+        try:
+            while not self._instruction_done.wait(0.5):
+                if self.state not in ('ready', 'running') or getattr(self, '_aborted', False):
+                    return None      # 打ち切り(接続が切れた等)
+            idx = self._instruction_answer
+            if idx is None or not (0 <= idx < len(candidates)):
+                return None
+            return candidates[idx]
+        finally:
+            with self._instruction_lock:
+                self.instruction_request = None
+
+    def answer_instruction(self, seq, index):
+        """ブラウザで選ばれた指示を受け取る。"""
+        with self._instruction_lock:
+            req = self.instruction_request
+            if not req or req['seq'] != seq:
+                return False
+            self._instruction_answer = int(index)
+            self._instruction_done.set()
+            return True
+
     def notify(self, text):
         with self._notices_lock:
             self._notices.append(text)
@@ -666,8 +727,13 @@ class WebGamePlay:
             # 野菜だけの注文では、フルーツ・ミキサー・コップのない版の地図を使う
             map_name = f'{map_name}_veg'
         # 実験のセッションでは、指示は開始直後に1回だけ(見送り不可)。
-        timing = (INSTRUCTION_TIMING_ONCE_AT_START if sel and sel.get('participant')
-                  else a.instruction_request_timing)
+        # 自由に遊ぶときは、ステージ選択で「指示あり/なし」を選べる。
+        if sel and sel.get('participant'):
+            timing = INSTRUCTION_TIMING_ONCE_AT_START
+        elif sel and sel.get('instruction') in INSTRUCTION_TIMINGS:
+            timing = sel['instruction']
+        else:
+            timing = a.instruction_request_timing
         self.game, self.env, self.replay = play_main.init_env_replay(
             map_name, a.agent0, a.agent1, a.task,
             a.no_reschedule, a.debug,
@@ -695,6 +761,8 @@ class WebGamePlay:
 
         self._me_range = None
         self._other_range = None
+        # 指示はブラウザ側に出す(ゲーム画面を隠さないため)
+        game.instruction_chooser = self.ask_instruction
         self._install_agent_hook(game)
 
         # pygame の初期化後に pygame.mouse / display を差し替えたいので、フックしておく。
@@ -1386,12 +1454,15 @@ async def ws(sock: WebSocket):
                 session.start(token, {
                     'map': msg.get('map'), 'preset': msg.get('preset'),
                     'case': msg.get('case'),
+                    'instruction': msg.get('instruction'),
                     'participant': msg.get('participant')})
             elif kind == 'ack':
                 try:
                     frame_no[1] = max(frame_no[1], int(msg.get('n', 0)))
                 except (TypeError, ValueError):
                     pass
+            elif kind == 'instruct':
+                session.answer_instruction(msg.get('seq'), msg.get('index'))
             elif kind == 'go':
                 session.go(token)
             elif kind == 'hello':
@@ -1511,8 +1582,17 @@ async def ws(sock: WebSocket):
 
             await send_status_and_notices()
 
+    sent_instruction_seq = [0]
+
     async def send_status_and_notices():
         nonlocal last_state
+        req = session.instruction_request
+        if req and req['seq'] != sent_instruction_seq[0]:
+            sent_instruction_seq[0] = req['seq']
+            await send_text({'type': 'instruct', **req})
+        elif not req and sent_instruction_seq[0]:
+            sent_instruction_seq[0] = 0
+            await send_text({'type': 'instruct_close'})
         for text in session.take_notices():
             await send_text({'type': 'notice', 'text': text})
         if session.state != last_state:

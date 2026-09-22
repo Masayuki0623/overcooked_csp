@@ -189,6 +189,10 @@ class GamePlay(Game):
         self._seen_ready_cook_actions = set()
         # once_at_start で、開始直後の1回を出したかどうか。
         self._once_instruction_done = False
+        # 指示の選ばせ方を差し替える口。Web 版はブラウザ側に出したいので、
+        # ここに「候補を渡すと選ばれた1つを返す」関数を入れる。
+        # 何も入っていなければ、これまでどおり pygame の画面を出す。
+        self.instruction_chooser = None
 
     def _get_unexecuted_task_candidates(self):
         env_state = self._latest_env_state
@@ -224,7 +228,18 @@ class GamePlay(Game):
         return {'players': players}
 
     def _show_instruction_panel(self, candidates):
-        """スペース押下時の指示カード画面。選択中だけ窓を横に広げる。"""
+        """指示の選択画面。選択中だけ窓を横に広げる。
+
+        instruction_chooser が入っていれば、画面は出さずにそちらへ任せる
+        (Web 版はブラウザ側に出す)。
+        """
+        if self.instruction_chooser is not None:
+            self._instruction_panel_active = True
+            try:
+                return self.instruction_chooser(candidates, self._build_env_summary())
+            finally:
+                self._instruction_panel_active = False
+
         # 先に描画スレッドを止めてから、自分で完全な1フレームを描いてコピーする。
         # on_render は screen.fill してから全オブジェクトを描き直すため、その途中で
         # copy() すると提供口やプレイヤーが欠けたスナップショットになってしまう。
