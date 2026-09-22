@@ -229,15 +229,15 @@ class CSPAgent:
         # 立っていると、手待ちになったときに相手の担当も引き受ける。
         self.partner_is_external = False
         # 指示されたタスクを必ず AI 側の担当にするか。
-        # 「AI に指示する」という行為の意味からは常に True が筋だが、いまの
-        # 実装で有効にすると、相手が同じ食材を自分の側で刻んでしまい、その
-        # 刻んだ物に AI が手を届かせられずに止まる(下の注記を参照)。
-        # 指示されたタスクを必ず AI 側の担当にするか。
-        # 「AI に指示する」という行為の意味からは True が筋だが、有効にすると
-        # 良い指示の一部で完走できなくなる(162試行中 2〜7件)。無効なら完走率は
-        # 100% だが、指示の 31% が AI 以外に割り当たり、AI は永久に着手しない。
-        # 測定の交絡と完走率のどちらを取るかの判断が要るため、既定は無効。
-        self.force_instruction_to_ai = False
+        # 指示された作業を、必ず AI 側の担当にするか。
+        # 「AI に指示する」という行為の意味どおり True にしてある。
+        # 無効にすると、指示した作業が人側の担当として計画に入り、
+        # 人が動かない場合に指示が空振りする(実測: 「レタスを切って」と
+        # 指示したのに AI は玉ねぎから始め、鍋に入れるのが 13 秒遅れた)。
+        # 有効にすると、地図によっては完走できない場合が出る可能性がある
+        # (以前の測定で 162試行中 2〜7件)。指示の候補は「AI が物理的に
+        # できる作業」だけに絞ってあるので、そこは緩和されている。
+        self.force_instruction_to_ai = True
         # 「いま即座に着手できる cook タスク」を (動詞, 対象) で保持する。
         # __call__ ごとに更新し、GamePlay の指示タイミング監視(enable_cook)が読む。
         self.ready_cook_actions = set()
@@ -559,8 +559,12 @@ class CSPAgent:
                             pending['_consumed_tasks'] = (
                                 pending.get('_consumed_tasks', 0) + len(gone))
                     # 次回のために、いま AI の担当として残っている他タスクを控える
+                    # 最初の計画のときはまだ schedule_per_agent が無い。
+                    # ここで例外になると、指示の制約がまるごと入らないまま
+                    # 計画が決まってしまう(指示が効かない原因だった)。
                     ai_now = {t.get('id')
-                              for t in (self.schedule_per_agent or {}).get(0, [])}
+                              for t in (getattr(self, 'schedule_per_agent', None)
+                                        or {}).get(0, [])}
                     pending['_watched_ai_task_ids'] = {
                         tid for tid in ai_now
                         if tid in current_ids and tid not in target_ids
@@ -637,10 +641,12 @@ class CSPAgent:
                         # print(f"[SkipBudget] 制約: fixed_id={fixed_task_id} 残りbudget={remaining}, 対象前タスク≤{budget_bound} (非依存{len(counts_vars)}個)")
                         pass
                     pending['skip_budget_constraint_applied'] = True
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as e:
+                    # 黙って落とすと「指示が効かない」ことに気づけない
+                    print(f'[指示] 制約を入れられませんでした: {type(e).__name__} {e}',
+                          flush=True)
+        except Exception as e:
+            print(f'[指示] 制約の処理で失敗: {type(e).__name__} {e}', flush=True)
 
     def _dependency_ids_of(self, tasks, group_indices):
         """指示対象の前提になっているタスクの id 集合。
