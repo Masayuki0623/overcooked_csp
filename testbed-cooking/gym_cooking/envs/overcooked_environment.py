@@ -502,6 +502,17 @@ class OvercookedEnvironment(gym.Env):
                 try:
                     if hasattr(self, '_pending_instructions') and self._pending_instructions:
                         for pending in list(self._pending_instructions):
+                                # 指示された対象に触った操作だけを「着手」とみなす。
+                                # 以前は最初のどんな操作でも着手にしていたので、
+                                # 「りんごを切って」と指示したのに玉ねぎを拾った
+                                # 場面が「指示どおり着手した」と記録されていた。
+                                _payload = pending.get('task')
+                                if isinstance(_payload, (list, tuple)) and len(_payload) >= 2:
+                                    _payload = _payload[1]
+                                _obj = (_payload.get('obj')
+                                        if isinstance(_payload, dict) else None)
+                                if _obj and _obj.lower() not in str(result.event).lower():
+                                    continue
                                 if (not pending.get('execution_logged', False)) and pending.get('target_idx', None) == i:
                                     pending['execution_logged'] = True
                                     wall_time = time.time()

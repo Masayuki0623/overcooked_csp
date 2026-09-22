@@ -1367,6 +1367,36 @@ PUBLIC_URL_PATH = ROOT / '.cache' / 'public_url.txt'
 INSTANCE_ID = 0
 
 
+def running_code_version():
+    """いま動かしているコードがどの版かを返す。
+
+    直したつもりでも古いサーバーが動いたままだった、という取り違えが
+    何度も起きた。起動時に必ず出して、ログを見れば分かるようにする。
+    未コミットの変更があるときは (未コミットの変更あり) と付く。
+    """
+    try:
+        import subprocess
+        # コミットのことばは日本語なので、読み方を指定しないと
+        # Windows の既定(cp932)で読もうとして落ちる。
+        run = lambda cmd: subprocess.run(
+            cmd, cwd=str(ROOT), capture_output=True, timeout=5,
+            encoding='utf-8', errors='replace')
+        head = run(['git', 'log', '-1', '--format=%h %s'])
+        dirty = run(['git', 'status', '--porcelain'])
+        if head.returncode != 0:
+            return '(git から取れません)'
+        line = head.stdout.strip()
+        changed = [ln[3:] for ln in dirty.stdout.splitlines()
+                   if ln[3:].endswith(('.py', '.html'))]
+        if changed:
+            line += f'  + 未コミットの変更: {", ".join(changed[:5])}'
+            if len(changed) > 5:
+                line += f' ほか{len(changed) - 5}件'
+        return line
+    except Exception as e:
+        return f'(調べられません: {e})'
+
+
 def public_url():
     try:
         url = PUBLIC_URL_PATH.read_text(encoding='utf-8').strip()
@@ -1945,7 +1975,18 @@ def start_server_thread(host, port):
     # 起動を待ってから URL を出す(押しても繋がらない案内を出さないため)。
     deadline = time.time() + 10
     while not server.started and time.time() < deadline:
+        if not thread.is_alive():
+            break
         time.sleep(0.05)
+    if not server.started:
+        # ポートが空いていないと uvicorn は ERROR を1行出すだけで、
+        # こちらは何事もなく「起動しました」と表示し続けてしまう。
+        # 実際には前のサーバーが応答し続けるので、直したはずのコードが
+        # 動いていないことに気づけない(実際にこれで何度も取り違えた)。
+        # ここで止める。
+        print(f'[server] ポート {port} を使えませんでした。'
+              f'別のサーバーが動いていないか確かめてください。', flush=True)
+        raise SystemExit(1)
     return server
 
 
@@ -2004,6 +2045,7 @@ def main():
     shown_host = 'localhost' if args.host in ('127.0.0.1', '0.0.0.0') else args.host
     print('=' * 60)
     print(f'  Overcooked CSP web server')
+    print(f'  いま動いているコード: {running_code_version()}')
     print(f'  URL: http://{shown_host}:{args.port}/')
     print(f'  構成: map={args.map} agent0={args.agent0} agent1={args.agent1} '
           f'sc_2agent={args.sc_2agent} orders={args.orders} '

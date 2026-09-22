@@ -547,16 +547,29 @@ class CSPAgent:
                         fixed_task_id = self._extract_instruction_fixed_task_id(pending)
                         matched_idx = task_index_by_fixed_id.get(fixed_task_id)
                         if matched_idx is None:
+                            # 指示された作業が計画に見当たらない。済んだのなら
+                            # 正しいが、1フレームだけ消えただけでもここへ来て、
+                            # 以後この指示は二度と縛らなくなる。黙って捨てると
+                            # 「指示が効かない」原因が追えないので必ず残す。
+                            print(f'[指示] 対象が計画に無いので、これ以降は縛りません: '
+                                  f'action={action} fixed_id={fixed_task_id} '
+                                  f'計画にある作業={sorted({(t.get("verb"), t.get("obj")) for t in tasks})}',
+                                  flush=True)
                             pending['status'] = 'done'
                             continue
                         group_indices = [matched_idx]
 
+                    before_filter = list(group_indices)
                     group_indices = [
                         idx for idx in group_indices
                         if tasks[idx].get('id') not in self.completed_task_ids
                         and starts_by_idx.get(idx) is not None
                     ]
                     if not group_indices:
+                        print(f'[指示] 対象が済んだ扱いになったので、これ以降は縛りません: '
+                              f'action={action} '
+                              f'対象={[tasks[i].get("id") for i in before_filter]}',
+                              flush=True)
                         pending['status'] = 'done'
                         continue
 
@@ -2647,8 +2660,14 @@ class CSPAgent:
         if reschedule_reason is not None and self.initialized:
             current_env_time = getattr(env, 'time', None)
             last_resched = self._last_reschedule_time
+            # 指示を受け取ったときだけは間引かない。間引きはゲーム内時刻で
+            # 測るが、指示はカウントダウン中(時刻が止まっている間)に出すので、
+            # 経過0秒とみなされて必ず先送りされる。その間にゲームが始まり、
+            # AI は指示を知らない計画のまま動き出してしまう
+            # (実測: 「りんごを切って」と指示したのに玉ねぎを取りに行った)。
             if (
-                current_env_time is not None
+                not str(reschedule_reason).startswith('instruction')
+                and current_env_time is not None
                 and last_resched is not None
                 and (current_env_time - last_resched) < self._min_reschedule_interval_seconds
             ):
@@ -6824,8 +6843,18 @@ class CSPAgent:
         # ============ 指示による制約 (skip_budget ベース) ============
         # 旧: 秒数ベース制約 (当面は呼び出さない — メソッドは残す)
         # self._apply_instruction_deadline_constraints(model, tasks, starts, env)
+        instruction_watch = None
         if self.skip_budget is not None:
             self._apply_instruction_skip_budget_constraints(model, tasks, starts, env, is_a1=is_a1)
+            # 縛った結果、計画の何番目に来たかを後で照合するために控える
+            for _p in (list(getattr(env, '_pending_instructions', []) or [])
+                       + list(getattr(self, '_pending_instructions', []) or [])):
+                if _p.get('status') in {'done', 'canceled'}:
+                    continue
+                _a = self._extract_instruction_action(_p)
+                if _a:
+                    instruction_watch = (_a, _p)
+                    break
 
         # Makespan 最小化
         makespan = model.NewIntVar(0, horizon, 'makespan')
@@ -6935,6 +6964,27 @@ class CSPAgent:
                     schedule_per_agent[agent_idx].sort(key=lambda x: x['start'])
                 
                 self.schedule_per_agent = schedule_per_agent
+                # 指示した作業が、この計画で自分の何番目に来たか。
+                # 縛ったはずなのに後ろへ行っていたら、そこが原因なので残す。
+                if instruction_watch is not None:
+                    _act, _pend = instruction_watch
+                    _own = schedule_per_agent[self.own_agent_idx if self.sc_2agent else 0]
+                    _pos = None
+                    for _n, _t in enumerate(_own, 1):
+                        _tid = _t.get('id')
+                        if _tid and (str(_tid[0]), str(_tid[1])) == _act:
+                            _pos = _n
+                            break
+                    # 判定は最初に与えた猶予で見る。残り(remaining)はこなした
+                    # ぶん減って負にもなるので、それで見ると常に警告になる。
+                    _budget = _pend.get('skip_budget')
+                    if not isinstance(_budget, int):
+                        _budget = self.skip_budget
+                    _limit = (_budget + 1) if isinstance(_budget, int) else None
+                    if _pos is None or (_limit is not None and _pos > _limit):
+                        print(f'[指示] 縛りが効いていません: 指示={_act} '
+                              f'計画の{_pos}番目 (猶予{_budget} なら{_limit}番目まで) '
+                              f'自分の計画={[t.get("id") for t in _own]}', flush=True)
                 schedule = schedule_per_agent[0] + schedule_per_agent[1]
                 schedule.sort(key=lambda x: x['start'])
                 

@@ -458,6 +458,15 @@ class GamePlay(Game):
                         if not hasattr(self.ai, '_pending_instructions'):
                             self.ai._pending_instructions = []
                         self.ai._pending_instructions.append(pending_entry)
+                        # 指示をぶら下げただけでは計画は組み直されない。作業の
+                        # 一覧は変わらないので、AI 側の「変化したから計算し直す」
+                        # 判定に引っかからないため。そのままだと指示を受ける前の
+                        # 計画のまま動き出し、指示と関係ない作業に手を付けてから
+                        # ようやく計画が入れ替わる(実測: 「りんごを切って」と
+                        # 指示した直後に玉ねぎを取りに行った)。ここで必ず
+                        # 組み直させる。
+                        if hasattr(self.ai, '_mark_reschedule_needed'):
+                            self.ai._mark_reschedule_needed('instruction_accepted')
                 except Exception as e:
                     print(f"[GamePlay] Failed to attach pending instruction to agent: {e}")
 
