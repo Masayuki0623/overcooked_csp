@@ -1305,6 +1305,13 @@ class TaskAgent:
                 continue
             if only_assigned_counter and assigned_counter and pos != assigned_counter:
                 continue
+            # 他の注文のために確保された置き場からは取らない。計画側では
+            # 「どの注文がその材料を取るか」を所要時間で決めているのに、
+            # 実行側でそれを無視して横取りしていた(実測: スープ用に
+            # 確保したトマトをサラダが取り、人がもう一度トマトを刻む
+            # ことになってスープが 11 秒遅れた)。
+            if pos != assigned_counter and pos in (self.protected_counters or set()):
+                continue
 
             obj_name = getattr(obj, 'full_name', '')
             parts = obj_name.replace('Cooking', 'Chopped').replace('Cooked', 'Chopped').replace('Charred', 'Chopped').split('-')

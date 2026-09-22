@@ -159,6 +159,58 @@ def all_conditions():
     return [{'map': m, 'skip_budget': b} for m, _, _ in MAP_CHOICES for b in SKIP_BUDGETS]
 
 
+class CrossProcessLock:
+    """プロセスをまたいで1つずつにする鍵。
+
+    4人同時に遊べるようにすると、記録のファイルを別々のプロセスが同時に
+    書く。スレッドの鍵(threading.Lock)は同じプロセスの中でしか効かないので、
+    OS の鍵を使う。プロセスが落ちても OS が外してくれるため、鍵が残ったまま
+    次の人が始められなくなることがない。
+    """
+
+    def __init__(self, path):
+        self.path = Path(str(path) + '.lock')
+        self._fh = None
+
+    def __enter__(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._fh = open(self.path, 'a+b')
+        try:
+            if os.name == 'nt':
+                import msvcrt
+                # msvcrt は 10 秒あきらめると例外を出すので、取れるまで繰り返す。
+                while True:
+                    self._fh.seek(0)
+                    try:
+                        msvcrt.locking(self._fh.fileno(), msvcrt.LK_LOCK, 1)
+                        break
+                    except OSError:
+                        time.sleep(0.05)
+            else:
+                import fcntl
+                fcntl.flock(self._fh.fileno(), fcntl.LOCK_EX)
+        except Exception:
+            # 鍵が使えない環境でも、記録を落とすより書いたほうがよい。
+            pass
+        return self
+
+    def __exit__(self, *exc):
+        try:
+            if os.name == 'nt':
+                import msvcrt
+                self._fh.seek(0)
+                msvcrt.locking(self._fh.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(self._fh.fileno(), fcntl.LOCK_UN)
+        except Exception:
+            pass
+        finally:
+            self._fh.close()
+            self._fh = None
+        return False
+
+
 def _load_assignments():
     try:
         return json.loads(ASSIGN_PATH.read_text(encoding='utf-8'))
@@ -177,7 +229,7 @@ def assignment_for(participant):
     並びは最初に作ったときの1回だけ決め、ファイルに残す。途中でサーバーを
     止めても同じ順番の続きから遊べる。
     """
-    with _assign_lock:
+    with _assign_lock, CrossProcessLock(ASSIGN_PATH):
         data = _load_assignments()
         rec = data.get(participant)
         if not rec or len(rec.get('order') or []) != len(all_conditions()):
@@ -191,7 +243,7 @@ def assignment_for(participant):
 
 def note_session_done(participant):
     """1セッション終わったので、次の条件へ進める。"""
-    with _assign_lock:
+    with _assign_lock, CrossProcessLock(ASSIGN_PATH):
         data = _load_assignments()
         rec = data.get(participant)
         if not rec:
@@ -202,6 +254,11 @@ def note_session_done(participant):
 
 def append_csv(path, fields, row):
     path.parent.mkdir(parents=True, exist_ok=True)
+    with CrossProcessLock(path):
+        _append_csv_locked(path, fields, row)
+
+
+def _append_csv_locked(path, fields, row):
     new = not path.exists()
     if not new:
         # 項目が増えたのに古い見出しのまま足すと、列がずれて読めなくなる。
@@ -710,7 +767,7 @@ class WebGamePlay:
         outdir = ROOT / 'results' / 'web_perf'
         outdir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        path = outdir / f'{stamp}-game{self.game_id}.json'
+        path = outdir / f'{stamp}-i{INSTANCE_ID}-game{self.game_id}.json'
         try:
             path.write_text(json.dumps({
                 'selection': self.selection, 'end_reason': reason,
@@ -1120,7 +1177,7 @@ class WebGamePlay:
         repdir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         map_name = (self.selection or {}).get('map') or a.map
-        path = repdir / f'web-{map_name}-{a.agent0}-{a.agent1}-{stamp}.rep'
+        path = repdir / f'web{INSTANCE_ID}-{map_name}-{a.agent0}-{a.agent1}-{stamp}.rep'
         try:
             self.replay.save(path)
             print(f'[server] リプレイを保存しました: {path}')
@@ -1225,6 +1282,11 @@ app.mount('/graphics', StaticFiles(directory=str(WEB_GRAPHICS_DIR)), name='graph
 # いま使っている低遅延の入口(Cloudflare のトンネル)の URL。
 # tools/serve_public.py が起動のたびにここへ書く。
 PUBLIC_URL_PATH = ROOT / '.cache' / 'public_url.txt'
+
+# 何番目の入口か。4人同時に遊べるようにすると同じ PC で複数のサーバーが
+# 動くので、残すファイルの名前が秒単位で衝突する(リプレイ・通信の記録)。
+# 番号を名前に入れて、別々の記録として残す。
+INSTANCE_ID = 0
 
 
 def public_url():
@@ -1800,6 +1862,8 @@ def parse_arguments():
     p.add_argument('--host', type=str, default='127.0.0.1',
                    help='待ち受けアドレス。LAN の別端末から繋ぐなら 0.0.0.0')
     p.add_argument('--port', type=int, default=8000)
+    p.add_argument('--instance', type=int, default=0,
+                   help='何番目の入口か(server_multi.py が付ける。記録の名前に入る)')
 
     p.add_argument('--map', type=str, default='exp_partition',
                    choices=['ring', 'bottleneck', 'partition', 'quick', 'juice', 'experiment',
@@ -1827,9 +1891,10 @@ def parse_arguments():
 
 
 def main():
-    global session
+    global session, INSTANCE_ID
 
     args = parse_arguments()
+    INSTANCE_ID = int(args.instance)
     # 1秒あたりに行動できる回数。ゲームを組み立てる前に決めておく
     # (刻む回数や環境の1手の長さがこれで決まる)。
     game_config.set_input_hz(args.input_hz)
