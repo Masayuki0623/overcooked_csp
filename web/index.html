@@ -104,6 +104,7 @@
     box-sizing: border-box; min-height: calc(var(--btn) * 3.2);
   }
   #instruct.show { display: flex; flex-direction: column; justify-content: center; }
+  #instruct .lead, #instruct .who { flex: 0 0 auto; }
   body.compact #instruct {
     margin-top: 8px;
     padding-bottom: calc(env(safe-area-inset-bottom) + var(--lift));
@@ -116,7 +117,11 @@
   }
   #instruct .who span { display: flex; align-items: center; gap: 5px; }
   #instruct .who img { width: 26px; height: 26px; image-rendering: pixelated; }
-  #instruct .cards { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  #instruct .cards {
+    display: flex; gap: 8px; flex-wrap: wrap; justify-content: center;
+    /* 候補が多いとボタンの高さに収まらない。枠の中だけで送れるようにする */
+    overflow-y: auto; overscroll-behavior: contain; max-height: 100%;
+  }
   #instruct .cards button {
     font: inherit; font-size: 14px; color: var(--text); background: var(--btn-bg);
     border: 1px solid var(--btn-line); border-bottom-width: 3px; border-radius: 10px;
@@ -158,8 +163,12 @@
   #overlay {
     position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
     background: rgba(10,12,15,.84); font-size: 16px; text-align: center; padding: 24px; z-index: 10;
+    /* 画面に収まらない内容(選択肢が多いとき等)は縦に送れるようにする。
+       小さい画面では選ぶ項目が増えると下が見切れてしまうため。 */
+    overflow-y: auto; overscroll-behavior: contain;
   }
   #overlay.show { display: flex; }
+  #overlay > div { margin: auto; max-width: 100%; }
   /* カウントダウン中は盤面が見えるよう、背景を薄くする */
   #overlay.countdown { background: rgba(10,12,15,.35); }
   #overlay .cd {
