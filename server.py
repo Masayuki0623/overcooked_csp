@@ -1694,6 +1694,11 @@ async def ws(sock: WebSocket):
             elif kind == 'mousedown':
                 session.post_mouse_down(msg.get('x', 0), msg.get('y', 0))
             elif kind == 'start':
+                # 前の回が終わって枠が空いているなら取り直す。アンケートの
+                # 間も接続を保つようにしたので、同じ接続で次の回を始める
+                # ことがある。
+                if session.player is not token:
+                    session.try_acquire(token)
                 session.start(token, {
                     'map': msg.get('map'), 'preset': msg.get('preset'),
                     'case': msg.get('case'),
@@ -1740,6 +1745,7 @@ async def ws(sock: WebSocket):
     async def stream():
         """描画ができるたびに画面を送る。状態の変化もここで知らせる。"""
         nonlocal sent_version, sent_draw_version, sent_size, last_state
+        nonlocal my_game, acquired_at
         while True:
             # 次の描画を待つ。待ち(と画像モードでの PNG 化)は executor 側なので
             # イベントループは塞がらず、入力(ping/キー)は待たされない。
@@ -1753,14 +1759,15 @@ async def ws(sock: WebSocket):
                 session.go(token)
 
             # 枠を取ったままスタートされないと、後ろの人がずっと待たされる。
-            if (session.state == 'waiting'
+            if (session.player is token
+                    and session.state == 'waiting'
                     and time.time() - acquired_at > START_TIMEOUT_S):
                 await send_text({
                     'type': 'kicked',
                     'text': 'しばらくスタートされなかったので、<br>順番を次の人に譲りました'})
                 return
 
-            # この人の回が終わった。結果を渡して、次の人に枠を譲る。
+            # この人の回が終わった。結果を渡す。
             if session.game_id != my_game:
                 # 条件も一緒に渡す。1回目の「終わりました」は結果が
                 # まだ出来ていないことがあり(リプレイの保存を挟む)、
@@ -1771,7 +1778,15 @@ async def ws(sock: WebSocket):
                                  'result': session.results.get(my_game),
                                  'experiment': meta.get('experiment'),
                                  'selection': meta.get('selection')})
-                return
+                # ここで切らない。実験ではこのあとアンケートに答えてもらうので、
+                # 切ると答えている間ずっと「接続が切れました」と出てしまう
+                # (実測: アンケートの裏で切断表示になった)。枠は run_forever が
+                # もう手放しているので、つないだままでも次の人を待たせない。
+                my_game = session.game_id
+                last_state = None      # 次の回の状態をもう一度知らせる
+                sent_size = None       # 盤面の大きさも送り直す
+                acquired_at = time.time()   # 「取ったまま始めない」の計測もやり直す
+                continue
 
             # 次のゲームを組み立てる前(開始待ち)は盤面がない。前のゲームの
             # 盤面を送ろうとして落ち、接続が切れていた。
