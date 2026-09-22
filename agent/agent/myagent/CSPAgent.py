@@ -255,6 +255,8 @@ class CSPAgent:
         # サラダへ運び、スープのレタスを切り直すことになった)。
         # 取り合いが起きているときは、取る側を入れ替えた案も解いて
         # makespan の短い方を採る。
+        # 1回の探索の上限(決定性時間)。None なら最適解まで詰める。
+        self.solve_deterministic_limit = None
         self._claim_priority = None      # 確保する順に並べた注文 uid
         self._stock_contest = {}         # 食材 -> {'claimed': [uid], 'chopped': [uid]}
         self._claim_winner = {}          # 取り合いが決着した食材 -> 取る注文 uid
@@ -6295,6 +6297,7 @@ class CSPAgent:
         Circuit制約を用いて順序依存のセットアップ時間（移動時間）を正確にモデル化する。
         """
         self._emit_counter_debug(f"[CSPAgent] CSPスケジューリング開始 ({len(orders)} 注文)...")
+        _t_build_start = time.perf_counter()
         previous_schedule = getattr(self, 'schedule', None)
         previous_schedule_per_agent = getattr(self, 'schedule_per_agent', None)
         model = cp_model.CpModel()
@@ -6853,7 +6856,17 @@ class CSPAgent:
         # 同じ結果になることは、実験としても不具合を追う上でも欠かせない。
         solver.parameters.num_search_workers = 1
         solver.parameters.random_seed = 0
+        # 探索の上限。注文が増えると最適解まで詰めるのに時間がかかり、
+        # 1回の判断が数秒かかってAIが固まる(実測: 注文4つで最大2.3秒)。
+        # 秒ではなく「決定性時間」で切る。秒で切るとPCの速さや他の負荷で
+        # 打ち切る場所が変わり、同じ条件の試行が同じ結果にならない。
+        if self.solve_deterministic_limit is not None:
+            solver.parameters.max_deterministic_time = float(self.solve_deterministic_limit)
+        _t_search_start = time.perf_counter()
         status = solver.Solve(model)
+        # 組み立てと探索のどちらが重いかは、注文を増やせるかの判断に効く。
+        self._last_solve_metrics['build_ms'] = (_t_search_start - _t_build_start) * 1000
+        self._last_solve_metrics['search_ms'] = (time.perf_counter() - _t_search_start) * 1000
         status_name = solver.StatusName(status)
         self._emit_counter_debug(f"[CSPAgent] ソルバー状態: {status_name}")
 
