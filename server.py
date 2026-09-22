@@ -1916,6 +1916,17 @@ def main():
         session.run_forever()
     except KeyboardInterrupt:
         print('\n[server] 中断しました')
+    except Exception:
+        # 落ちた理由を残す。画面のログは流れて消えるので、ファイルにも書く。
+        import traceback
+        log = ROOT / 'results' / 'server_crash.log'
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with log.open('a', encoding='utf-8') as f:
+            f.write('--- ' + datetime.now().isoformat(timespec='seconds') + ' ---' + chr(10))
+            traceback.print_exc(file=f)
+        traceback.print_exc()
+        print(f'[server] 落ちました。理由は {log} に残しました', flush=True)
+        raise
 
 
 if __name__ == '__main__':
