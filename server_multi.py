@@ -44,6 +44,8 @@ SLOT_CACHE_SECONDS = 0.5
 HOP_BY_HOP = {'connection', 'keep-alive', 'transfer-encoding', 'upgrade',
               'content-encoding', 'content-length', 'te', 'trailer',
               'proxy-authorization', 'proxy-authenticate'}
+# 受付自身が付け直す見出し。そのまま通すと二重になる。
+DROP_FROM_GAME = {'date', 'server'}
 
 
 class Seats:
@@ -218,7 +220,8 @@ def build_app(seats: Seats):
             return JSONResponse({'error': f'席{seat} につながりません: {err}'},
                                 status_code=502)
 
-        out = {k: v for k, v in up.headers.items() if k.lower() not in HOP_BY_HOP}
+        out = {k: v for k, v in up.headers.items()
+               if k.lower() not in HOP_BY_HOP and k.lower() not in DROP_FROM_GAME}
         resp = Response(content=up.content, status_code=up.status_code,
                         headers=out, media_type=up.headers.get('content-type'))
         if seat != current:

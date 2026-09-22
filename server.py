@@ -1591,7 +1591,10 @@ async def ws(sock: WebSocket):
         await wait_in_line(sock)
         return
     # どの経路で来たか(家の中の LAN か、Funnel 経由か)。遅さの切り分けに使う。
-    host = getattr(sock.client, 'host', '') or ''
+    # server_multi.py 経由だと接続元がその受付(127.0.0.1)になるので、
+    # 受付が伝えてくる本当の接続元を優先する。
+    host = (sock.headers.get('x-forwarded-for', '').split(',')[0].strip()
+            or getattr(sock.client, 'host', '') or '')
     via_funnel = ('tailscale-funnel-request' in sock.headers
                   or host in ('127.0.0.1', '::1'))
     session.connection_info = {'route': 'funnel' if via_funnel else 'lan', 'host': host,
