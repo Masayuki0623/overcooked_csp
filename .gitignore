@@ -55,3 +55,6 @@ results/web_perf/
 
 # プロセスをまたぐ鍵(server_multi.py で複数人が同時に遊ぶときに使う)
 *.lock
+
+# 再起動したサーバーの出力(手元だけ)
+results/server.log
