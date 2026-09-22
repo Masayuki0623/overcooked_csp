@@ -1183,25 +1183,32 @@
     }));
   }
 
+  let countdownTimer = null;
+  // 数えるのをやめて、最初からやり直せるようにする。
+  function cancelCountdown() {
+    if (countdownTimer !== null) { clearTimeout(countdownTimer); countdownTimer = null; }
+    countdownRan = false;
+    el.overlay.classList.remove('countdown');
+  }
+
   function beginCountdown() {
     if (countdownRan) return;
     countdownRan = true;
     paint();
-    {
-      let n = 3;
-      const tick = () => {
-        if (n > 0) {
-          el.overlay.classList.add('countdown');
-          showOverlay(`<div class="cd">${n}</div>` + selectionNote());
-          n -= 1;
-          setTimeout(tick, 1000);
-        } else {
-          send({ type: 'go' });
-          showOverlay('<div class="cd">スタート!</div>');
-        }
-      };
-      tick();
-    }
+    let n = 3;
+    const tick = () => {
+      countdownTimer = null;
+      if (n > 0) {
+        el.overlay.classList.add('countdown');
+        showOverlay(`<div class="cd">${n}</div>` + selectionNote());
+        n -= 1;
+        countdownTimer = setTimeout(tick, 1000);
+      } else {
+        send({ type: 'go' });
+        showOverlay('<div class="cd">スタート!</div>');
+      }
+    };
+    tick();
   }
 
   function showStart() {
@@ -1429,6 +1436,16 @@
   let instructShown = false;    // いま指示を出しているか
   function showInstruct(msg) {
     instructShown = true;
+    if (!started) {
+      // まだ始まっていない = 開始前の指示。数えている途中でも必ず止める。
+      // 指示を選んでいる間に数え終わると、決めた時点でもう時間が進んで
+      // いることになる。選び終えてから数え直す。
+      // (サーバーが「この回は指示がある」と伝えてこない場合でも、ここで
+      //  止まるので順番は変わらない)
+      instructDone = false;
+      needInstruction = true;
+      cancelCountdown();
+    }
     hideOverlay();              // 盤面を見ながら選べるように
     const who = (msg.players || []).map((p) =>
       `<span><img src="/graphics/${esc(p.sprite || 'agent-blue')}-front.png" ` +
@@ -1452,7 +1469,7 @@
       hideInstruct();
       instructShown = false;
       instructDone = true;
-      beginCountdown();          // 決めてから 3・2・1
+      if (!started) beginCountdown();   // 決めてから 3・2・1
     }));
     instructBox.classList.add('show');
   }
