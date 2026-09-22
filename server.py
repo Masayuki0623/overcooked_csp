@@ -507,6 +507,8 @@ class WebGamePlay:
         # 終わった回の結果は、その回の参加者へ届けるために番号で残す。
         self.game_id = 0
         self.results = {}
+        # 終わった回の条件(アンケートを出すのに要る)。番号で引く。
+        self.finished_meta = {}
         # 遊ぶ人がスタート画面で選んだ地図・レシピ・注文の組み合わせ。
         # 選ばれた内容でゲームを組み立ててから始める。
         self.selection = None
@@ -688,6 +690,33 @@ class WebGamePlay:
         if not res.get('aborted'):
             # 最後までやったセッションだけ数える(途中で切れた回はやり直し)
             note_session_done(sel['participant'])
+
+    def experiment_info(self, sel=None):
+        """アンケートに添える、その回の条件。参加者IDで遊んだときだけ返す。"""
+        sel = (self.selection if sel is None else sel) or {}
+        if not sel.get('participant'):
+            return None
+        return {
+            'participant_id': sel.get('participant'),
+            'session': sel.get('session'),
+            'sessions_total': sel.get('sessions_total'),
+            # アンケートに添える条件(画面には出さない)
+            'map': sel.get('map'), 'case': sel.get('case'),
+            'skip_budget': sel.get('skip_budget'),
+        }
+
+    def selection_info(self, sel=None):
+        """画面に見せる「何で遊んでいるか」。"""
+        sel = self.selection if sel is None else sel
+        if not sel:
+            return None
+        return {
+            'instruction': sel.get('instruction'),
+            'skip_budget': sel.get('skip_budget'),
+            'map': dict((m, l) for m, l, _ in MAP_CHOICES).get(sel.get('map')),
+            'preset': dict((r, l) for r, l, _ in RECIPE_CHOICES).get(sel.get('preset')),
+            'orders': [recipe_label(r) for r in sel.get('recipes', [])],
+        }
 
     def instruction_record(self):
         """この回の指示と、その効き方。skip_budget の効果を見るための値。
@@ -1047,6 +1076,12 @@ class WebGamePlay:
                 'makespan_s': round(float(getattr(self.env, 'current_time', 0.0) or 0.0), 1),
             }
             print(f'[server] #{self.game_id} ゲーム終了: {self.result}')
+            # 終わった回の条件も残す。この後 selection は次の回のために
+            # 消されるので、あとから参照できるのはここに控えた分だけ。
+            self.finished_meta[self.game_id] = {
+                'experiment': self.experiment_info(),
+                'selection': self.selection_info(),
+            }
             self._log_session()
 
             # 結果を残してから番号を進める(遊んだ人の接続は、番号が
@@ -1727,8 +1762,15 @@ async def ws(sock: WebSocket):
 
             # この人の回が終わった。結果を渡して、次の人に枠を譲る。
             if session.game_id != my_game:
+                # 条件も一緒に渡す。1回目の「終わりました」は結果が
+                # まだ出来ていないことがあり(リプレイの保存を挟む)、
+                # 画面側はそれを読み飛ばす。こちらに条件が載っていないと、
+                # 参加者の回でもアンケートに進めない。
+                meta = session.finished_meta.get(my_game) or {}
                 await send_text({'type': 'status', 'state': 'finished',
-                                 'result': session.results.get(my_game)})
+                                 'result': session.results.get(my_game),
+                                 'experiment': meta.get('experiment'),
+                                 'selection': meta.get('selection')})
                 return
 
             # 次のゲームを組み立てる前(開始待ち)は盤面がない。前のゲームの
@@ -1806,24 +1848,10 @@ async def ws(sock: WebSocket):
             await send_text({'type': 'notice', 'text': text})
         if session.state != last_state:
             last_state = session.state
-            sel = session.selection or {}
             await send_text({'type': 'status', 'state': session.state,
                              'result': session.result,
-                             'experiment': {
-                                 'participant_id': sel.get('participant'),
-                                 'session': sel.get('session'),
-                                 'sessions_total': sel.get('sessions_total'),
-                                 # アンケートに添える条件(画面には出さない)
-                                 'map': sel.get('map'), 'case': sel.get('case'),
-                                 'skip_budget': sel.get('skip_budget'),
-                             } if sel.get('participant') else None,
-                             'selection': {
-                                 'instruction': sel.get('instruction'),
-                                 'skip_budget': sel.get('skip_budget'),
-                                 'map': dict((m, l) for m, l, _ in MAP_CHOICES).get(sel.get('map')),
-                                 'preset': dict((r, l) for r, l, _ in RECIPE_CHOICES).get(sel.get('preset')),
-                                 'orders': [recipe_label(r) for r in sel.get('recipes', [])],
-                             } if sel else None})
+                             'experiment': session.experiment_info(),
+                             'selection': session.selection_info()})
 
     async def watchdog():
         """何も言わずに消えた端末(電波切れ等)を見つける。"""

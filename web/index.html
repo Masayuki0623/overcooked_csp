@@ -1157,6 +1157,7 @@
   let countdownStarted = false;
   let countdownRan = false;
   let needInstruction = false;   // この回は最初に指示を選ぶか
+  let sessionExp = null;         // 実験のセッションなら、その条件(参加者ID等)
   let lastSelection = null;
   function selectionNote() {
     // 何を選んだかは、始まる前(カウントダウン中)にだけ見せる。
@@ -1269,6 +1270,13 @@
         needInstruction = sel.instruction === 'once_at_start';
         el.cfg.textContent = `${sel.map} / ${sel.preset} / ${sel.orders.join('、')}`;
       }
+      // 実験のセッションかどうかは、始まった時点で決まっている。終わりの
+      // 知らせに条件が載っているかで判断すると、載っていない経路を通った
+      // ときにアンケートへ進めない(実測: 「もう一度遊ぶ」が出てしまった)。
+      // 一度受け取った条件を覚えておき、終わりの判断はこれだけで行う。
+      if (msg.experiment && msg.experiment.participant_id) {
+        sessionExp = msg.experiment;
+      }
       if (msg.state === 'waiting' && !started) {
         if (autoStartPending() && participantId) {
           clearAutoStart();
@@ -1299,8 +1307,17 @@
         const summary =
           `<div class="sub">提供 ${msg.result.served} 件 / 失敗 ${msg.result.failed} 件` +
           `<br>スコア ${msg.result.reward}</div>`;
-        if (msg.experiment && msg.experiment.participant_id && !msg.result.aborted) {
-          showSurvey(msg.experiment, msg.result, summary);
+        // 実験のセッション と 自由に遊ぶとき で、終わったあとの進み方が違う。
+        //   セッション  : アンケート -> 出し終えたら次のセッションへ
+        //   自由に遊ぶ  : 「もう一度遊ぶ」で選び直し
+        // 打ち切った回(通信が切れた等)はセッション数に数えないので、
+        // アンケートも出さない。
+        if (sessionExp && !msg.result.aborted) {
+          showSurvey(sessionExp, msg.result, summary);
+        } else if (sessionExp) {
+          showOverlay('<div class="big">ゲームが途中で終わりました</div>' + summary +
+                      '<div class="sub">この回は数えません。もう一度同じ条件で遊びます。</div>' +
+                      '<button onclick="location.reload()">やり直す</button>');
         } else {
           showOverlay('<div class="big">ゲーム終了</div>' + summary +
                       '<button onclick="location.reload()">もう一度遊ぶ</button>');
