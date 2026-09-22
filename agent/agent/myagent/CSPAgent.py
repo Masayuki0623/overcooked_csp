@@ -174,7 +174,10 @@ class CSPAgent:
         # 正当な待機で最も長いのは調理待ち(COOKING_TIME_SECONDS)。
         # それを確実に上回る値にしないと、煮えるのを待っているだけの
         # エージェントを「進んでいない」と誤って諦めさせてしまう。
-        self.progress_stall_seconds = COOKING_TIME_SECONDS + 10.0
+        # 入力の速さを下げると、同じ工程にかかる時間はその分だけ延びる。
+        # 上限を固定のままにすると、進んでいる作業を途中で諦めてしまう。
+        self.progress_stall_seconds = ((COOKING_TIME_SECONDS + 10.0)
+                                       * game_config.BASE_INPUT_HZ / max(self.fps, 1))
         # 進められなかった作業を避ける長さ。秒で決める(手数で持つと、
         # 入力の速さ n を下げたときに倍の長さになり、煮上がったスープを
         # 60秒も取りに行かないことがあった)。
@@ -1366,6 +1369,17 @@ class CSPAgent:
             return
         if watch[0] != signature:
             watch[0], watch[1] = signature, env_now
+            watch[2:] = [holding]
+            return
+        if len(watch) < 3:
+            watch[2:] = [holding]
+        elif watch[2] != holding:
+            # 拾った・置いた = 工程は進んでいる。ここで測り直す。
+            # 同じ工程でも、材料を取りに行って刻んで運ぶまでには時間が
+            # かかる。時間だけで諦めると、進んでいる作業まで中断していた
+            # (実測: 刻む工程が 25 秒で中断された)。
+            watch[1] = env_now
+            watch[2] = holding
             return
         if self._waiting_for_pot(tid):
             # 鍋が煮えるのを待っているだけなら、進んでいないのではなく
