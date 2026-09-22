@@ -1,3 +1,4 @@
+import itertools
 import random
 import re
 import time
@@ -245,6 +246,19 @@ class CSPAgent:
         # sc_2agent=True かつ human_counterpart_mode=True のとき有効。
         # play_main.py が ai_idx を設定する。
         self.own_agent_idx = 0
+
+        # --- 既に刻んである材料を、どの注文が確保するか ---
+        # 以前はタスクを作る順(=注文の並び順)で先着順に決まっていた。
+        # プリセットの並びは (サラダ, スープ, ジュース) で固定なので、
+        # サラダとスープが同じ材料を使うと必ずサラダが先に取り、スープは
+        # 切り直しになっていた(実測: 人がスープ用に切ったレタスを AI が
+        # サラダへ運び、スープのレタスを切り直すことになった)。
+        # 取り合いが起きているときは、取る側を入れ替えた案も解いて
+        # makespan の短い方を採る。
+        self._claim_priority = None      # 確保する順に並べた注文 uid
+        self._stock_contest = {}         # 食材 -> {'claimed': [uid], 'chopped': [uid]}
+        self._claim_winner = {}          # 取り合いが決着した食材 -> 取る注文 uid
+        self.MAX_CLAIM_CANDIDATES = 3
 
         # print("[CSPAgent] 初期化完了")
 
@@ -2673,7 +2687,15 @@ class CSPAgent:
 
             try:
                 start_time = time.time()
-                self.schedule = self.solve_csp_scheduling(env, orders=current_orders)
+                self.schedule, solved_orders = self._solve_best_claim_priority(
+                    env, current_orders)
+                if solved_orders is not current_orders:
+                    # 在庫の取り合いを裁き直した結果、工程一覧が変わった。
+                    # 変化検知に使う一覧も入れ替えないと、次のフレームで
+                    # 「増えた/減った」と誤検知して再計算が止まらなくなる。
+                    current_orders = solved_orders
+                    current_task_ids = self._stabilize_task_ids_for_held_progress(
+                        env, {t['id'] for o in current_orders for t in o['tasks']})
                 self._last_reschedule_time = getattr(env, 'time', self._last_reschedule_time)
                 elapsed_time = time.time() - start_time
                 self._emit_counter_debug(f"[CSPAgent] スケジューリング時間: {elapsed_time:.4f} 秒")
@@ -4156,7 +4178,8 @@ class CSPAgent:
 
         return predicted
 
-    def _task_duration_frames(self, env, verb, obj, order_idx, assigned_counter=None):
+    def _task_duration_frames(self, env, verb, obj, order_idx, assigned_counter=None,
+                              source=None):
         """工程の所要フレーム数。測れなければ直前に測れた値を使う。
 
         所要時間は「経路が引けるか」に依存するので、相手が通路に立った、
@@ -4166,15 +4189,18 @@ class CSPAgent:
         乗り移り、二度と戻らない。見積もりが少し古いことより、工程が
         消えることのほうがはるかに害が大きい。
         """
-        value = self._task_duration_frames_raw(env, verb, obj, order_idx, assigned_counter)
+        value = self._task_duration_frames_raw(env, verb, obj, order_idx, assigned_counter,
+                                               source=source)
         memo = self.__dict__.setdefault('_duration_memo', {})
-        key = (verb, obj, order_idx, tuple(assigned_counter) if assigned_counter else None)
+        key = (verb, obj, order_idx, tuple(assigned_counter) if assigned_counter else None,
+               tuple(source) if source else None)
         if value is not None:
             memo[key] = value
             return value
         return memo.get(key)
 
-    def _task_duration_frames_raw(self, env, verb, obj, order_idx, assigned_counter=None):
+    def _task_duration_frames_raw(self, env, verb, obj, order_idx, assigned_counter=None,
+                                  source=None):
         resources = self._get_resources(env)
 
         def raw_base_name(item):
@@ -4223,6 +4249,19 @@ class CSPAgent:
             same = [c for c in candidates
                     if self._components_touching(env, tuple(c)) & side] if side else []
             return get_nearest(start_pos, same or candidates)
+
+        if verb == 'fetch':
+            # 切ってある物を取りに行って、置き場まで運ぶだけ(切り直さない)。
+            # 切るのと同じ時間で見積もっていると、ソルバーから見て「在庫を
+            # 使っても早くならない」ことになり、在庫をどの注文へ回すかを
+            # 所要時間で選べなくなる。
+            if source is None or assigned_counter is None:
+                return None
+            d = self.astar_distance(env, tuple(source), tuple(assigned_counter))
+            if d is None:
+                return None
+            # 取る + 置く の2インタラクト
+            return int(d + INTERACT_FRAMES * 2)
 
         if verb == 'chop':
             tile_map = INGREDIENT_TILE
@@ -5138,7 +5177,179 @@ class CSPAgent:
 
         return best_counter
 
-    def _build_order_tasks(self, env):
+    def _claim_sequence(self, order_uids, claim_priority=None):
+        """注文を「刻み済みの在庫を確保する順」に並べた slot 番号の列を返す。
+
+        先に回ってきた注文が在庫を取る。指定が無ければ従来どおり注文の並び順。
+        """
+        priority = claim_priority if claim_priority is not None else self._claim_priority
+        seq = []
+        if priority:
+            for uid in priority:
+                for idx, u in enumerate(order_uids):
+                    if u == uid and idx not in seq:
+                        seq.append(idx)
+                        break
+        for idx in range(len(order_uids)):
+            if idx not in seq:
+                seq.append(idx)
+        return seq
+
+    def _contest_signature(self):
+        """いま起きている在庫の取り合いを、比較できる形にしたもの。
+
+        これが変わらない限り「どの注文が取るか」を決め直さない。世界が少し
+        動くたびに決め直すと、同じ材料の行き先が毎回入れ替わってしまう。
+        """
+        contest = getattr(self, '_stock_contest', None) or {}
+        return tuple(sorted(
+            (ing, tuple(sorted(info['claimed'])), tuple(sorted(info['chopped'])))
+            for ing, info in contest.items()
+        ))
+
+    def _claim_priority_candidates(self, order_uids):
+        """在庫の取り合いが起きているときだけ、取る側を入れ替えた案を並べる。
+
+        取り合いが無ければ空リスト(=従来どおり1回だけ解く)。
+        先頭は必ず現状の案にする。同点なら現状を保ち、揺れを起こさない。
+        """
+        contest = getattr(self, '_stock_contest', None) or {}
+        involved = []
+        for info in contest.values():
+            for uid in list(info['claimed']) + list(info['chopped']):
+                if uid is not None and uid not in involved:
+                    involved.append(uid)
+        if len(involved) < 2:
+            return []
+
+        # いま実際に使われている確保順。これを基準に、取り合っている注文の
+        # 位置だけを入れ替える(無関係な注文は動かさない)。
+        base = [order_uids[idx] for idx in self._claim_sequence(order_uids)
+                if order_uids[idx] is not None]
+        positions = [i for i, uid in enumerate(base) if uid in involved]
+        if len(positions) < 2:
+            return []
+
+        candidates = [list(base)]
+        for perm in itertools.permutations([base[i] for i in positions]):
+            cand = list(base)
+            for pos, uid in zip(positions, perm):
+                cand[pos] = uid
+            if cand not in candidates:
+                candidates.append(cand)
+            if len(candidates) >= self.MAX_CLAIM_CANDIDATES:
+                break
+        return candidates
+
+    # 試し解きの間だけ元に戻す内部状態。
+    _CLAIM_TRIAL_ATTRS_DEEP = ('counter_policy_by_order', 'active_order_entries')
+    _CLAIM_TRIAL_ATTRS_FLAT = (
+        'next_order_uid', 'order_display_labels', 'assigned_counters_display_map',
+        '_predicted_human_task_id', 'predicted_human_tasks', '_human_prediction_doubt',
+        'schedule', 'schedule_per_agent', '_last_solve_metrics', '_stock_contest',
+        '_claim_winner',
+    )
+
+    @staticmethod
+    def _prospective_winners(priority, contest):
+        """その確保順で解いたとき、取り合っている材料をどの注文が取るか。
+
+        置き場の持ち主は「前に確保した注文」の結果として残っているので、
+        それを見るだけでは取る側を選び直せない(他注文の置き場からは
+        取らない規則があるため、前に取った注文が取り続ける)。誰が取るかを
+        先に決めてから組み立てる。
+        """
+        rank = {uid: i for i, uid in enumerate(priority)}
+        winners = {}
+        for ing, info in contest.items():
+            needers = [uid for uid in list(info['claimed']) + list(info['chopped'])
+                       if uid is not None]
+            if not needers:
+                continue
+            winners[ing] = min(needers, key=lambda uid: rank.get(uid, len(rank)))
+        return winners
+
+    def _claim_trial_snapshot(self):
+        snap = {name: deepcopy(getattr(self, name, None))
+                for name in self._CLAIM_TRIAL_ATTRS_DEEP}
+        snap.update({name: getattr(self, name, None)
+                     for name in self._CLAIM_TRIAL_ATTRS_FLAT})
+        return snap
+
+    def _claim_trial_restore(self, snap):
+        for name in self._CLAIM_TRIAL_ATTRS_DEEP:
+            setattr(self, name, deepcopy(snap[name]))
+        for name in self._CLAIM_TRIAL_ATTRS_FLAT:
+            setattr(self, name, snap[name])
+
+    def _solve_best_claim_priority(self, env, current_orders):
+        """在庫の取り合いを makespan で裁いてからスケジュールを解く。
+
+        同じ材料を使う注文が2つあり、刻んである在庫が1つしかないとき、
+        どちらが取るかで全体の所要時間は変わる。以前はタスクを作る順
+        (=注文の並び順)で先着順に決めていたため、常にサラダが取り、
+        スープは切り直しになっていた。ここで取る側を入れ替えた案も解き、
+        makespan の短い方を採る。
+
+        戻り値は (スケジュール, 採用した案で作り直した工程一覧)。
+        取り合いが無ければ従来どおり1回解くだけで、余計な計算はしない。
+        """
+        order_uids = [o['order'] for o in current_orders]
+        signature = self._contest_signature()
+        if signature and signature == getattr(self, '_claim_decision_key', None):
+            # 同じ取り合いについては決め直さない(決めた側を使い続ける)
+            return self.solve_csp_scheduling(env, orders=current_orders), current_orders
+
+        candidates = self._claim_priority_candidates(order_uids)
+        if len(candidates) < 2:
+            self._claim_decision_key = signature
+            return self.solve_csp_scheduling(env, orders=current_orders), current_orders
+
+        snapshot = self._claim_trial_snapshot()
+        contested = deepcopy(getattr(self, '_stock_contest', None) or {})
+        best = None
+        for cand in candidates:
+            self._claim_trial_restore(snapshot)
+            self._claim_winner = self._prospective_winners(cand, contested)
+            try:
+                trial_orders = self._build_order_tasks(env, claim_priority=cand)
+                self.solve_csp_scheduling(env, orders=trial_orders)
+            except Exception as err:
+                self._emit_counter_debug(f"[StockClaim] 案 {cand} の評価に失敗: {err}")
+                continue
+            makespan = (getattr(self, '_last_solve_metrics', {}) or {}).get('makespan_frames')
+            if makespan is None:
+                continue
+            self._emit_counter_debug(f"[StockClaim] 案 {cand}: makespan={makespan}")
+            # 同点なら先頭(現状の案)のまま。取り合いの裁き方が毎回入れ替わると、
+            # 同じ材料を置いたり拾ったりを繰り返すことになる。
+            if best is None or makespan < best[0]:
+                best = (makespan, cand)
+
+        self._claim_trial_restore(snapshot)
+        if best is None:
+            self._claim_decision_key = signature
+            return self.solve_csp_scheduling(env, orders=current_orders), current_orders
+
+        self._claim_priority = best[1]
+        self._claim_winner = self._prospective_winners(best[1], contested)
+        orders = self._build_order_tasks(env, claim_priority=best[1])
+        schedule = self.solve_csp_scheduling(env, orders=orders)
+        self._claim_decision_key = self._contest_signature()
+        self._emit_counter_debug(
+            f"[StockClaim] 採用: 確保順={best[1]} makespan={best[0]} "
+            f"取り合い={self._stock_contest}")
+        return schedule, orders
+
+    def _build_order_tasks(self, env, claim_priority=None):
+        """注文ごとの工程一覧を作る。
+
+        claim_priority: 既に刻んである材料を確保する順(注文 uid の並び)。
+        None なら self._claim_priority、それも無ければ注文の並び順。
+        同じ材料を複数の注文が使うとき、どの注文がその在庫を取るかはここで
+        決まり、取れなかった注文には切り直す工程が付く。makespan で選び直す
+        ために、その決め方を外から差し替えられるようにしてある。
+        """
         available_chopped = {}
         available_chopped_by_pos = {}
         pot_states = []
@@ -5295,6 +5506,12 @@ class CSPAgent:
         # この注文で「切らずに運ぶだけ」にできる食材 -> 運び元カウンター
         carry_sources = {}
 
+        # 取り合いの記録。food(小文字) -> 在庫を確保した注文 uid / 切り直す注文 uid。
+        # 両方に値が入る食材は「在庫が1つしかないのに複数の注文が欲しがった」
+        # ことを意味する。そこだけ、取る側を入れ替えて解き比べる。
+        stock_claims = {}
+        stock_chops = {}
+
         def consume_chopped(ingredient_name, assigned_counter, reserved_counters,
                             order_uid=None, use_component=None, order_ings=None):
             def usable_here(pos):
@@ -5311,6 +5528,7 @@ class CSPAgent:
                 preferred_positions.extend(
                     pos for pos in available_chopped_by_pos.keys()
                     if pos not in reserved_counters
+                    or not reserved_needs(pos, ingredient_name, order_uid)
                 )
 
             # 自分の置き場に無い場合、どの注文の置き場でもない「自由な」カウンターに
@@ -5321,7 +5539,7 @@ class CSPAgent:
                 for pos in available_chopped_by_pos.keys():
                     if pos == assigned_counter:
                         continue
-                    if pos in reserved_counters and reserved_needs(pos, ingredient_name):
+                    if pos in reserved_counters and reserved_needs(pos, ingredient_name, order_uid):
                         continue
                     stock = available_chopped_by_pos.get(pos, {})
                     if stock.get(ingredient_name, 0) <= 0:
@@ -5355,6 +5573,8 @@ class CSPAgent:
                 available_chopped[ingredient_name] -= 1
                 if available_chopped[ingredient_name] <= 0:
                     del available_chopped[ingredient_name]
+                # 世界にあった在庫を、この注文が確保した。取り合いの検出に使う。
+                stock_claims.setdefault(ingredient_name.lower(), []).append(order_uid)
                 if pos != assigned_counter:
                     # 自分の置き場ではない = 運んで合流させる必要がある
                     self._emit_counter_debug(
@@ -5499,7 +5719,6 @@ class CSPAgent:
                 plate_states.append({'names': names, 'obj': held, 'used': False})
 
         resources = self._get_resources(env)
-        orders = []
         # 既に刻む側へ届いている材料の在庫。注文ごとに1つずつ引いていく。
         carried_budget = {}
         current_orders = env.order.current_orders if hasattr(env, 'order') and hasattr(env.order, 'current_orders') else []
@@ -5531,11 +5750,23 @@ class CSPAgent:
             if any(ps['names'] == _want for ps in _pool):
                 assembled_uids.add(_uid)
 
-        def reserved_needs(pos, ingredient_name):
+        # 取り合いが決着している材料は、取る注文が決まっている。
+        claim_winner = dict(getattr(self, '_claim_winner', None) or {})
+
+        def reserved_needs(pos, ingredient_name, asking_uid=None):
             owner = counter_owner.get(pos)
             if owner is None or owner in assembled_uids:
                 return False
-            return ingredient_name.lower() in ings_by_uid.get(owner, set())
+            ing_key = ingredient_name.lower()
+            if ing_key not in ings_by_uid.get(owner, set()):
+                return False
+            # 取り合いを makespan で裁いた結果、その材料はこの注文が取ると
+            # 決まっている。決めた側は、置き場の持ち主が誰であれ取りに行ける。
+            # ここを塞いだままだと、前に取った注文が持ち場ごと抱え込んで
+            # いるせいで決定が効かず、毎フレーム元の割り当てに戻ってしまう。
+            if asking_uid is not None and claim_winner.get(ing_key) == asking_uid:
+                return owner == asking_uid
+            return True
         # 合流地点は注文ごとに1枚へ固定する。途中で移動すると、前に置いた
         # 食材がその場に取り残され、別注文の山に混ざって使えなくなる。
         # 注: 合流地点の固定は試したが取り消した。注文と鍋・提供口の距離を
@@ -5555,7 +5786,12 @@ class CSPAgent:
         used_counters = list(dict.fromkeys(raw_used_counters))
         assigned_counters_display_map = {}
 
-        for order_idx, order_tuple in enumerate(current_orders):
+        # 在庫を確保する順。先に回ってきた注文が取る(この順番そのものが
+        # 「どの注文がその材料を取るか」の決定になっている)。
+        # 返す並びは従来どおり注文の並び順にしたいので、いったん番号で受ける。
+        built_by_idx = {}
+        for order_idx in self._claim_sequence(order_uids, claim_priority):
+            order_tuple = current_orders[order_idx]
             goal = order_tuple[0]
             name = getattr(goal, 'full_name', '').lower()
             ings_lower = [ing for ing in ALL_INGREDIENTS if ing in name]
@@ -5767,8 +6003,18 @@ class CSPAgent:
                 else:
                     dur = self._task_duration_frames(
                         env, 'chop', ing.lower(), order_idx, assigned_counter)
+                if carry_from is not None:
+                    # 切り直さず「取りに行って運ぶだけ」で済む分は、そのぶん短い。
+                    dur_fetch = self._task_duration_frames(
+                        env, 'fetch', ing.lower(), order_idx, assigned_counter,
+                        source=carry_from)
+                    if dur_fetch is not None:
+                        dur = dur_fetch
                 if dur is None:
                     continue
+                if carry_from is None:
+                    # 在庫から取れず、この注文は自分で切り直すことになった。
+                    stock_chops.setdefault(ing.lower(), []).append(order_uid)
                 chop_task = {
                     'carry_from': carry_from,
                     'id': ('chop', ing.lower(), order_uid),
@@ -5908,8 +6154,18 @@ class CSPAgent:
             # 判定が正しく働かない。
             for _t in tasks:
                 _t['order_ingredients'] = set(ings_lower)
-            orders.append({'order': order_uid, 'display_order': display_order, 'name': dish_name, 'ingredients': ings_lower, 'tasks': tasks})
+            built_by_idx[order_idx] = {'order': order_uid, 'display_order': display_order, 'name': dish_name, 'ingredients': ings_lower, 'tasks': tasks}
 
+        orders = [built_by_idx[idx] for idx in sorted(built_by_idx)]
+        self._stock_contest = {
+            ing: {'claimed': list(claimed), 'chopped': list(stock_chops[ing])}
+            for ing, claimed in stock_claims.items()
+            if stock_chops.get(ing)
+        }
+        # 取り合いが解消した材料(運び終わった・使い切った)の決着は捨てる。
+        # 残したままだと、関係の無い場面でその注文だけが優遇され続ける。
+        self._claim_winner = {ing: uid for ing, uid in claim_winner.items()
+                              if ing in self._stock_contest}
         self.assigned_counters_display_map = assigned_counters_display_map
 
         # 仕切りのある地図では、同じ作業でも担当者によって使う資材が変わる。
