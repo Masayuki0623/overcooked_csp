@@ -753,7 +753,7 @@ class TaskAgent:
             dynamic_obstacles=dynamic_obstacles,
             done_state='Mixed', mid_states=('Mixing',),
             container='Cup', container_tile='CupTile', appliance='Blender',
-            appliance_label='ミキサー')
+            appliance_label='ミキサー', appliance_runs_alone=False)
 
     @classmethod
     def _free_shared_counter(cls, env, near_pos):
@@ -929,11 +929,16 @@ class TaskAgent:
                            assigned_pot=None, dynamic_obstacles=None,
                            done_state='Cooked', mid_states=('Cooking', 'Charred'),
                            container='Plate', container_tile='PlateTile', appliance='Pot',
-                           appliance_label='鍋'):
+                           appliance_label='鍋', appliance_runs_alone=True):
         """調理器具の中身を容器に移して提供する。
 
         スープ(鍋->皿)とジュース(ミキサー->コップ)は工程が同じ形なので、
         「完成状態の名前・容器・器具」だけを差し替えて共用する。
+
+        appliance_runs_alone: その器具が放っておいても進むか。
+            鍋は時間で煮えるので True。ミキサーは手ぶらで向かって
+            インタラクトした回数だけ混ざるので False。False のときは
+            「出来上がるまで待つ」が成り立たない(待っても誰も回さない)。
         """
         self_pos = env.self_pos
         holding = env.hold
@@ -1014,6 +1019,17 @@ class TaskAgent:
                 return action, "調理済み料理の取得"
 
             if waiting_pot:
+                if not appliance_runs_alone:
+                    # ミキサーは放っておいても進まない。コップを持ったまま
+                    # 前に立って待つと、誰も回さないので永久に終わらない
+                    # (実測: コップを持ってミキサーの前で止まり続けた)。
+                    # コップを置いて、自分で回しに戻る。
+                    return self.drop_unwanted_item(
+                        env, holding,
+                        reason=f"{appliance_label}を回すため {holding_name} を置く",
+                        dynamic_obstacles=dynamic_obstacles,
+                        allow_strict_override=True,
+                    )
                 action = self.move_to(env, waiting_pot, dynamic_obstacles=dynamic_obstacles)
                 if action == (0, 0) and dynamic_obstacles:
                     action = self.move_to(env, waiting_pot, dynamic_obstacles=None)
@@ -1023,6 +1039,20 @@ class TaskAgent:
 
         # 3. If holding nothing -> Get Plate
         if not holding:
+            if not appliance_runs_alone:
+                # 先に容器を取ってしまうと、出来上がるまで何もできない状態に
+                # 戻ってしまう。手が空いているうちに回しきる。
+                working = []
+                for p_loc in ([assigned_pot] if assigned_pot else []) or                         self.reachable_positions(env, env.get_pos_by_obj_gs(gs=appliance)):
+                    obj = env.pos_obj.get(p_loc)
+                    name = getattr(obj, 'full_name', '') if obj else ''
+                    if name and has_target_recipe(name) and not is_target_food(name):
+                        working.append(p_loc)
+                if working:
+                    action = self.move_to(env, working[0], dynamic_obstacles=dynamic_obstacles)
+                    if action == (0, 0) and dynamic_obstacles:
+                        action = self.move_to(env, working[0], dynamic_obstacles=None)
+                    return action, f"{appliance_label}を回す"
             if assigned_plate:
                 plate_locs = [assigned_plate]
             else:
