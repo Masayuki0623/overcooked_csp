@@ -40,5 +40,89 @@
   ],
   "done": 1,
   "created": "2026-09-20T18:33:59"
+ },
+ "logtest": {
+  "order": [
+   {
+    "map": "exp_ring",
+    "skip_budget": 0
+   },
+   {
+    "map": "exp_ring",
+    "skip_budget": 4
+   },
+   {
+    "map": "exp_bottleneck",
+    "skip_budget": 2
+   },
+   {
+    "map": "exp_ring",
+    "skip_budget": 2
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 2
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 4
+   },
+   {
+    "map": "exp_bottleneck",
+    "skip_budget": 4
+   },
+   {
+    "map": "exp_bottleneck",
+    "skip_budget": 0
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 0
+   }
+  ],
+  "done": 1,
+  "created": "2026-09-22T16:18:14"
+ },
+ "logtest2": {
+  "order": [
+   {
+    "map": "exp_ring",
+    "skip_budget": 0
+   },
+   {
+    "map": "exp_bottleneck",
+    "skip_budget": 0
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 2
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 4
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 0
+   },
+   {
+    "map": "exp_bottleneck",
+    "skip_budget": 2
+   },
+   {
+    "map": "exp_ring",
+    "skip_budget": 4
+   },
+   {
+    "map": "exp_bottleneck",
+    "skip_budget": 4
+   },
+   {
+    "map": "exp_ring",
+    "skip_budget": 2
+   }
+  ],
+  "done": 1,
+  "created": "2026-09-22T16:20:18"
  }
 }

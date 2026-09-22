@@ -54,8 +54,11 @@ VERB_STYLE = {
                     'border': (66, 165, 245), 'text': (13, 71, 161)},
 }
 
-INGREDIENT_JP = {'onion': 'たまねぎ', 'tomato': 'トマト', 'lettuce': 'レタス'}
-VERB_ACTION_JP = {'chop': '切って', 'cook': '調理して', 'serve': '提供して', 'serve_salad': '提供して'}
+INGREDIENT_JP = {'onion': 'たまねぎ', 'tomato': 'トマト', 'lettuce': 'レタス',
+                 'apple': 'リンゴ', 'orange': 'オレンジ', 'banana': 'バナナ'}
+VERB_ACTION_JP = {'chop': '切って', 'cook': '調理して', 'serve': '提供して',
+                  'serve_salad': '提供して', 'mix': '混ぜて', 'serve_juice': '提供して',
+                  'carry': '運んで', 'handover': '渡して', 'serve_from_counter': '提供して'}
 
 
 def _jp_font(size, bold=False):
@@ -84,7 +87,7 @@ def timer_color(progress):
 
 def _ingredients_of(obj):
     base = str(obj)
-    for suffix in (' soup', ' salad'):
+    for suffix in (' soup', ' salad', ' juice'):
         if base.endswith(suffix):
             base = base[:-len(suffix)]
             break
@@ -97,7 +100,9 @@ def card_label(verb, obj):
     if verb == 'chop':
         return INGREDIENT_JP.get(ings[0] if ings else '', str(obj))
     names = [INGREDIENT_JP.get(i, i) for i in ings]
-    dish = 'サラダ' if str(obj).endswith(' salad') else 'スープ'
+    name = str(obj)
+    dish = ('サラダ' if name.endswith(' salad')
+            else 'ジュース' if name.endswith(' juice') else 'スープ')
     if len(names) == 1:
         return f"{names[0]}{dish}"
     return "・".join(names) + dish

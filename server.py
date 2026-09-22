@@ -37,6 +37,7 @@ os.environ.setdefault('SDL_AUDIODRIVER', 'dummy')
 import argparse
 import asyncio
 import csv
+from copy import deepcopy
 import io
 import json
 import random
@@ -202,6 +203,20 @@ def note_session_done(participant):
 def append_csv(path, fields, row):
     path.parent.mkdir(parents=True, exist_ok=True)
     new = not path.exists()
+    if not new:
+        # 項目が増えたのに古い見出しのまま足すと、列がずれて読めなくなる。
+        # 見出しが変わっていたら、古いファイルは名前を変えて残す。
+        try:
+            with path.open('r', encoding='utf-8', newline='') as f:
+                head = next(csv.reader(f), [])
+        except OSError:
+            head = []
+        if head and head != list(fields):
+            backup = path.with_name(
+                f'{path.stem}-{datetime.now():%Y%m%d_%H%M%S}{path.suffix}')
+            path.rename(backup)
+            print(f'[server] 記録の項目が変わったので、古い分は {backup.name} に移しました')
+            new = True
     with path.open('a', newline='', encoding='utf-8') as f:
         w = csv.DictWriter(f, fieldnames=fields, extrasaction='ignore')
         if new:
@@ -432,6 +447,8 @@ class WebGamePlay:
         self._hooks_installed = False
 
         # 指示の選択(ブラウザ側に出す)
+        self.instruction_natural_rank = None
+        self.instruction_kinds = ''
         self.instruction_request = None
         self._instruction_answer = None
         self._instruction_seq = 0
@@ -523,9 +540,12 @@ class WebGamePlay:
         if instruction not in (INSTRUCTION_TIMING_ONCE_AT_START,
                                INSTRUCTION_TIMING_NO_INSTRUCTION):
             instruction = INSTRUCTION_TIMING_ONCE_AT_START
+        skip_budget = choice.get('skip_budget')
+        if skip_budget not in SKIP_BUDGETS:
+            skip_budget = SKIP_BUDGETS[0]
         return {'map': map_name, 'preset': preset, 'case': case,
                 'recipes': list(sets[case]), 'picked_by': picked_by,
-                'instruction': instruction}
+                'instruction': instruction, 'skip_budget': skip_budget}
 
     def note_client_rtt(self, rtt_ms):
         """参加者の端末で測った往復時間を残す。/api/perf で見る。
@@ -565,7 +585,10 @@ class WebGamePlay:
         self.timeline.append(row)
 
     SESSION_FIELDS = ['timestamp', 'participant_id', 'session', 'map', 'skip_budget',
-                      'case', 'orders', 'served', 'failed', 'completed',
+                      'case', 'orders', 'instruction', 'instruction_verb',
+                      'instruction_obj', 'quality', 'wait_seconds', 'wait_censored',
+                      'exec_rank', 'natural_rank', 'rank_gain', 'tasks_before',
+                      'served', 'failed', 'completed',
                       'makespan_s', 'aborted', 'game_id']
 
     def _log_session(self):
@@ -580,6 +603,7 @@ class WebGamePlay:
         res = self.result or {}
         env = self.env
         append_csv(SESSION_LOG_PATH, self.SESSION_FIELDS, {
+            **self.instruction_record(),
             'timestamp': datetime.now().isoformat(timespec='seconds'),
             'participant_id': sel['participant'], 'session': sel.get('session'),
             'map': sel.get('map'), 'skip_budget': sel.get('skip_budget'),
@@ -592,6 +616,93 @@ class WebGamePlay:
         if not res.get('aborted'):
             # 最後までやったセッションだけ数える(途中で切れた回はやり直し)
             note_session_done(sel['participant'])
+
+    def instruction_record(self):
+        """この回の指示と、その効き方。skip_budget の効果を見るための値。
+
+        wait_seconds : 指示してから、AI がその作業に取りかかるまでの秒数
+        exec_rank    : AI が何番目にその作業をやったか(間に挟んだ数+1)
+        natural_rank : 指示しなかったら何番目になるはずだったか
+        rank_gain    : 何番手ぶん繰り上がったか
+        """
+        env = self.env
+        pend = list(getattr(env, '_pending_instructions', []) or []) if env else []
+        if not pend:
+            return {}
+        p = pend[0]
+        payload = p.get('task')
+        if isinstance(payload, (list, tuple)) and len(payload) >= 2:
+            payload = payload[1]
+        verb = payload.get('verb') if isinstance(payload, dict) else None
+        obj = payload.get('obj') if isinstance(payload, dict) else None
+        started = p.get('started_env_time')
+        tasks_before = p.get('tasks_before')
+        exec_rank = (tasks_before + 1) if tasks_before is not None else None
+        natural = self.instruction_natural_rank
+        return {
+            'instruction': f'{verb}_{obj}' if verb else '',
+            'instruction_verb': verb or '', 'instruction_obj': obj or '',
+            'quality': self.instruction_kinds or '',
+            'wait_seconds': started if started is not None else
+                            round(float(getattr(env, 'current_time', 0.0) or 0.0), 1),
+            'wait_censored': int(started is None),
+            'exec_rank': exec_rank,
+            'natural_rank': natural,
+            'rank_gain': (natural - exec_rank) if (natural and exec_rank) else None,
+            'tasks_before': tasks_before,
+        }
+
+    def _dish_kinds_of(self, payload):
+        """その指示が、どの系統の料理(サラダ/スープ/ジュース)を進めるものか。"""
+        try:
+            state = getattr(self.game, '_latest_env_state', None)
+            ai = getattr(self.game, 'ai', None)
+            if state is None or ai is None:
+                return ''
+            kinds = {}
+            for o in ai._build_order_tasks(deepcopy(state)):
+                name = str(o.get('name') or '')
+                for k in ('salad', 'soup', 'juice'):
+                    if name.endswith(k):
+                        kinds[o.get('order')] = k
+            got = {kinds.get(u) for u in (payload.get('order_uids') or [])}
+            return '/'.join(sorted(k for k in got if k))
+        except Exception:
+            return ''
+
+    def measure_natural_rank(self, verb, obj):
+        """指示しなかったら、その作業は AI の何番目になるはずだったかを測る。
+
+        指示を受けた場面をそのまま別の AI に解かせて、順番だけ見る。
+        ゲームの進行とは別のスレッドで動かす(CP-SAT に数秒かかるため)。
+        """
+        state = getattr(self.game, '_latest_env_state', None)
+        if state is None:
+            return
+
+        def work():
+            try:
+                from agent.myagent.CSPAgent import CSPAgent
+                from gym_cooking.utils.replay import Replay as _Replay
+                ai = CSPAgent(10, _Replay(), sc_2agent=True,
+                              skip_budget=getattr(self.game.ai, 'skip_budget', None))
+                ai.human_counterpart_mode = True
+                ai.own_agent_idx = getattr(self.game.ai, 'own_agent_idx', 0)
+                ai.priority_weights = {}
+                ai.gui_text_input = ''
+                ai.gui_constraint_input = ''
+                ai.active_constraints = []
+                ai(deepcopy(state))
+                sched = (ai.schedule_per_agent or {}).get(ai.own_agent_idx) or []
+                for i, t in enumerate(sched, 1):
+                    tid = t.get('id')
+                    if tid and str(tid[0]) == str(verb) and str(tid[1]) == str(obj):
+                        self.instruction_natural_rank = i
+                        return
+            except Exception as e:
+                print(f'[server] 指示なしの順番を測れませんでした: {e}')
+
+        threading.Thread(target=work, daemon=True).start()
 
     def _save_timeline(self, reason):
         if not self.timeline:
@@ -682,7 +793,12 @@ class WebGamePlay:
             idx = self._instruction_answer
             if idx is None or not (0 <= idx < len(candidates)):
                 return None
-            return candidates[idx]
+            chosen = candidates[idx]
+            payload = chosen[1] if isinstance(chosen, (list, tuple)) and len(chosen) > 1 else {}
+            if isinstance(payload, dict) and payload.get('verb'):
+                self.instruction_kinds = self._dish_kinds_of(payload)
+                self.measure_natural_rank(payload['verb'], payload.get('obj'))
+            return chosen
         finally:
             with self._instruction_lock:
                 self.instruction_request = None
@@ -743,10 +859,10 @@ class WebGamePlay:
         if sel:
             # 何を選んで遊んだかをリプレイにも残す
             self.replay['web_selection'] = dict(sel)
-        if sel and sel.get('participant'):
-            # 実験のセッション。AI が指示を後回しにできる量を条件どおりにする。
-            # 時間の締め切り(deadline_seconds)は使わない(シミュレーション側の
-            # 実験と同じ条件にそろえる)。
+        if sel and sel.get('skip_budget') is not None:
+            # AI が指示を後回しにできる量。実験では条件として割り当て、
+            # 自由に遊ぶときはステージ選択で選ぶ。時間の締め切り
+            # (deadline_seconds)は使わない(シミュレーション側と同じ条件)。
             ai = getattr(self.game, 'ai', None)
             if ai is not None:
                 ai.skip_budget = int(sel['skip_budget'])
@@ -814,6 +930,8 @@ class WebGamePlay:
             self._aborted = False
             self.timeline = []
             self.disconnect_reason = None
+            self.instruction_natural_rank = None
+            self.instruction_kinds = ''
             with self._pending_lock:
                 self._draw = None      # 前のゲームの盤面を残さない
             self.state = 'waiting'
@@ -1455,6 +1573,7 @@ async def ws(sock: WebSocket):
                     'map': msg.get('map'), 'preset': msg.get('preset'),
                     'case': msg.get('case'),
                     'instruction': msg.get('instruction'),
+                    'skip_budget': msg.get('skip_budget'),
                     'participant': msg.get('participant')})
             elif kind == 'ack':
                 try:
@@ -1610,6 +1729,7 @@ async def ws(sock: WebSocket):
                              } if sel.get('participant') else None,
                              'selection': {
                                  'instruction': sel.get('instruction'),
+                                 'skip_budget': sel.get('skip_budget'),
                                  'map': dict((m, l) for m, l, _ in MAP_CHOICES).get(sel.get('map')),
                                  'preset': dict((r, l) for r, l, _ in RECIPE_CHOICES).get(sel.get('preset')),
                                  'orders': [recipe_label(r) for r in sel.get('recipes', [])],

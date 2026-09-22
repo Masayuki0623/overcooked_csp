@@ -648,6 +648,29 @@ class CSPAgent:
         except Exception as e:
             print(f'[指示] 制約の処理で失敗: {type(e).__name__} {e}', flush=True)
 
+    def _note_instruction_started(self, env, agent_idx, tid):
+        """指示された作業に実際に取りかかった時刻を残す(測定用)。
+
+        「指示してから何秒で着手したか」「その前に他の作業をいくつ挟んだか」は
+        skip_budget の効き方そのものなので、ここで押さえる。
+        """
+        if not tid:
+            return
+        for pending in list(getattr(self, '_pending_instructions', []) or []):
+            if pending.get('started_env_time') is not None:
+                continue
+            if pending.get('target_idx', 0) not in (agent_idx, None):
+                continue
+            action = self._extract_instruction_action(pending)
+            if not action or (str(tid[0]), str(tid[1])) != action:
+                continue
+            now = getattr(env, 'time', None)
+            if now is None:
+                now = getattr(env, 'current_time', 0.0) or 0.0
+            pending['started_env_time'] = round(float(now), 1)
+            pending['tasks_before'] = int(pending.get('_consumed_tasks', 0))
+            pending['status'] = 'started'
+
     def _dependency_ids_of(self, tasks, group_indices):
         """指示対象の前提になっているタスクの id 集合。
 
@@ -3021,6 +3044,7 @@ class CSPAgent:
                 task = self._steady_task(env, agent_idx, task, sc)
                 tid = task['id']
                 verb, obj, order_uid = tid
+                self._note_instruction_started(env, agent_idx, tid)
 
                 ta = self.task_agents[agent_idx]
                 task_name = None

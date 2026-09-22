@@ -987,6 +987,12 @@
   // ---- ステージ選択 ----------------------------------------------------
   // 地図・レシピ・注文の組み合わせを選んでからスタートする。前回選んだ
   // ものはこの端末に覚えておく(次に開いたとき同じ選択から始められる)。
+  const SKIP_BUDGETS = [0, 2, 4];
+  const SKIP_BUDGET_DESC = {
+    '0': '0 = 指示したことにすぐ取りかかる',
+    '2': '2 = 他の作業を2つまで先にやってから取りかかる',
+    '4': '4 = 他の作業を4つまで先にやってから取りかかる',
+  };
   const INSTRUCTION_CHOICES = [
     { id: 'once_at_start', label: '指示あり(最初に1回)',
       desc: '始まってすぐ、AIに何をしてほしいかを1つ選びます' },
@@ -1012,7 +1018,8 @@
       .catch(() => {});
   }
   let options = null;
-  let pick = { map: null, preset: null, case: '', instruction: 'once_at_start' };
+  let pick = { map: null, preset: null, case: '', instruction: 'once_at_start',
+               skip_budget: 0 };
   try { Object.assign(pick, JSON.parse(localStorage.getItem(PICK_STORE) || '{}')); } catch (e) {}
   const optionsReady = fetch('/api/options').then(r => r.json()).then(o => { options = o; })
     .catch(() => {});
@@ -1064,7 +1071,15 @@
           `<button type="button" data-key="instruction" data-val="${c.id}" ` +
           `class="${pick.instruction === c.id ? 'on' : ''}">${esc(c.label)}</button>`).join('') +
         `</div><div class="hint">${esc((INSTRUCTION_CHOICES.find(
-            (c) => c.id === pick.instruction) || {}).desc || '')}</div></div>`) +
+            (c) => c.id === pick.instruction) || {}).desc || '')}</div></div>` +
+        (pick.instruction === 'once_at_start' ?
+          '<div class="pick"><div class="lab">指示の効き方(AIが先に挟める作業の数)</div>' +
+          '<div class="opts">' +
+          SKIP_BUDGETS.map((b) =>
+            `<button type="button" data-key="skip_budget" data-val="${b}" ` +
+            `class="${Number(pick.skip_budget) === b ? 'on' : ''}">${b}</button>`).join('') +
+          `</div><div class="hint">${esc(SKIP_BUDGET_DESC[String(pick.skip_budget)] || '')}` +
+          '</div></div>' : '')) +
       '<div class="go"><button class="primary" id="start" disabled>スタート</button>' +
       '<div class="sub" id="dl-note" style="margin-top:8px"></div></div>' +
       '</div>');
@@ -1079,7 +1094,8 @@
     pid.addEventListener('blur', applyPid);
 
     el.overlayText.querySelectorAll('.opts button').forEach((b) => b.addEventListener('click', () => {
-      pick[b.dataset.key] = b.dataset.val;
+      pick[b.dataset.key] = b.dataset.key === 'skip_budget'
+        ? Number(b.dataset.val) : b.dataset.val;
       if (b.dataset.key === 'preset') pick.case = '';
       savePick();
       renderPick();
@@ -1097,6 +1113,7 @@
       send({ type: 'start', map: pick.map, preset: pick.preset,
              case: pick.case === '' ? null : Number(pick.case),
              instruction: pick.instruction,
+             skip_budget: Number(pick.skip_budget) || 0,
              participant: participantId || null });
       showOverlay('<div class="big">準備しています</div><div class="sub">数秒かかります</div>');
     });
