@@ -660,8 +660,12 @@ class WebGamePlay:
 
     SESSION_FIELDS = ['timestamp', 'participant_id', 'session', 'map', 'skip_budget',
                       'case', 'orders', 'instruction', 'instruction_verb',
-                      'instruction_obj', 'quality', 'wait_seconds', 'wait_censored',
+                      'instruction_obj', 'quality',
+                      'instruction_accepted_s', 'wait_seconds',
+                      'wait_after_instruction_s', 'wait_censored',
                       'exec_rank', 'natural_rank', 'rank_gain', 'tasks_before',
+                      'loss_seconds', 'baseline_seconds', 'constrained_seconds',
+                      'loss_status', 'loss_num_tasks',
                       'served', 'failed', 'completed',
                       'makespan_s', 'aborted', 'game_id']
 
@@ -721,10 +725,21 @@ class WebGamePlay:
     def instruction_record(self):
         """この回の指示と、その効き方。skip_budget の効果を見るための値。
 
-        wait_seconds : 指示してから、AI がその作業に取りかかるまでの秒数
-        exec_rank    : AI が何番目にその作業をやったか(間に挟んだ数+1)
-        natural_rank : 指示しなかったら何番目になるはずだったか
-        rank_gain    : 何番手ぶん繰り上がったか
+        instruction_accepted_s   : 指示を受け取ったときのゲーム内時刻
+        wait_seconds             : AI がその作業に取りかかったゲーム内時刻
+                                   (指示からの経過ではない。開始直後に指示する
+                                    いまの設計では結果的に一致する)
+        wait_after_instruction_s : 指示してから取りかかるまでの秒数(引き算した値)
+        exec_rank                : AI が何番目にその作業をやったか(間に挟んだ数+1)
+        natural_rank             : 指示しなかったら何番目になるはずだったか
+        rank_gain                : 何番手ぶん繰り上がったか
+
+        loss_seconds       : 時間損失量 L(d) = f'(d) - f。指示によって最適な
+                             段取りからどれだけ外れたか
+        baseline_seconds   : f  = 指示の制約なしで解いた最適 makespan
+        constrained_seconds: f' = 指示の制約ありで解いた最適 makespan
+        loss_status        : 計算できたか(ok / no_constraint / error: ...)
+        loss_num_tasks     : そのとき解いた工程の数
         """
         env = self.env
         pend = list(getattr(env, '_pending_instructions', []) or []) if env else []
@@ -740,17 +755,30 @@ class WebGamePlay:
         tasks_before = p.get('tasks_before')
         exec_rank = (tasks_before + 1) if tasks_before is not None else None
         natural = self.instruction_natural_rank
+        accepted = p.get('accepted_env_time')
+        # 時間損失量 L(d)。別スレッドで解いた結果が pending へ入っている。
+        loss = p.get('time_loss') or {}
         return {
             'instruction': f'{verb}_{obj}' if verb else '',
             'instruction_verb': verb or '', 'instruction_obj': obj or '',
             'quality': self.instruction_kinds or '',
+            'instruction_accepted_s': (round(float(accepted), 1)
+                                       if accepted is not None else None),
             'wait_seconds': started if started is not None else
                             round(float(getattr(env, 'current_time', 0.0) or 0.0), 1),
+            'wait_after_instruction_s': (round(float(started) - float(accepted), 1)
+                                         if started is not None and accepted is not None
+                                         else None),
             'wait_censored': int(started is None),
             'exec_rank': exec_rank,
             'natural_rank': natural,
             'rank_gain': (natural - exec_rank) if (natural and exec_rank) else None,
             'tasks_before': tasks_before,
+            'loss_seconds': loss.get('loss_seconds'),
+            'baseline_seconds': loss.get('baseline_seconds'),
+            'constrained_seconds': loss.get('constrained_seconds'),
+            'loss_status': loss.get('status') or '',
+            'loss_num_tasks': loss.get('num_tasks'),
         }
 
     def _dish_kinds_of(self, payload):
