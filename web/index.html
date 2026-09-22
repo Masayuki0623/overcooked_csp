@@ -209,6 +209,11 @@
   }
   /* アンケート。項目が多いので、画面に収まらなければ中だけ縦に送る */
   #overlay.form { align-items: flex-start; overflow-y: auto; }
+  /* アンケートは答えることに集中してもらう。盤面が透けていると文字が
+     読みにくいので、背景を完全に塗りつぶし、操作ボタンも隠す。 */
+  #overlay.solid { background: var(--bg); }
+  body.survey #stage, body.survey #pad, body.survey #instruct,
+  body.survey .bar { display: none !important; }
   #overlay .survey { width: min(560px, 100%); text-align: left; }
   #overlay .survey .big { text-align: center; }
   #overlay .survey h3 {
@@ -992,6 +997,19 @@
     if (settled) return;
     playing = false;
     el.overlay.classList.remove('countdown');
+    // 実験のセッションなら、黙ってやり直す。打ち切られた回はセッション数に
+    // 数えないので、同じ条件をもう一度遊ぶだけでよい。端末が Wi-Fi と
+    // モバイル回線を切り替えるとここに来ることがあり(実測: 途中で接続元の
+    // アドレスが変わって切れた)、そのたびにボタンを押させるのは負担が大きい。
+    if (sessionExp && retryCount() < 3) {
+      noteRetry(retryCount() + 1);
+      try { sessionStorage.setItem(AUTOSTART_STORE, '1'); } catch (e) {}
+      showOverlay('<div class="big">接続が切れました</div>' +
+                  '<div class="sub">この回は数えません。<br>' +
+                  '同じ条件でやり直します...</div>');
+      setTimeout(() => location.reload(), 2000);
+      return;
+    }
     // 途中で切れたゲームは続けられない(サーバー側で打ち切られる)。
     showOverlay('<div class="big">接続が切れました</div>' +
                 (started || countdownStarted
@@ -1030,6 +1048,19 @@
   }
   function clearAutoStart() {
     try { sessionStorage.removeItem(AUTOSTART_STORE); } catch (e) {}
+  }
+  // 切れてやり直した回数。つながらないときに読み込み直しを繰り返さないよう、
+  // 上限を設けて、それを超えたらボタンを出す。
+  const RETRY_STORE = 'overcooked-retry';
+  function retryCount() {
+    try { return Number(sessionStorage.getItem(RETRY_STORE) || 0) || 0; }
+    catch (e) { return 0; }
+  }
+  function noteRetry(n) {
+    try { sessionStorage.setItem(RETRY_STORE, String(n)); } catch (e) {}
+  }
+  function clearRetry() {
+    try { sessionStorage.removeItem(RETRY_STORE); } catch (e) {}
   }
   // 実験の参加者ID。入れて始めると、地図と AI の設定は割り当てどおりになり、
   // 終わったあとにアンケートが出る。空ならこれまでどおり自由に遊べる。
@@ -1292,6 +1323,7 @@
         showOverlay('<div class="big">盤面を描いています...</div>');
         startCountdown();
       } else if (msg.state === 'running') {
+        clearRetry();          // 無事に始まったので、やり直しの数は忘れる
         el.overlay.classList.remove('countdown');
         if (!playing) {
           sentInputs = 0;
@@ -1370,12 +1402,12 @@
       return `<div class="q" id="q-trust_${n}"><div class="text">${n}. ${esc(text)}</div>` +
              `<div class="scale num">${opts}</div>` +
              '<div class="anchors"><span>0 = 全くあてはまらない</span>' +
-             '<span>7 = 非常にあてはまる</span></div>' +
-             `<div class="scale"><label class="dnf"><input type="radio" name="trust_${n}" ` +
-             'value="dnf"><span>あてはまらない</span></label></div></div>';
+             '<span>7 = 非常にあてはまる</span></div></div>';
     }).join('');
 
     el.overlay.classList.add('form');
+    el.overlay.classList.add('solid');
+    document.body.classList.add('survey');
     showOverlay(
       '<div class="survey">' +
       '<div class="big">ゲーム終了</div>' + summary +
@@ -1385,8 +1417,7 @@
       '<div class="lead">今回のやりとりの中で、以下のことがどの程度あったと感じましたか。<br>' +
       '1 = 全くそう思わない 〜 5 = 強くそう思う</div>' + coordQs +
       '<h3>パートB:AIパートナーについて</h3>' +
-      '<div class="lead">一緒にプレイしたAIパートナーについて、以下の特性がどの程度あてはまりますか。' +
-      '判断できない、または当てはめるのが適切でないと感じる場合は「あてはまらない」を選んでください。<br>' +
+      '<div class="lead">一緒にプレイしたAIパートナーについて、以下の特性がどの程度あてはまりますか。<br>' +
       '0 = 全くあてはまらない 〜 7 = 非常にあてはまる</div>' + trustQs +
       '<h3>パートC:自由記述(任意)</h3>' +
       '<div class="lead">当てはまるものが無ければ空のままで構いません。</div>' + freeQs +
@@ -1429,6 +1460,9 @@
           if (!r.ok) throw new Error(r.error || '保存できませんでした');
           el.overlay.classList.remove('form');
           const last = exp.session >= exp.sessions_total;
+          // 盤面と操作ボタンを戻す(次の回はこの上で遊ぶ)
+          document.body.classList.remove('survey');
+          el.overlay.classList.remove('solid');
           if (last) {
             showOverlay('<div class="big">ありがとうございました</div>' +
               '<div class="sub">全セッションが終わりました。</div>');
