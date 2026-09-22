@@ -1285,6 +1285,48 @@ class CSPAgent:
         cache[key] = out
         return out
 
+    # 「待っているだけ」を表す理由。ここに当てはまるときは、受け取る台の
+    # 前まで行って待つ(離れた場所で待つと、置かれてから取りに行くぶん遅れる)。
+    WAIT_REASONS = ('必要な食材 (Chopped) を待機中', '不足分がそろうのを待機中',
+                    'マージ対象がそろうのを待機中', '共有置き場ID未割当のため待機中')
+
+    def _wait_at_handover_counter(self, env, agent_idx, task, action, reason,
+                                  dynamic_obstacles=None):
+        """相手が置いてくれるのを待つ間は、その受け渡し台の前で待つ。
+
+        仕切りのある地図では、最後の1品が「人が台に置く → AI が取って出す」
+        だけになることがある。作業を終えた場所で待っていると、置かれてから
+        取りに行くぶんだけ遅れる。台の前で向いて待てば、置かれた次の手で
+        受け取れる。
+        """
+        if tuple(action) != (0, 0) or str(reason) not in self.WAIT_REASONS:
+            return action, reason
+        agents = getattr(env, 'agents', None) or []
+        if agent_idx >= len(agents):
+            return action, reason
+        if getattr(agents[agent_idx], 'holding', None) is not None:
+            return action, reason      # 何か持っているときは動かさない
+        counter = (task or {}).get('assigned_counter')
+        if not counter:
+            return action, reason
+        counter = tuple(counter)
+        # その台に手が届かないなら意味がない(仕切りの向こう側など)
+        if agent_idx not in self._task_allowed_agents(env, {'res': ('counter', counter)}):
+            pass      # 判定できない形なら、そのまま下の到達判定に任せる
+        me = tuple(agents[agent_idx].location)
+        if max(abs(me[0] - counter[0]), abs(me[1] - counter[1])) <= 1 \
+                and abs(me[0] - counter[0]) + abs(me[1] - counter[1]) == 1:
+            # すでに台の隣。向きだけ台へ合わせておく
+            facing = (counter[0] - me[0], counter[1] - me[1])
+            if tuple(getattr(agents[agent_idx], 'facing', (0, 1))) != facing:
+                return facing, f'{reason}(受け渡し台の前で待つ)'
+            return action, f'{reason}(受け渡し台の前で待つ)'
+        ta = self.task_agents[agent_idx]
+        move = ta.move_to(env, counter, dynamic_obstacles=dynamic_obstacles)
+        if move and tuple(move) != (0, 0):
+            return move, f'{reason}(受け渡し台へ移動)'
+        return action, reason
+
     def _idle_action(self, env, agent_idx):
         """やることが無いときの動き。
 
@@ -1315,11 +1357,65 @@ class CSPAgent:
                 return action
             except Exception:
                 return (0, 0)
+        # 自分の担当が無いときは、相手が置きに来る受け渡し台の前で待つ。
+        # 作業を終えた場所で待っていると、置かれてから取りに行くぶん遅れる
+        # (仕切りの地図で、最後の1品が「人が台に置く → AI が出す」だけに
+        # なったときのため)。
+        step = self._go_wait_at_handover(e_agent, agent_idx)
+        if step is not None:
+            return step
         if me in self._chokepoints(env) or me in self._station_entrances(env):
             step = self._step_off_chokepoint(env, me, you)
             if step is not None:
                 return step
         return (0, 0)
+
+    def _go_wait_at_handover(self, env, agent_idx):
+        """受け取りに使う台の前まで行って、その台を向いて待つ。
+
+        戻り値は行動(そこに居て向きも合っていれば None)。
+        """
+        if not self._map_is_partitioned(env):
+            return None
+        agents = getattr(env, 'agents', None) or []
+        if agent_idx >= len(agents) or getattr(agents[agent_idx], 'holding', None) is not None:
+            return None
+        me = tuple(agents[agent_idx].location)
+        # いま使っている受け渡し台のうち、自分が手を出せるもの
+        counters = []
+        for entry in (self.counter_policy_by_order or {}).values():
+            c = entry.get('counter')
+            if c:
+                counters.append(tuple(c))
+        for uid, c in (getattr(self, '_fixed_counters', None) or {}).items():
+            if c:
+                counters.append(tuple(c))
+        if not counters:
+            return None
+        reach = getattr(env, 'rch_map', None)
+
+        def touchable(c):
+            for d in ((0, 1), (0, -1), (1, 0), (-1, 0)):
+                n = (c[0] + d[0], c[1] + d[1])
+                try:
+                    if env.to_grid[n[0]][n[1]] == 1 and (reach is None or reach[n[0]][n[1]]):
+                        return True
+                except Exception:
+                    continue
+            return False
+
+        counters = [c for c in dict.fromkeys(counters) if touchable(c)]
+        if not counters:
+            return None
+        counter = min(counters, key=lambda c: abs(c[0] - me[0]) + abs(c[1] - me[1]))
+        if abs(me[0] - counter[0]) + abs(me[1] - counter[1]) == 1:
+            facing = (counter[0] - me[0], counter[1] - me[1])
+            if tuple(getattr(agents[agent_idx], 'facing', (0, 1))) != facing:
+                return facing          # 向きだけ合わせる
+            return None                # もう台の前にいる
+        ta = self.task_agents[agent_idx]
+        move = ta.move_to(env, counter, dynamic_obstacles=None)
+        return move if move and tuple(move) != (0, 0) else None
 
     def _step_off_chokepoint(self, env, me, you):
         """要所から、要所でない空いた隣のマスへ出る1歩(相手から離れる向き優先)。"""
@@ -3110,6 +3206,8 @@ class CSPAgent:
                     
                     # 交互ターン待機は使わず、毎フレーム実行する。
                     action, reason = ta(e_agent, dynamic_obstacles=dynamic_obstacles)
+                    action, reason = self._wait_at_handover_counter(
+                        e_agent, agent_idx, task, action, reason, dynamic_obstacles)
 
                     hold_before = self._hold_before_for_log(e_agent)
                     hold_hint = self._hold_hint_for_log(hold_before, reason)
