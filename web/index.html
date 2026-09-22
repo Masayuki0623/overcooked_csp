@@ -240,6 +240,13 @@
     display: flex; justify-content: space-between; gap: 8px;
     font-size: 11.5px; color: var(--muted); margin: 4px 0 6px;
   }
+  #overlay .survey textarea {
+    width: 100%; box-sizing: border-box; resize: vertical;
+    background: #11141a; color: var(--fg); border: 1px solid #39404b;
+    border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 14px;
+    line-height: 1.6;
+  }
+  #overlay .survey textarea:focus { outline: none; border-color: #8fd3a8; }
   #overlay .survey .err { color: #ffb4b4; font-size: 13.5px; min-height: 1.4em; margin-top: 10px; }
 
   #toast {
@@ -619,7 +626,7 @@
     },
     // 見た目の確認用。アンケート画面をそのまま出す(送信もできる)。
     showSurvey(exp, result) {
-      showSurvey(exp || { participant_id: 'test', session: 1, sessions_total: 9,
+      showSurvey(exp || { participant_id: 'test', session: 1, sessions_total: 6,
                           map: 'exp_partition', skip_budget: 0, case: 0 },
                  result || { served: 3, failed: 0, reward: 45, makespan_s: 42.0 },
                  '<div class="sub">提供 3 件 / 失敗 0 件<br>スコア 45</div>');
@@ -1281,6 +1288,12 @@
                         'そう思う', '強くそう思う'];
   const TRUST_ITEMS = ['信頼できる', '能力がある', '予測できる', '熟練している',
                        '頼りになる', '有能である', '一貫している', '几帳面である'];
+  // 自由記述。尺度では拾えない気づきを残すための欄で、回答は任意。
+  const FREE_ITEMS = [
+    ['free_good', 'AIの動きで「うまく噛み合った」と感じたところがあれば教えてください。'],
+    ['free_bad', 'AIの動きで「気になった」「思ったのと違った」ところがあれば教えてください。'],
+    ['free_other', 'その他、気づいたことがあれば自由にお書きください。'],
+  ];
 
   function showSurvey(exp, result, summary) {
     playing = false;
@@ -1292,6 +1305,11 @@
       return `<div class="q" id="q-coord_${n}"><div class="text">${n}. ${esc(text)}</div>` +
              `<div class="scale">${opts}</div></div>`;
     }).join('');
+
+    const freeQs = FREE_ITEMS.map(([name, text]) =>
+      `<div class="q"><div class="text">${esc(text)}</div>` +
+      `<textarea id="${name}" rows="3" placeholder="任意です。空のままでも送信できます"></textarea></div>`
+    ).join('');
 
     const trustQs = TRUST_ITEMS.map((text, i) => {
       const n = i + 1;
@@ -1323,6 +1341,8 @@
       '<div class="lead">一緒にプレイしたAIパートナーについて、以下の特性がどの程度あてはまりますか。' +
       '判断できない、または当てはめるのが適切でないと感じる場合は「あてはまらない」を選んでください。<br>' +
       '0 = 全くあてはまらない 〜 7 = 非常にあてはまる</div>' + trustQs +
+      '<h3>パートC:自由記述(任意)</h3>' +
+      '<div class="lead">当てはまるものが無ければ空のままで構いません。</div>' + freeQs +
       '<div class="err" id="sv-err"></div>' +
       '<div class="go"><button class="primary" id="sv-send">送信する</button></div>' +
       '</div>');
@@ -1343,6 +1363,10 @@
       };
       for (let i = 1; i <= 6; i++) body[`coord_${i}`] = read(`coord_${i}`);
       for (let i = 1; i <= 8; i++) body[`trust_${i}`] = read(`trust_${i}`);
+      // 自由記述は任意なので、未回答の確認(missing)には入れない。
+      for (const [name] of FREE_ITEMS) {
+        body[name] = (document.getElementById(name) || {}).value || '';
+      }
       if (missing.length) {
         err.textContent = `未回答が ${missing.length} 項目あります(赤い項目)`;
         document.getElementById(`q-${missing[0]}`).scrollIntoView({ block: 'center' });

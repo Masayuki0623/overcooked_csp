@@ -52,3 +52,6 @@ results/layouts/
 # Web 版に配る縮小した絵(server.py が起動時に作る)
 .cache/
 results/web_perf/
+
+# プロセスをまたぐ鍵(server_multi.py で複数人が同時に遊ぶときに使う)
+*.lock

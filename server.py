@@ -110,7 +110,6 @@ prepare_web_graphics()
 # 遊ぶ前に選べる地図とレシピ。地図の中身は play_test.MAP_SETTINGS を参照。
 MAP_CHOICES = [
     ('exp_partition', '仕切り', '左右が仕切られていて行き来できない。材料は仕切りの台で受け渡す'),
-    ('exp_bottleneck', 'ボトルネック', '仕切りの真ん中に1マスだけ通れる穴がある'),
     ('exp_ring', 'リング', '真ん中の島のまわりをぐるっと回れる'),
 ]
 RECIPE_CHOICES = [
@@ -145,10 +144,18 @@ def order_sets_for(preset):
 # ----------------------------------------------------------------------
 # 実験(参加者ID を入れて遊ぶとき)
 # ----------------------------------------------------------------------
-# 条件は「地図3種 × AI が指示を後回しにできる量(skip_budget)3種」の9通り。
-# 参加者は9セッション全部を遊び、順番だけ人ごとにランダムにする。
+# 条件は「地図2種 × AI が指示を後回しにできる量(skip_budget)3種」の6通り。
+# 参加者は6セッション全部を遊び、順番だけ人ごとにランダムにする。
 SKIP_BUDGETS = (0, 2, 4)
-EXPERIMENT_PRESET = 'experiment2'
+# 注文の構成は地図ごとに決める。
+#   仕切り : サラダ + スープ + ジュース(experiment2)
+#   リング : サラダ2品 + スープ(experiment1)。フルーツを使わないので、
+#            地図はフルーツ・ミキサー・コップを外した版(_veg)になる
+#            (build() が uses_fruit を見て自動で付け替える)
+EXPERIMENT_MAP_PRESETS = {
+    'exp_partition': 'experiment2',
+    'exp_ring': 'experiment1',
+}
 ASSIGN_PATH = ROOT / 'results' / 'assignments.json'
 SURVEY_PATH = ROOT / 'results' / 'survey.csv'
 SESSION_LOG_PATH = ROOT / 'results' / 'web_sessions.csv'
@@ -156,7 +163,9 @@ _assign_lock = threading.Lock()
 
 
 def all_conditions():
-    return [{'map': m, 'skip_budget': b} for m, _, _ in MAP_CHOICES for b in SKIP_BUDGETS]
+    """実験で回す条件。地図2種 × 指示の効き方3種 = 6通り。"""
+    return [{'map': m, 'skip_budget': b}
+            for m in EXPERIMENT_MAP_PRESETS for b in SKIP_BUDGETS]
 
 
 class CrossProcessLock:
@@ -574,10 +583,11 @@ class WebGamePlay:
             done = int(rec.get('done', 0))
             order = rec['order']
             cond = order[min(done, len(order) - 1)]
-            sets = order_sets_for(EXPERIMENT_PRESET)
-            cases = experiment_case_indices(EXPERIMENT_PRESET) or list(range(len(sets)))
+            preset = EXPERIMENT_MAP_PRESETS[cond['map']]
+            sets = order_sets_for(preset)
+            cases = experiment_case_indices(preset) or list(range(len(sets)))
             case = random.choice(cases)
-            return {'map': cond['map'], 'preset': EXPERIMENT_PRESET, 'case': case,
+            return {'map': cond['map'], 'preset': preset, 'case': case,
                     'recipes': list(sets[case]), 'picked_by': 'experiment',
                     'participant': participant, 'session': done + 1,
                     'sessions_total': len(order), 'skip_budget': cond['skip_budget']}
@@ -1424,11 +1434,14 @@ async def slot():
     })
 
 
+# 自由記述。改行やカンマが入っても CSV が崩れないよう csv モジュールに任せる。
+FREE_TEXT_FIELDS = ['free_good', 'free_bad', 'free_other']
 SURVEY_FIELDS = (['participant_id', 'session', 'timestamp']
                  + [f'coord_{i}' for i in range(1, 7)] + ['coord_mean']
                  + [f'trust_{i}' for i in range(1, 9)]
-                 + ['trust_mean', 'trust_dnf_count',
-                    'map', 'skip_budget', 'case', 'served', 'makespan_s'])
+                 + ['trust_mean', 'trust_dnf_count']
+                 + FREE_TEXT_FIELDS
+                 + ['map', 'skip_budget', 'case', 'served', 'makespan_s'])
 
 
 @app.post('/api/survey')
@@ -1437,6 +1450,7 @@ async def survey(req: Request):
 
     協調感(1〜5の6項目)は単純平均。信頼感(0〜7の8項目)は「あてはまらない」
     を欠損として除いた平均。どちらも点数まで CSV に入れる。
+    自由記述(3欄)は任意で、書かなければ空のまま残す。
     """
     body = await req.json()
     pid = str(body.get('participant_id') or '').strip()
@@ -1466,11 +1480,17 @@ async def survey(req: Request):
         return JSONResponse({'ok': False, 'error': '信頼感に未回答があります'},
                             status_code=400)
 
+    # 自由記述は任意。長すぎる貼り付けだけ切って、あとはそのまま残す。
+    free = {}
+    for name in FREE_TEXT_FIELDS:
+        free[name] = str(body.get(name) or '').strip()[:2000]
+
     got = [v for v in trust if v is not None]
     row = {
         'participant_id': pid, 'session': body.get('session'),
         'timestamp': datetime.now().isoformat(timespec='seconds'),
         'coord_mean': round(sum(coord) / len(coord), 2),
+        **free,
         'trust_mean': round(sum(got) / len(got), 2) if got else '',
         'trust_dnf_count': sum(1 for v in trust if v is None),
         'map': body.get('map'), 'skip_budget': body.get('skip_budget'),
