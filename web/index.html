@@ -1017,6 +1017,20 @@
   ];
   const PICK_STORE = 'overcooked-stage-v1';
   const PID_STORE = 'overcooked-participant';
+  // アンケートを出し終えて読み込み直したときだけ立つ目印。実験のセッションを
+  // 続けて回すために、ステージ選択を出さずにそのまま次を始める。
+  // タブを閉じるまでしか残らないので、あとで普通に開き直したときは効かない。
+  const AUTOSTART_STORE = 'overcooked-autostart';
+  // 目印は「実際に次を始める」ところまで消さない。順番待ちに入ると
+  // 一度空いたところで読み込み直すので、読み込み時に消してしまうと
+  // そこで自動再開が途切れてステージ選択に戻ってしまう。
+  function autoStartPending() {
+    try { return sessionStorage.getItem(AUTOSTART_STORE) === '1'; }
+    catch (e) { return false; }
+  }
+  function clearAutoStart() {
+    try { sessionStorage.removeItem(AUTOSTART_STORE); } catch (e) {}
+  }
   // 実験の参加者ID。入れて始めると、地図と AI の設定は割り当てどおりになり、
   // 終わったあとにアンケートが出る。空ならこれまでどおり自由に遊べる。
   let participantId = '';
@@ -1249,6 +1263,15 @@
         el.cfg.textContent = `${sel.map} / ${sel.preset} / ${sel.orders.join('、')}`;
       }
       if (msg.state === 'waiting' && !started) {
+        if (autoStartPending() && participantId) {
+          clearAutoStart();
+          showOverlay('<div class="big">次のセッションを準備しています...</div>');
+          // 絵が揃ってから送る(揃う前に始めると最初の盤面が描けない)。
+          optionsReady.then(() => whenSpritesLoaded(() => {
+            send({ type: 'start', participant: participantId });
+          }));
+          return;
+        }
         showStart();
       } else if (msg.state === 'ready') {
         showOverlay('<div class="big">盤面を描いています...</div>');
@@ -1382,10 +1405,18 @@
           if (!r.ok) throw new Error(r.error || '保存できませんでした');
           el.overlay.classList.remove('form');
           const last = exp.session >= exp.sessions_total;
+          if (last) {
+            showOverlay('<div class="big">ありがとうございました</div>' +
+              '<div class="sub">全セッションが終わりました。</div>');
+            return;
+          }
+          // 続きは自動で始める。ボタンを押させると、押し忘れたまま
+          // 待ちが続いてしまう。
           showOverlay('<div class="big">ありがとうございました</div>' +
-            `<div class="sub">${last ? '全セッションが終わりました。' :
-              `次はセッション ${exp.session + 1} / ${exp.sessions_total} です。`}</div>` +
-            (last ? '' : '<button onclick="location.reload()">次のセッションへ</button>'));
+            `<div class="sub">次はセッション ${exp.session + 1} / ${exp.sessions_total} です。` +
+            '<br>まもなく始まります...</div>');
+          try { sessionStorage.setItem(AUTOSTART_STORE, '1'); } catch (e2) {}
+          setTimeout(() => location.reload(), 1800);
         })
         .catch((e) => { err.textContent = String(e.message || e); btn.disabled = false; });
     });

@@ -590,7 +590,12 @@ class WebGamePlay:
             return {'map': cond['map'], 'preset': preset, 'case': case,
                     'recipes': list(sets[case]), 'picked_by': 'experiment',
                     'participant': participant, 'session': done + 1,
-                    'sessions_total': len(order), 'skip_budget': cond['skip_budget']}
+                    'sessions_total': len(order), 'skip_budget': cond['skip_budget'],
+                    # 実験では指示を開始直後に1回だけ受け取る(build() も同じ)。
+                    # ここに入れておかないと画面側が「この回は指示がある」と
+                    # 分からず、指示を待たずに 3・2・1 を始めてしまい、
+                    # 指示を選んでいる間に時間が進んでしまう。
+                    'instruction': INSTRUCTION_TIMING_ONCE_AT_START}
         maps = [m for m, _, _ in MAP_CHOICES]
         presets = [r for r, _, _ in RECIPE_CHOICES]
         map_name = choice.get('map') if choice.get('map') in maps else maps[0]
