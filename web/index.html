@@ -97,8 +97,18 @@
   #pad button.pressed { background: #3b4350; transform: translateY(2px); border-bottom-width: 1px; }
 
   /* 指示の選択。ゲーム画面を隠さないよう、ボタンと同じ下側に出す */
-  #instruct { display: none; width: min(100%, 560px); margin-top: 10px; }
-  #instruct.show { display: block; }
+  #instruct {
+    display: none; width: min(100%, 560px); margin-top: 16px; text-align: center;
+    /* 十字キーと同じ高さを取り、盤面の位置がずれないようにする
+       (実際の高さは出すときに JS でボタンに合わせる) */
+    box-sizing: border-box; min-height: calc(var(--btn) * 3.2);
+  }
+  #instruct.show { display: flex; flex-direction: column; justify-content: center; }
+  body.compact #instruct {
+    margin-top: 8px;
+    padding-bottom: calc(env(safe-area-inset-bottom) + var(--lift));
+  }
+  #pad.hidden { display: none; }
   #instruct .lead { font-size: 14px; margin-bottom: 4px; }
   #instruct .who {
     display: flex; gap: 14px; justify-content: center; align-items: center;
@@ -1098,6 +1108,8 @@
   // 盤面が描けて絵も揃ったら 3・2・1 を出し、終わったら開始の合図を送る。
   // それまでサーバー側の時間は止まっている。
   let countdownStarted = false;
+  let countdownRan = false;
+  let needInstruction = false;   // この回は最初に指示を選ぶか
   let lastSelection = null;
   function selectionNote() {
     // 何を選んだかは、始まる前(カウントダウン中)にだけ見せる。
@@ -1114,6 +1126,21 @@
     setTimeout(() => markBoardDrawn(true), 2000);
     whenSpritesLoaded(() => whenBoardDrawn(() => {
       paint();
+      // 指示を選ぶ回は、選び終えてから数え始める(選んでいる間に
+      // 数えると、決めた直後にいきなり始まってしまう)。
+      if (needInstruction && !instructDone) {
+        hideOverlay();
+        return;
+      }
+      beginCountdown();
+    }));
+  }
+
+  function beginCountdown() {
+    if (countdownRan) return;
+    countdownRan = true;
+    paint();
+    {
       let n = 3;
       const tick = () => {
         if (n > 0) {
@@ -1127,7 +1154,7 @@
         }
       };
       tick();
-    }));
+    }
   }
 
   function showStart() {
@@ -1185,6 +1212,7 @@
       if (msg.selection) {
         const sel = msg.selection;
         lastSelection = sel;
+        needInstruction = sel.instruction === 'once_at_start';
         el.cfg.textContent = `${sel.map} / ${sel.preset} / ${sel.orders.join('、')}`;
       }
       if (msg.state === 'waiting' && !started) {
@@ -1316,7 +1344,11 @@
   // ---- AIへの指示(ゲーム画面の下に出す) ---------------------------------
   // 画面を覆わないので、盤面を見ながら選べる。時間制限は無い。
   const instructBox = document.getElementById('instruct');
+  let instructDone = false;     // この回の指示をもう選んだか
+  let instructShown = false;    // いま指示を出しているか
   function showInstruct(msg) {
+    instructShown = true;
+    hideOverlay();              // 盤面を見ながら選べるように
     const who = (msg.players || []).map((p) =>
       `<span><img src="/graphics/${esc(p.sprite || 'agent-blue')}-front.png" ` +
       `onerror="this.src='/graphics/${esc(p.sprite || 'agent-blue')}.png'">` +
@@ -1327,15 +1359,26 @@
       (it.icon ? `<img src="/graphics/${esc(it.icon)}.png" alt="">` : '') +
       `<span>${esc(it.label)}<br><span class="act">${esc(it.action)}</span></span></button>`
     ).join('');
+    // 指示を選ぶ間は移動・使うボタンを隠す。盤面の位置が動かないよう、
+    // 隠す前にボタンの高さを測って、同じ高さを確保する。
+    const padBox = pad.getBoundingClientRect();
+    if (padBox.height) instructBox.style.minHeight = padBox.height + 'px';
+    pad.classList.add('hidden');
     const box = document.getElementById('instruct-cards');
     box.innerHTML = cards;
     box.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
       sendNow({ type: 'instruct', seq: msg.seq, index: Number(b.dataset.i) });
       hideInstruct();
+      instructShown = false;
+      instructDone = true;
+      beginCountdown();          // 決めてから 3・2・1
     }));
     instructBox.classList.add('show');
   }
-  function hideInstruct() { instructBox.classList.remove('show'); }
+  function hideInstruct() {
+    instructBox.classList.remove('show');
+    pad.classList.remove('hidden');
+  }
 
   let toastTimer = null;
   function showToast(text) {

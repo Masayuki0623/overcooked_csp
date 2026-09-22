@@ -1609,6 +1609,7 @@ async def ws(sock: WebSocket):
                                  'skip_budget': sel.get('skip_budget'),
                              } if sel.get('participant') else None,
                              'selection': {
+                                 'instruction': sel.get('instruction'),
                                  'map': dict((m, l) for m, l, _ in MAP_CHOICES).get(sel.get('map')),
                                  'preset': dict((r, l) for r, l, _ in RECIPE_CHOICES).get(sel.get('preset')),
                                  'orders': [recipe_label(r) for r in sel.get('recipes', [])],
