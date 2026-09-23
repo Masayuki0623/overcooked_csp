@@ -146,7 +146,13 @@ def order_sets_for(preset):
 # ----------------------------------------------------------------------
 # 条件は「地図2種 × AI が指示を後回しにできる量(skip_budget)3種」の6通り。
 # 参加者は6セッション全部を遊び、順番だけ人ごとにランダムにする。
-SKIP_BUDGETS = (0, 2, 4)
+# AI が指示を後回しにできる作業の数。
+# 0/2/4 から 0/1/2 に下げた。指示の制約が実際に縛るのは
+# 「指示しなかったときの順位 > skip_budget + 1」のときだけで、いまの注文
+# 構成で出る順位の上限は 仕切り=3 / リング=6。4 だと6番目以降でないと
+# 縛らず、手元の記録でも skip=2 の6回・skip=4 の4回はすべて L=0 だった
+# (＝指示なしと同じ動きしかしない条件になっていた)。
+SKIP_BUDGETS = (0, 1, 2)
 # 注文の構成は地図ごとに決める。
 #   仕切り : サラダ + スープ + ジュース(experiment2)
 #   リング : サラダ2品 + スープ(experiment1)。フルーツを使わないので、
@@ -241,7 +247,18 @@ def assignment_for(participant):
     with _assign_lock, CrossProcessLock(ASSIGN_PATH):
         data = _load_assignments()
         rec = data.get(participant)
-        if not rec or len(rec.get('order') or []) != len(all_conditions()):
+        # 条件の中身で見比べる。数だけ見ていると、条件の値を変えたのに
+        # 数が同じ(6通り)場合に古い割り当てが残り、もう使わない
+        # skip_budget で遊ばせてしまう。
+        def _same(order):
+            want = sorted((c['map'], c['skip_budget']) for c in all_conditions())
+            try:
+                got = sorted((c['map'], c['skip_budget']) for c in order)
+            except (KeyError, TypeError):
+                return False
+            return got == want
+
+        if not rec or not _same(rec.get('order') or []):
             order = all_conditions()
             random.shuffle(order)
             rec = {'order': order, 'done': 0, 'created': datetime.now().isoformat(timespec='seconds')}
@@ -666,6 +683,8 @@ class WebGamePlay:
                       'exec_rank', 'natural_rank', 'rank_gain', 'tasks_before',
                       'loss_seconds', 'baseline_seconds', 'constrained_seconds',
                       'loss_status', 'loss_num_tasks',
+                      'free_start_s', 'bound_start_s', 'start_gain_s',
+                      'free_rank', 'bound_rank',
                       'served', 'failed', 'completed',
                       'makespan_s', 'aborted', 'game_id']
 
@@ -740,6 +759,15 @@ class WebGamePlay:
         constrained_seconds: f' = 指示の制約ありで解いた最適 makespan
         loss_status        : 計算できたか(ok / no_constraint / error: ...)
         loss_num_tasks     : そのとき解いた工程の数
+
+        指示が実際に何秒ぶんの繰り上げになったか。skip_budget は作業の数
+        なので、同じ値でも地図や注文構成で実際の待ち時間が変わる。参加者が
+        感じるのは秒なので、名目の条件とは別に実測を残す。
+        free_start_s  : 指示しなかったときの着手予定(秒)
+        bound_start_s : 指示したときの着手予定(秒)
+        start_gain_s  : その差。何秒早く取りかかることになったか
+        free_rank     : 指示しなかったときの順位(= natural_rank)
+        bound_rank    : 指示したときの順位
         """
         env = self.env
         pend = list(getattr(env, '_pending_instructions', []) or []) if env else []
@@ -779,6 +807,11 @@ class WebGamePlay:
             'constrained_seconds': loss.get('constrained_seconds'),
             'loss_status': loss.get('status') or '',
             'loss_num_tasks': loss.get('num_tasks'),
+            'free_start_s': loss.get('free_start_s'),
+            'bound_start_s': loss.get('bound_start_s'),
+            'start_gain_s': loss.get('start_gain_s'),
+            'free_rank': loss.get('free_rank'),
+            'bound_rank': loss.get('bound_rank'),
         }
 
     def _dish_kinds_of(self, payload):

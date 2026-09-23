@@ -7073,12 +7073,30 @@ class CSPAgent:
             # 1度だけ作って両方に渡す。
             orders = probe._build_order_tasks(env_probe)
 
+            action = self._extract_instruction_action(pending)
+
             def solve_makespan_frames(budget):
                 probe.skip_budget = budget
                 # solve_csp_scheduling は orders 内のタスク辞書に order_obj を
                 # 書き込むため、毎回作り直した複製を渡す。
                 probe.solve_csp_scheduling(env_probe, orders=_dcopy(orders))
-                return dict(getattr(probe, '_last_solve_metrics', {}) or {})
+                out = dict(getattr(probe, '_last_solve_metrics', {}) or {})
+                # 指示された作業が「自分の何番目・何秒から」になる計画か。
+                # skip_budget は作業の数なので、同じ値でも地図や注文構成に
+                # よって実際の待ち時間が変わる。参加者が感じるのは秒なので、
+                # その回の操作量が実際に何秒だったかを一緒に残す。
+                own = (probe.schedule_per_agent or {}).get(
+                    probe.own_agent_idx if probe.sc_2agent else 0) or []
+                for n, t in enumerate(own, 1):
+                    tid = t.get('id')
+                    if tid and action and (str(tid[0]), str(tid[1])) == action:
+                        out['target_rank'] = n
+                        start = t.get('start')
+                        if start is not None:
+                            out['target_start_s'] = round(
+                                float(start) / float(self.fps), 1)
+                        break
+                return out
 
             # f: 指示制約なし (skip_budget=None だと制約自体が追加されない)
             base = solve_makespan_frames(None)
@@ -7096,6 +7114,8 @@ class CSPAgent:
 
             f = base['makespan_frames'] / float(self.fps)
             f_prime = cons['makespan_frames'] / float(self.fps)
+            free_start = base.get('target_start_s')
+            bound_start = cons.get('target_start_s')
             result.update({
                 'loss_seconds': round(f_prime - f, 3),
                 'baseline_seconds': round(f, 3),
@@ -7103,6 +7123,16 @@ class CSPAgent:
                 'num_tasks': base.get('num_tasks'),
                 'baseline_status': base.get('status'),
                 'constrained_status': cons.get('status'),
+                # 指示した作業の着手予定。free=指示しなかったとき、
+                # bound=指示したとき。gain はその差(何秒早まったか)。
+                # 名目の skip_budget が同じでも、これが違えば操作量は違う。
+                'free_start_s': free_start,
+                'bound_start_s': bound_start,
+                'start_gain_s': (round(free_start - bound_start, 1)
+                                 if free_start is not None and bound_start is not None
+                                 else None),
+                'free_rank': base.get('target_rank'),
+                'bound_rank': cons.get('target_rank'),
                 'status': 'ok',
             })
         except Exception as e:
