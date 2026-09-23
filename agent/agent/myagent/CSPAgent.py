@@ -3235,6 +3235,8 @@ class CSPAgent:
                     parts = dish_ingredients(obj)
                     task_name = f"serve_salad_{'_'.join(parts)}"
                     ta.assigned_counter = task.get('assigned_counter')
+                    # 材料を先に取るか、皿を先に取るか。CSP が決めた方で回る。
+                    ta.serve_route = task.get('serve_route')
                 elif verb == 'clear_pot':
                     # 注文にない中身が入った鍋を空ける。置き場は使わない。
                     parts = dish_ingredients(obj)
@@ -3633,7 +3635,40 @@ class CSPAgent:
         }
 
     # 幾何情報のうち、担当者によって変わるもの。
-    GEOMETRY_KEYS = ('start_pos', 'end_pos', 'fixed_res')
+    GEOMETRY_KEYS = ('start_pos', 'end_pos', 'fixed_res', 'route_choices')
+
+    # サラダの提供で選べる回り方。CSP の解と実行側で同じ名前を使う。
+    SALAD_ROUTE_INGREDIENT = 'ingredient'
+    SALAD_ROUTE_PLATE = 'plate'
+
+    def _salad_route_choices(self, env, counter, plate, delivery):
+        """サラダを提供するときの、2通りの回り方。
+
+            ingredient : 材料を取る → 皿タイルで皿に乗せる → 提供口
+            plate      : 皿を取る   → 材料のある台で皿に乗せる → 提供口
+
+        どちらでも同じ皿が出来上がる。鍋やミキサーの中身は持ち上げられず、
+        必ず皿(コップ)を持って取りに行くしかないので、この選択があるのは
+        サラダだけ。出発点も所要時間も変わるため、両方を返して、どちらが
+        早いかは CSP に決めさせる。
+        """
+        if counter is None or plate is None or delivery is None:
+            return None
+        counter, plate, delivery = tuple(counter), tuple(plate), tuple(delivery)
+        d_cp = self.astar_distance(env, counter, plate)
+        d_pd = self.astar_distance(env, plate, delivery)
+        d_pc = self.astar_distance(env, plate, counter)
+        d_cd = self.astar_distance(env, counter, delivery)
+        if None in (d_cp, d_pd, d_pc, d_cd):
+            return None
+        # どちらも「取る + 皿に乗せる + 提供する」の3インタラクト。
+        step = INTERACT_FRAMES * 3
+        return {
+            self.SALAD_ROUTE_INGREDIENT: {
+                'start_pos': counter, 'dur': int(d_cp + d_pd + step)},
+            self.SALAD_ROUTE_PLATE: {
+                'start_pos': plate, 'dur': int(d_pc + d_cd + step)},
+        }
 
     def _has_resources_for(self, env, task, resources):
         """その資材一覧だけで、このタスクをやり切れるか。
@@ -3929,6 +3964,9 @@ class CSPAgent:
                 t['start_pos'] = start_pos
                 t['end_pos'] = delivery
                 t['fixed_res'] = ('delivery', delivery)
+                # 材料先取り / 皿先取り のどちらで回るかは CSP に決めさせる。
+                t['route_choices'] = self._salad_route_choices(
+                    env, start_pos, plate, delivery)
 
             elif verb == 'serve':
                 pots = resources['pots']
@@ -4500,12 +4538,12 @@ class CSPAgent:
                     start_pos = get_nearest_reachable(plate_pos, counters)
                     if start_pos is None: return None
 
-            d1 = self.astar_distance(env, start_pos, plate_pos)
-            d2 = self.astar_distance(env, plate_pos, delivery_pos)
-
-            if d1 is None or d2 is None: return None
-            # 食材の取得 + 皿に乗せる + 提供 の3インタラクト分
-            return int(d1 + d2 + INTERACT_FRAMES * 3)
+            routes = self._salad_route_choices(env, start_pos, plate_pos, delivery_pos)
+            if not routes:
+                return None
+            # 回り方は CSP が決める(前の工程がどこで終わるかで変わる)。
+            # ここでは見積もりなので、短いほうを使う。
+            return min(r['dur'] for r in routes.values())
 
         elif verb == 'serve':
             pot_pos_list = resources['pots']
@@ -6539,6 +6577,47 @@ class CSPAgent:
                     dist = get_dist(pos_i, pos_j)
                     dist_matrix[(i,j)] = dist
 
+        # サラダの提供だけは「材料を先に取る」「皿を先に取る」の2通りがあり、
+        # 出発点も所要時間も変わる。どちらで回るかを CSP の決定変数にして、
+        # 前後の工程を含めた全体の makespan で選ばせる。
+        # (鍋・ミキサーの中身は持ち上げられないので、他の提供工程には
+        #  この選択肢が無い)
+        route_plate_first = {}   # task_idx -> BoolVar (True = 皿を先に取る)
+        route_durations = {}     # task_idx -> (材料先取りの所要, 皿先取りの所要)
+        dist_alt = {}            # (from_node, task_idx) -> 皿先取りの出発点までの距離
+        for i in range(num_tasks):
+            choices = tasks[i].get('route_choices') or {}
+            by_ing = choices.get(self.SALAD_ROUTE_INGREDIENT)
+            by_plate = choices.get(self.SALAD_ROUTE_PLATE)
+            if not by_ing or not by_plate:
+                continue
+            if tuple(by_ing['start_pos']) == tuple(by_plate['start_pos']):
+                continue
+            route_plate_first[i] = model.NewBoolVar(f'plate_first_{tasks[i]["id"]}')
+            route_durations[i] = (int(by_ing['dur']), int(by_plate['dur']))
+            alt_pos = tuple(by_plate['start_pos'])
+            for k in all_nodes:
+                if k == i:
+                    continue
+                if k == start_node:
+                    pos_k = agent_pos
+                elif self.sc_2agent and k == agent1_start_node:
+                    pos_k = agent1_pos
+                else:
+                    pos_k = tasks[k]['end_pos']
+                dist_alt[(k, i)] = get_dist(pos_k, alt_pos)
+
+        def reach_cases(j):
+            """タスク j に着手するまでの移動。(追加の条件, 使う距離表) を返す。
+
+            回り方を選べるタスクは、選んだほうの出発点までの距離で縛る。
+            選べないタスクは今までどおり1通り。
+            """
+            var = route_plate_first.get(j)
+            if var is None:
+                return [([], dist_matrix)]
+            return [([var.Not()], dist_matrix), ([var], dist_alt)]
+
         # Debug: Check distances between task types
         self._emit_counter_debug("--- 距離行列サンプル ---")
         sample_chop = next((i for i, t in enumerate(tasks) if t['verb'] == 'chop'), None)
@@ -6563,9 +6642,16 @@ class CSPAgent:
         for i in range(num_tasks):
             t = tasks[i]
             dur = int(t['dur']) # これは作業自体の正味時間（移動含まない）
-            
+
             s_var = model.NewIntVar(0, horizon, f'start_{t["id"]}')
             e_var = model.NewIntVar(0, horizon, f'end_{t["id"]}')
+            if i in route_plate_first:
+                # 回り方によって、この工程の中で歩く距離が変わる。
+                dur_ing, dur_plate = route_durations[i]
+                dur = model.NewIntVar(min(dur_ing, dur_plate),
+                                      max(dur_ing, dur_plate), f'dur_{t["id"]}')
+                model.Add(dur == dur_plate).OnlyEnforceIf(route_plate_first[i])
+                model.Add(dur == dur_ing).OnlyEnforceIf(route_plate_first[i].Not())
             interval = model.NewIntervalVar(s_var, dur, e_var, f'interval_{t["id"]}')
             
             starts[i] = s_var
@@ -6643,24 +6729,28 @@ class CSPAgent:
 
                 # エージェント出発位置からの最低到達時間
                 for i in range(num_tasks):
-                    dist_from_a0 = int(dist_matrix.get((start_node, i), 0))
-                    dist_from_a1 = int(dist_matrix.get((agent1_start_node, i), 0))
-                    model.Add(starts[i] >= dist_from_a0).OnlyEnforceIf(is_a1[i].Not())
-                    model.Add(starts[i] >= dist_from_a1).OnlyEnforceIf(is_a1[i])
-                
+                    for extra, mat in reach_cases(i):
+                        dist_from_a0 = int(mat.get((start_node, i), 0))
+                        dist_from_a1 = int(mat.get((agent1_start_node, i), 0))
+                        model.Add(starts[i] >= dist_from_a0).OnlyEnforceIf(
+                            [is_a1[i].Not()] + extra)
+                        model.Add(starts[i] >= dist_from_a1).OnlyEnforceIf(
+                            [is_a1[i]] + extra)
+
                 for i in range(num_tasks):
                     for j in range(i + 1, num_tasks):
                         order_ij = model.NewBoolVar(f'order_{i}_{j}')
-                        dij = int(dist_matrix.get((i, j), 0))
-                        dji = int(dist_matrix.get((j, i), 0))
-                        model.Add(starts[j] >= ends[i] + dij).OnlyEnforceIf(
-                            [is_a1[i].Not(), is_a1[j].Not(), order_ij])
-                        model.Add(starts[i] >= ends[j] + dji).OnlyEnforceIf(
-                            [is_a1[i].Not(), is_a1[j].Not(), order_ij.Not()])
-                        model.Add(starts[j] >= ends[i] + dij).OnlyEnforceIf(
-                            [is_a1[i], is_a1[j], order_ij])
-                        model.Add(starts[i] >= ends[j] + dji).OnlyEnforceIf(
-                            [is_a1[i], is_a1[j], order_ij.Not()])
+                        for same_agent in (False, True):
+                            lit_i = is_a1[i] if same_agent else is_a1[i].Not()
+                            lit_j = is_a1[j] if same_agent else is_a1[j].Not()
+                            for extra, mat in reach_cases(j):
+                                dij = int(mat.get((i, j), 0))
+                                model.Add(starts[j] >= ends[i] + dij).OnlyEnforceIf(
+                                    [lit_i, lit_j, order_ij] + extra)
+                            for extra, mat in reach_cases(i):
+                                dji = int(mat.get((j, i), 0))
+                                model.Add(starts[i] >= ends[j] + dji).OnlyEnforceIf(
+                                    [lit_i, lit_j, order_ij.Not()] + extra)
 
                 # makespan と end_sum が同点になるタスク割り当てが複数存在する場合、
                 # ソルバーはその中から任意の1つを選ぶため、世界の状態がわずかに
@@ -6691,11 +6781,13 @@ class CSPAgent:
                     arcs.append((i, j, lit))
                     lit_map[(i, j)] = lit
                     if j != start_node:
-                        dist = dist_matrix[(i, j)]
-                        model.Add(starts[j] >= ends[i] + dist).OnlyEnforceIf(lit)
+                        for extra, mat in reach_cases(j):
+                            model.Add(starts[j] >= ends[i] + int(mat.get((i, j), 0))
+                                      ).OnlyEnforceIf([lit] + extra)
                     if i == start_node:
-                        dist = dist_matrix[(i, j)]
-                        model.Add(starts[j] >= dist).OnlyEnforceIf(lit)
+                        for extra, mat in reach_cases(j):
+                            model.Add(starts[j] >= int(mat.get((i, j), 0))
+                                      ).OnlyEnforceIf([lit] + extra)
             model.AddCircuit(arcs)
 
         # ====================================================
@@ -7026,6 +7118,14 @@ class CSPAgent:
         status_name = solver.StatusName(status)
         self._emit_counter_debug(f"[CSPAgent] ソルバー状態: {status_name}")
 
+        def chosen_route(task_idx):
+            """サラダの提供をどちらの順で回ると決まったか。実行側へ渡す。"""
+            var = route_plate_first.get(task_idx)
+            if var is None:
+                return None
+            return (self.SALAD_ROUTE_PLATE if solver.Value(var)
+                    else self.SALAD_ROUTE_INGREDIENT)
+
         self._last_solve_metrics.update(status=status_name, num_tasks=num_tasks)
 
         schedule = []
@@ -7056,6 +7156,7 @@ class CSPAgent:
                                     'res': t.get('fixed_res'),
                                     'assigned_counter': t.get('assigned_counter'),
                                     'display_order': t.get('display_order', t.get('slot_idx', t['order'])),
+                                    'serve_route': chosen_route(j),
                                     'fixed_task_id': self._make_fixed_task_id(t['verb'], t['obj'], t['order'])
                                 })
                                 self._emit_counter_debug(f" -> {t['verb']} {t['obj']}")
@@ -7084,6 +7185,8 @@ class CSPAgent:
                         # from_counter: 供給口ではなく共有台から材料を取る
                         'carry_from': t.get('carry_from'),
                         'from_counter': t.get('from_counter'),
+                        # serve_route: サラダを「材料先取り/皿先取り」どちらで回るか
+                        'serve_route': chosen_route(i),
                         'fixed_task_id': self._make_fixed_task_id(t['verb'], t['obj'], t['order'])
                     })
                 # 各エージェントのタスクを開始時刻順に並べる

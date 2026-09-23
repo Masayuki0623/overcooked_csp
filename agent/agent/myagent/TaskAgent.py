@@ -25,6 +25,9 @@ class TaskAgent:
         self.order_ingredients = None
         self.assigned_counter = None 
         self.assigned_task_id = None
+        # サラダの提供をどちらの順で回るか('ingredient' / 'plate')。
+        # CSPAgent が毎フレーム設定する。
+        self.serve_route = None
         self.protected_counters = set()
         
         # 経路予約用（Cooperative A*）
@@ -631,7 +634,7 @@ class TaskAgent:
             # process_serve_task (cook 専用の提供) に流してはいけない。
             parts = self.task_name.split('_')
             ingredients = [p.capitalize() for p in parts[2:]]
-            return self.process_serve_salad_task(env, ingredients, assigned_counter=self.assigned_counter, assigned_serve_loc=self.assigned_serve_loc, dynamic_obstacles=dynamic_obstacles)
+            return self.process_serve_salad_task(env, ingredients, assigned_counter=self.assigned_counter, assigned_serve_loc=self.assigned_serve_loc, dynamic_obstacles=dynamic_obstacles, route=self.serve_route)
         elif self.task_name.startswith('serve'):
             parts = self.task_name.split('_')
             ingredients = []
@@ -1456,15 +1459,43 @@ class TaskAgent:
                 return pos
         return None
 
+    def _counter_with_exact_ingredients(self, env, ing_names, prefer=None):
+        """その食材だけがちょうど置いてある台。皿を持って取りに行く先。
+
+        皿や余計な食材が混ざっている山に皿で触れても、欲しい形にならない。
+        指定テーブルを優先して探す。
+        """
+        want = sorted(ing_names)
+        best = None
+        for pos, obj in env.pos_obj.items():
+            if not self._is_available_object(obj):
+                continue
+            if not self.can_use_position(env, pos):
+                continue
+            parts = sorted((getattr(obj, 'full_name', '') or '').split('-'))
+            if parts != want:
+                continue
+            if prefer is not None and tuple(pos) == tuple(prefer):
+                return tuple(pos)
+            if best is None:
+                best = tuple(pos)
+        return best
+
     def process_serve_salad_task(self, env, ingredients=None, assigned_counter=None,
-                                 assigned_serve_loc=None, dynamic_obstacles=None):
+                                 assigned_serve_loc=None, dynamic_obstacles=None,
+                                 route=None):
         """サラダの提供タスク(鍋を使わない)。
 
         サラダは「刻む → 皿に乗せる → 提供」で完成する。process_serve_task が
-        「鍋の調理済み料理を皿ですくって運ぶ」のに対し、こちらは
-        置き場に集めた刻んだ食材をまとめて取り、皿タイルに触れて皿に乗せ
-        (食材を持ったまま皿タイルに触れると、皿に乗った状態で手に持てる)、
-        提供口へ運ぶ。
+        「鍋の調理済み料理を皿ですくって運ぶ」のに対し、こちらは回り方が
+        2通りある。
+
+            ingredient : 材料を取る → 皿タイルで皿に乗せる → 提供口
+            plate      : 皿を取る   → 材料のある台で皿に乗せる → 提供口
+
+        鍋・ミキサーの中身は持ち上げられないので、この選択があるのは
+        サラダだけ。どちらが早いかは CSP が makespan で決めていて、
+        その結果が route で渡ってくる(指定が無ければ材料先取り)。
         """
         self_pos = env.self_pos
         holding = env.hold
@@ -1501,6 +1532,24 @@ class TaskAgent:
             action, _t, adjacent = self._move_to_first_usable(
                 env, deliveries, dynamic_obstacles=dynamic_obstacles)
             return action, "サラダの配膳 (完了)" if adjacent else "サラダの配膳"
+
+        # 1.5 皿先取りで回ると決まっている -> 先に皿を取り、材料の山へ触れる。
+        #     皿を持って食材に触れると、食材は皿に乗ったまま手元に残る
+        #     (食材を持って皿に触れたときと同じ結果になる)。
+        if route == 'plate':
+            pile = self._counter_with_exact_ingredients(
+                env, missing_ings, prefer=assigned_counter)
+            if pile is not None:
+                if has_plate:
+                    return (self.move_to(env, pile, dynamic_obstacles=dynamic_obstacles),
+                            "皿に材料を乗せに行く")
+                if not holding_name:
+                    plate_tiles = self.reachable_positions(
+                        env, env.get_pos_by_obj_gs(gs='PlateTile'))
+                    if plate_tiles:
+                        action, _t, _adj = self._move_to_first_usable(
+                            env, plate_tiles, dynamic_obstacles=dynamic_obstacles)
+                        return action, "先に皿を取る"
 
         # 2. 皿なしで材料が全部そろっている -> 皿タイルへ行って皿に乗せる
         #    カウンター上に置かれた皿と合流させると、マージ結果がカウンター側に
