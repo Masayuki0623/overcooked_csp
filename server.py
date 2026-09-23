@@ -714,6 +714,62 @@ class WebGamePlay:
             # 最後までやったセッションだけ数える(途中で切れた回はやり直し)
             note_session_done(sel['participant'])
 
+    def save_bug_report(self, message):
+        """「バグを報告」で送られた内容を、あとで原因を追える形で残す。
+
+        そのときのリプレイ(そこまでの全行動)を別名で保存し、条件と時刻と
+        本文を同じ名前の JSON に書く。2つを突き合わせれば、どの場面で何が
+        起きたかを replay_trace で再現できる。
+        """
+        stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        outdir = ROOT / 'results' / 'bug_reports'
+        outdir.mkdir(parents=True, exist_ok=True)
+
+        replay_name = None
+        try:
+            repdir = ROOT / 'agent' / 'agent' / 'replay'
+            repdir.mkdir(parents=True, exist_ok=True)
+            replay_name = f'bug-{stamp}-i{INSTANCE_ID}.rep'
+            self.replay.save(repdir / replay_name)
+        except Exception as e:
+            print(f'[server] 報告用のリプレイを保存できませんでした: {e}')
+
+        sel = self.selection or {}
+        env = self.env
+        row = {
+            'timestamp': datetime.now().isoformat(timespec='seconds'),
+            'message': str(message or '')[:4000],
+            'participant_id': sel.get('participant'),
+            'session': sel.get('session'),
+            'game_id': self.game_id,
+            'instance': INSTANCE_ID,
+            'map': sel.get('map'), 'preset': sel.get('preset'),
+            'case': sel.get('case'), 'recipes': sel.get('recipes'),
+            'skip_budget': sel.get('skip_budget'),
+            'instruction': sel.get('instruction'),
+            'game_time_s': round(float(getattr(env, 'current_time', 0.0) or 0.0), 1),
+            'state': self.state,
+            'connection': self.connection_info,
+            'replay': replay_name,
+            'code': running_code_version(),
+            'instructions': [
+                {k: v for k, v in (p or {}).items()
+                 if k in ('task', 'status', 'skip_budget', 'accepted_env_time',
+                          'started_env_time', 'tasks_before')}
+                for p in (getattr(env, '_pending_instructions', []) or [])
+            ] if env else [],
+        }
+        path = outdir / f'{stamp}-i{INSTANCE_ID}.json'
+        try:
+            path.write_text(json.dumps(row, ensure_ascii=False, indent=1),
+                            encoding='utf-8')
+            print(f'[server] バグ報告を保存しました: {path.name} '
+                  f'(リプレイ {replay_name})')
+        except Exception as e:
+            print(f'[server] バグ報告を保存できませんでした: {e}')
+            return None
+        return {'file': path.name, 'replay': replay_name}
+
     def experiment_info(self, sel=None):
         """アンケートに添える、その回の条件。参加者IDで遊んだときだけ返す。"""
         sel = (self.selection if sel is None else sel) or {}
@@ -1637,6 +1693,25 @@ async def survey(req: Request):
           f"協調 {row['coord_mean']} 信頼 {row['trust_mean']} "
           f"あてはまらない {row['trust_dnf_count']}件")
     return JSONResponse({'ok': True})
+
+
+@app.post('/api/bug')
+async def bug(req: Request):
+    """遊んでいる最中の「バグを報告」。内容とリプレイを残して、回を打ち切る。
+
+    打ち切った回はセッション数に数えないので、同じ条件でやり直せる。
+    """
+    body = await req.json()
+    saved = session.save_bug_report(body.get('message'))
+    if saved is None:
+        return JSONResponse({'ok': False, 'error': '保存できませんでした'},
+                            status_code=500)
+    # 報告したあとは、その回を打ち切ってやり直してもらう
+    try:
+        session._abort()
+    except Exception as e:
+        print(f'[server] 報告後の打ち切りに失敗: {e}')
+    return JSONResponse({'ok': True, **saved})
 
 
 @app.get('/api/assignment')

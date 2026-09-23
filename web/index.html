@@ -36,6 +36,9 @@
     font-size: 12.5px; color: var(--muted); margin-bottom: 12px;
   }
   .bar b { color: var(--text); font-weight: 600; }
+  /* バグ報告。設定の隣に置く。盤面や操作ボタンには重ねない */
+  #bug { border-color: #6b4a4a; color: #ffbcbc; }
+  #bug:hover { background: #3a2a2a; }
   .bar .title { color: var(--text); font-weight: 600; font-size: 14px; margin-right: 4px; }
   .dot {
     display: inline-block; width: 8px; height: 8px; border-radius: 50%;
@@ -148,6 +151,10 @@
   }
   body.compact .bar { font-size: 11.5px; padding: 6px 10px; gap: 4px 12px; margin-bottom: 8px; }
   body.compact .bar .title, body.compact #cfg, body.compact .keys { display: none; }
+  /* スマホでは字を出さず絵文字だけにする。バーが2段になると盤面が
+     そのぶん下がり、下のボタンが見切れるため。 */
+  body.compact #bug { font-size: 0; padding: 4px 8px; }
+  body.compact #bug::before { content: '🐞'; font-size: 13px; }
   body.compact #stage {
     flex: 1; min-height: 0; justify-content: center; align-items: center;
   }
@@ -293,6 +300,7 @@
   <span>描画 <b id="paintms">--</b> ms</span>
   <span>状態 <b id="state">--</b></span>
   <span id="cfg"></span>
+  <button id="bug" type="button" aria-label="バグを報告">🐞 バグを報告</button>
   <button id="gear" type="button" aria-label="ボタンの設定">⚙ 設定</button>
 </div>
 
@@ -352,6 +360,7 @@
   const panelCv = document.getElementById('panel');
   const stage = document.getElementById('stage');
   const pad = document.getElementById('pad');
+  document.getElementById('bug').addEventListener('click', () => showBugForm());
   const gameCtx = gameCv.getContext('2d');
   const panelCtx = panelCv.getContext('2d');
 
@@ -1189,6 +1198,7 @@
   let countdownRan = false;
   let needInstruction = false;   // この回は最初に指示を選ぶか
   let sessionExp = null;         // 実験のセッションなら、その条件(参加者ID等)
+  let reporting = false;         // バグを報告して、やり直しを待っている最中
   let lastSelection = null;
   function selectionNote() {
     // 何を選んだかは、始まる前(カウントダウン中)にだけ見せる。
@@ -1335,6 +1345,8 @@
         started = true;
         hideOverlay();
       } else if (msg.state === 'finished' && msg.result) {
+        // バグの報告でこちらから打ち切ったときは、案内を上書きしない
+        if (reporting) return;
         settled = true;
         const summary =
           `<div class="sub">提供 ${msg.result.served} 件 / 失敗 ${msg.result.failed} 件` +
@@ -1357,6 +1369,56 @@
       }
     }
   };
+
+  // ---- バグの報告 --------------------------------------------------------
+  // 遊んでいる最中に様子がおかしかったら、その場で書いて残してもらう。
+  // 書いた内容とそこまでのリプレイをサーバーが保存し、その回は打ち切って
+  // 同じ条件でやり直す(打ち切った回はセッション数に数えない)。
+  function showBugForm() {
+    const wasPlaying = playing;
+    playing = false;
+    showOverlay(
+      '<div class="survey">' +
+      '<div class="big">バグを報告</div>' +
+      '<div class="sub">どこがおかしかったか、覚えている範囲で書いてください。<br>' +
+      'そのときの状況は自動で保存されます。</div>' +
+      '<div class="q"><textarea id="bug-text" rows="4" ' +
+      'placeholder="例: AIがミキサーの前で止まったまま動かなかった"></textarea></div>' +
+      '<div class="err" id="bug-err"></div>' +
+      '<div class="go">' +
+      '<button class="primary" id="bug-send">送信してやり直す</button> ' +
+      '<button id="bug-cancel">やめる</button>' +
+      '</div></div>');
+    document.getElementById('bug-text').focus();
+
+    document.getElementById('bug-cancel').addEventListener('click', () => {
+      hideOverlay();
+      playing = wasPlaying;
+    });
+    document.getElementById('bug-send').addEventListener('click', () => {
+      const btn = document.getElementById('bug-send');
+      const err = document.getElementById('bug-err');
+      btn.disabled = true;
+      err.textContent = '送っています...';
+      fetch('/api/bug', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: document.getElementById('bug-text').value }),
+      }).then(r => r.json()).then((r) => {
+        if (!r.ok) throw new Error(r.error || '保存できませんでした');
+        settled = true;          // 切断の案内で上書きしない
+        reporting = true;        // 終了の知らせでも上書きしない
+        showOverlay('<div class="big">ありがとうございました</div>' +
+          '<div class="sub">記録しました。<br>同じ条件でやり直します...</div>');
+        if (sessionExp) {
+          try { sessionStorage.setItem(AUTOSTART_STORE, '1'); } catch (e) {}
+        }
+        setTimeout(() => location.reload(), 1500);
+      }).catch((e) => {
+        err.textContent = String(e.message || e);
+        btn.disabled = false;
+      });
+    });
+  }
 
   // ---- アンケート(セッション直後) --------------------------------------
   // パートA: 協調感(5段階・6項目)、パートB: 信頼感(8段階+「あてはまらない」・8項目)。

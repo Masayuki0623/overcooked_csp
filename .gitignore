@@ -58,3 +58,6 @@ results/web_perf/
 
 # 再起動したサーバーの出力(手元だけ)
 results/server.log
+
+# バグ報告(参加者の記録なので追跡しない)
+results/bug_reports/
