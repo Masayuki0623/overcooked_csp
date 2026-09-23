@@ -151,10 +151,11 @@
   }
   body.compact .bar { font-size: 11.5px; padding: 6px 10px; gap: 4px 12px; margin-bottom: 8px; }
   body.compact .bar .title, body.compact #cfg, body.compact .keys { display: none; }
-  /* スマホでは字を出さず絵文字だけにする。バーが2段になると盤面が
-     そのぶん下がり、下のボタンが見切れるため。 */
+  /* スマホでは短い字にする。絵文字だけだと何のボタンか分からない。
+     バーが2段になると盤面がそのぶん下がり、下のボタンが見切れるので、
+     字数を詰めて1段に収める。 */
   body.compact #bug { font-size: 0; padding: 4px 8px; }
-  body.compact #bug::before { content: '🐞'; font-size: 13px; }
+  body.compact #bug::before { content: 'バグ報告'; font-size: 11.5px; }
   body.compact #stage {
     flex: 1; min-height: 0; justify-content: center; align-items: center;
   }
@@ -300,7 +301,7 @@
   <span>描画 <b id="paintms">--</b> ms</span>
   <span>状態 <b id="state">--</b></span>
   <span id="cfg"></span>
-  <button id="bug" type="button" aria-label="バグを報告">🐞 バグを報告</button>
+  <button id="bug" type="button" aria-label="バグを報告">バグを報告</button>
   <button id="gear" type="button" aria-label="ボタンの設定">⚙ 設定</button>
 </div>
 

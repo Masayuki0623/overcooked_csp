@@ -3748,16 +3748,26 @@ class CSPAgent:
             resources = self._get_resources(env)
 
         def raw_base_name(item):
+            """まだ切り終えていない材料の名前。切りかけ(Chopping)も含む。
+
+            切りかけの物を数えないと、まな板に残した切りかけが計画から
+            見えなくなる。すると「その材料を切る」工程は供給口から
+            始まる前提になり、仕切りの向こう側の人に割り当てられる。
+            切りかけはこちら側のまな板にあって相手には届かないので、
+            誰も手を付けないまま試合が終わる(実測: バグ報告2件目、
+            レタスを切りかけたまま47秒停止)。
+            """
             if item is None:
                 return None
             if getattr(item, 'is_held', False):
                 return None
-            name = getattr(item, 'name', '')
-            if name.startswith('Fresh'):
-                return name.replace('Fresh', '')
-            full_name = getattr(item, 'full_name', '')
-            if full_name.startswith('Fresh'):
-                return full_name.replace('Fresh', '')
+            for prefix in ('Fresh', 'Chopping'):
+                name = getattr(item, 'name', '')
+                if name.startswith(prefix):
+                    return name.replace(prefix, '')
+                full_name = getattr(item, 'full_name', '')
+                if full_name.startswith(prefix):
+                    return full_name.replace(prefix, '')
             return None
 
         def chopped_base_name(item):
@@ -4260,16 +4270,26 @@ class CSPAgent:
         resources = self._get_resources(env)
 
         def raw_base_name(item):
+            """まだ切り終えていない材料の名前。切りかけ(Chopping)も含む。
+
+            切りかけの物を数えないと、まな板に残した切りかけが計画から
+            見えなくなる。すると「その材料を切る」工程は供給口から
+            始まる前提になり、仕切りの向こう側の人に割り当てられる。
+            切りかけはこちら側のまな板にあって相手には届かないので、
+            誰も手を付けないまま試合が終わる(実測: バグ報告2件目、
+            レタスを切りかけたまま47秒停止)。
+            """
             if item is None:
                 return None
             if getattr(item, 'is_held', False):
                 return None
-            name = getattr(item, 'name', '')
-            if name.startswith('Fresh'):
-                return name.replace('Fresh', '')
-            full_name = getattr(item, 'full_name', '')
-            if full_name.startswith('Fresh'):
-                return full_name.replace('Fresh', '')
+            for prefix in ('Fresh', 'Chopping'):
+                name = getattr(item, 'name', '')
+                if name.startswith(prefix):
+                    return name.replace(prefix, '')
+                full_name = getattr(item, 'full_name', '')
+                if full_name.startswith(prefix):
+                    return full_name.replace(prefix, '')
             return None
 
         def chopped_base_name(item):
