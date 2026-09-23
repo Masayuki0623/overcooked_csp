@@ -23,6 +23,8 @@ os.environ.setdefault('SDL_AUDIODRIVER', 'dummy')
 from gym_cooking.envs.overcooked_environment import OvercookedEnvironment, MapSetting  # noqa: E402
 from gym_cooking.play_test import MAP_SETTINGS  # noqa: E402
 from gym_cooking.utils.replay import Replay  # noqa: E402
+from agent.executor.low import EnvState  # noqa: E402
+from agent.myagent.CSPAgent import CSPAgent  # noqa: E402
 
 REPLAY_DIR = ROOT / 'agent' / 'agent' / 'replay'
 
@@ -58,6 +60,27 @@ def rebuild(sel):
     return env
 
 
+def make_probe(sel):
+    """当時と同じ設定の AI を作る(何を考えていたかを見るため)。"""
+    ai = CSPAgent(10, Replay(), sc_2agent=True,
+                  skip_budget=sel.get('skip_budget'))
+    ai.human_counterpart_mode = True
+    ai.own_agent_idx = 0
+    ai.priority_weights = {}
+    ai.gui_text_input = ''
+    ai.gui_constraint_input = ''
+    ai.active_constraints = []
+    ai.debug_counter_trace = False
+    return ai
+
+
+def state_of(env):
+    i = env.get_ai_info()
+    return EnvState(world=i['world'], agents=i['sim_agents'], agent_idx=0,
+                    order=i['order_scheduler'], event_history=i['event_history'],
+                    time=i['current_time'], chg_grid=i['chg_grid'])
+
+
 def trace(info, upto=None):
     sel = info.get('web_selection')
     if not sel:
@@ -87,6 +110,41 @@ def trace(info, upto=None):
           % (sched.successful_orders, len(sched.current_orders), t))
 
 
+def why(info, upto=None):
+    """当時の盤面を復元しながら、AI が何をしようとしていたかを並べる。
+
+    盤面は記録どおりに再現し、その盤面を当時と同じ設定の AI に見せて
+    「いま何の作業のつもりか」を言わせる。手が止まっていた理由を探すのに使う。
+    """
+    sel = info.get('web_selection')
+    if not sel:
+        print('  (どの地図で遊んだかが残っていないので再現できません)')
+        return
+    env = rebuild(sel)
+    ai = make_probe(sel)
+    steps = [h for h in info['his'] if h['name'] == 'env.step']
+    prev = None
+    print('   時刻   AIのつもり                        持ち物')
+    for h in steps[:upto or len(steps)]:
+        st = state_of(env)
+        try:
+            move, reason = ai(st)
+        except Exception as e:
+            reason = f'(判断できず: {type(e).__name__} {e})'
+        sched = (ai.schedule_per_agent or {}).get(0) or []
+        idx = (ai.current_task_idx or {}).get(0, 0)             if isinstance(ai.current_task_idx, dict) else 0
+        cur = sched[idx]['id'] if idx < len(sched) else None
+        hold = getattr(env.sim_agents[0].holding, 'full_name', None)
+        line = (str(cur), str(reason)[:32], hold)
+        if line != prev:
+            print('  %5.1fs %-14s %-32s %s'
+                  % (env.current_time, str(cur), str(reason)[:32], hold or '-'))
+            prev = line
+        acts = {a.name: tuple(h['args']['action_dict'].get(a.name) or (0, 0))
+                for a in env.sim_agents}
+        env.step(acts, passed_time=h['args'].get('passed_time', 0.2))
+
+
 def summarize(info):
     sel = info.get('web_selection') or {}
     acc = info.get('accepted') or {}
@@ -111,6 +169,8 @@ def main():
     ap.add_argument('path', nargs='?', default=None)
     ap.add_argument('--all', action='store_true', help='指示のあった回を一覧する')
     ap.add_argument('--steps', type=int, default=None, help='何ステップまで再現するか')
+    ap.add_argument('--why', action='store_true',
+                    help='AI が何をしようとしていたかも出す(遅い)')
     args = ap.parse_args()
 
     files = sorted(glob.glob(str(REPLAY_DIR / 'web*.rep')), key=os.path.getmtime)
@@ -134,7 +194,10 @@ def main():
     info = load(args.path or files[-1])
     summarize(info)
     print()
-    trace(info, upto=args.steps)
+    if args.why:
+        why(info, upto=args.steps)
+    else:
+        trace(info, upto=args.steps)
     return 0
 
 

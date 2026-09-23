@@ -3168,6 +3168,20 @@ class CSPAgent:
                         task = alt
                         tid = task['id']
                         verb, obj, order_uid = tid
+                # 材料がそろっていない工程を抱えたまま待つと、その間ずっと
+                # 止まる。相手の側にしかない材料を待つときは特にそうで、
+                # 実測では受け渡し台の前で 14 秒間動かず、その間に出せたはずの
+                # サラダを出していなかった。いま着手できる別の作業があるなら
+                # そちらを先にやる(鍋の煮上がり待ちと同じ考え方)。
+                if (verb in ('mix', 'cook', 'serve_salad')
+                        and (not me_hold or 'Plate' in me_hold)
+                        and not self._cook_dependency_ready_from_world(env, obj)):
+                    alt = self._find_startable_other_task(env, agent_idx, tid, sc)
+                    if alt is not None:
+                        task = alt
+                        tid = task['id']
+                        verb, obj, order_uid = tid
+
                 if verb not in ('serve', 'handover') and (not me_hold or 'Plate' in me_hold):
                     # 何かを運んでいる途中では割り込まない(持ち物を捨てて
                     # 取りに戻る無駄が出るため)。手が空いているか、皿を
