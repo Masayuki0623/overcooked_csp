@@ -584,6 +584,12 @@ class TaskAgent:
             if len(parts) > 1:
                 ingredients = [p.capitalize() for p in parts[1:]]
             return self.process_cook_task(env, ingredients, assigned_pot=self.assigned_pot, assigned_counter=self.assigned_counter, dynamic_obstacles=dynamic_obstacles)
+        elif self.task_name.startswith('clear_pot'):
+            parts = self.task_name.split('_')
+            ingredients = [x.capitalize() for x in parts[2:]]
+            return self.process_clear_pot_task(env, ingredients,
+                                               assigned_pot=self.assigned_pot,
+                                               dynamic_obstacles=dynamic_obstacles)
         elif self.task_name.startswith('mix'):
             parts = self.task_name.split('_')
             ingredients = [p.capitalize() for p in parts[1:]]
@@ -738,6 +744,72 @@ class TaskAgent:
             env, ingredients, assigned_pot=assigned_blender,
             assigned_counter=assigned_counter, dynamic_obstacles=dynamic_obstacles,
             appliance='Blender', appliance_label='ミキサー')
+
+    def process_clear_pot_task(self, env, ingredients=None, assigned_pot=None,
+                               dynamic_obstacles=None):
+        """注文にない中身が入った鍋を空ける。
+
+        中身は足すことも入れ替えることもできないので、間違えて入れると
+        その鍋は使えないままになる。煮上がるのを待って空の皿に取り、
+        近くの空いた台へ置く。提供口へは持って行かない(注文ではない)。
+        """
+        holding = env.hold
+        holding_name = holding.full_name if holding else None
+
+        pots = ([assigned_pot] if assigned_pot
+                else self.reachable_positions(env, env.get_pos_by_obj_gs(gs='Pot')))
+
+        def stuck_pot():
+            """取り出したい中身が入っている鍋。煮上がっていないうちは取れない。"""
+            for p_loc in pots:
+                obj = env.pos_obj.get(p_loc)
+                if obj is None:
+                    continue
+                is_cooked = getattr(obj, 'is_cooked', None)
+                if callable(is_cooked) and is_cooked():
+                    return p_loc, True
+                return p_loc, False
+            return None, False
+
+        # 1. もう皿に取ってある -> 空いた台に置く
+        if holding_name and 'Plate' in holding_name and holding_name != 'Plate':
+            return self.drop_unwanted_item(
+                env, holding,
+                reason='鍋から出した中身を置く',
+                dynamic_obstacles=dynamic_obstacles,
+                allow_strict_override=True)
+
+        pot_loc, cooked = stuck_pot()
+        if pot_loc is None:
+            return (0, 0), '空ける鍋が見つかりません (完了)'
+
+        # 2. 空の皿を持っている -> 鍋へ
+        if holding_name == 'Plate':
+            if not cooked:
+                # 煮上がるまでは取り出せない。皿を持ったまま待たず、
+                # 呼び出し側が別の作業へ回せるよう待機として返す。
+                return (0, 0), '鍋が煮上がるのを待機中'
+            return (self.move_to(env, pot_loc, dynamic_obstacles=dynamic_obstacles),
+                    '鍋の中身を皿に取る')
+
+        # 3. 何も持っていない -> 皿を取りに行く
+        if not holding:
+            plates = self.reachable_positions(
+                env, self._filter_unheld_positions(env, env.get_pos_by_obj_gs(obj='Plate')))
+            tiles = self.reachable_positions(env, env.get_pos_by_obj_gs(gs='PlateTile'))
+            spots = list(plates) + [t for t in tiles if t not in plates]
+            if not spots:
+                return (0, 0), '皿が見つかりません'
+            action, _t, _adj = self._move_to_first_usable(
+                env, spots, dynamic_obstacles=dynamic_obstacles)
+            return action, '鍋を空けるための皿の取得'
+
+        # 4. 関係ない物を持っている -> 置いてくる
+        return self.drop_unwanted_item(
+            env, holding,
+            reason=f'鍋を空けるので {holding_name} を置く',
+            dynamic_obstacles=dynamic_obstacles,
+            allow_strict_override=True)
 
     def process_serve_juice_task(self, env, ingredients=None, assigned_cup=None,
                                  assigned_serve_loc=None, assigned_blender=None,

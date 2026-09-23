@@ -2861,6 +2861,11 @@ class CSPAgent:
                 task_name = f"serve_salad_{'_'.join(parts)}"
                 if getattr(self.task_agent, 'assigned_task_id', None) != tid or getattr(self.task_agent, 'assigned_counter', None) is None:
                     self.task_agent.assigned_counter = task.get('assigned_counter')
+            elif verb == 'clear_pot':
+                # 注文にない中身が入った鍋を空ける。置き場は使わない。
+                parts = dish_ingredients(obj)
+                task_name = f"clear_pot_{'_'.join(parts)}"
+                self.task_agent.assigned_counter = None
             elif verb == 'mix':
                 # ミキサーへ入れる材料は置き場に集めてあるので、chop/cook と
                 # 同じく assigned_counter を保持する。
@@ -3230,6 +3235,10 @@ class CSPAgent:
                     parts = dish_ingredients(obj)
                     task_name = f"serve_salad_{'_'.join(parts)}"
                     ta.assigned_counter = task.get('assigned_counter')
+                elif verb == 'clear_pot':
+                    # 注文にない中身が入った鍋を空ける。置き場は使わない。
+                    parts = dish_ingredients(obj)
+                    task_name = f"clear_pot_{'_'.join(parts)}"
                 elif verb == 'mix':
                     parts = dish_ingredients(obj)
                     task_name = f"mix_{'_'.join(parts)}"
@@ -3921,6 +3930,18 @@ class CSPAgent:
                 t['end_pos'] = delivery
                 t['fixed_res'] = ('pot', pot)
 
+            elif verb == 'clear_pot':
+                # 皿を取りに行き、鍋から取り出し、空いた台へ置く。
+                pots = resources['pots']
+                pot = pots[order_idx % len(pots)] if pots else default_start_pos
+                plate = self._pick_plate(env, resources, pot) or default_start_pos
+                free = [c for c in self._usable_counters(
+                            env, env.get_pos_by_obj_gs(gs='Counter'))
+                        if env.pos_obj.get(c) is None]
+                t['start_pos'] = plate
+                t['end_pos'] = free[0] if free else pot
+                t['fixed_res'] = ('pot', pot)
+
             elif verb == 'mix':
                 blenders = resources['blenders']
                 blender = blenders[order_idx % len(blenders)] if blenders else default_start_pos
@@ -4284,6 +4305,28 @@ class CSPAgent:
             same = [c for c in candidates
                     if self._components_touching(env, tuple(c)) & side] if side else []
             return get_nearest(start_pos, same or candidates)
+
+        if verb == 'clear_pot':
+            # 間違った中身の鍋を空ける。皿を取る -> 鍋から取り出す -> 空いた
+            # 台に置く。提供口へは運ばない(注文ではないので出せない)。
+            pots = resources['pots']
+            if not pots:
+                return None
+            pot_pos = pots[order_idx % len(pots)]
+            plate_pos = self._pick_plate(env, resources, pot_pos)
+            if plate_pos is None:
+                return None
+            counters = self._usable_counters(env, env.get_pos_by_obj_gs(gs='Counter'))
+            free = [c for c in counters if env.pos_obj.get(c) is None]
+            drop_pos = get_nearest(pot_pos, free) if free else None
+            if drop_pos is None:
+                return None
+            d1 = self.astar_distance(env, plate_pos, pot_pos)
+            d2 = self.astar_distance(env, pot_pos, drop_pos)
+            if d1 is None or d2 is None:
+                return None
+            # 皿を取る + 鍋から取り出す + 台に置く の3インタラクト
+            return int(d1 + d2 + INTERACT_FRAMES * 3)
 
         if verb == 'fetch':
             # 切ってある物を取りに行って、置き場まで運ぶだけ(切り直さない)。
@@ -5825,6 +5868,26 @@ class CSPAgent:
         # 「どの注文がその材料を取るか」の決定になっている)。
         # 返す並びは従来どおり注文の並び順にしたいので、いったん番号で受ける。
         built_by_idx = {}
+        # どの注文にも当てはまらない中身が入った鍋。間違えて入れると、鍋を
+        # 使う注文は永久に進められない。中身は追加も交換もできないので、
+        # 煮上がるのを待って皿に取り、空いた台へ置いて鍋を空けるしかない。
+        wanted_pot_dishes = set()
+        for _idx, _ot in enumerate(current_orders):
+            _name = getattr(_ot[0], 'full_name', '').lower()
+            if goal_dish_kind(_name) != KIND_SOUP:
+                continue
+            _ings = [i for i in ALL_INGREDIENTS if i in _name]
+            wanted_pot_dishes.add(tuple(sorted(i.capitalize() for i in _ings)))
+        stuck_pots = [ps for ps in pot_states
+                      if tuple(ps['names']) not in wanted_pot_dishes]
+        # 鍋を使う注文がまだ残っているときだけ片づける必要がある
+        soups_left = sum(1 for _idx, _ot in enumerate(current_orders)
+                         if goal_dish_kind(getattr(_ot[0], 'full_name', '').lower())
+                         == KIND_SOUP)
+        free_pots = max(0, len(pot_locs) - len(stuck_pots))
+        need_clear = stuck_pots and soups_left > free_pots
+        clear_pot_added = False
+
         for order_idx in self._claim_sequence(order_uids, claim_priority):
             order_tuple = current_orders[order_idx]
             goal = order_tuple[0]
@@ -6098,6 +6161,26 @@ class CSPAgent:
                         'res_candidates': [('blender', r) for r in resources['blenders']],
                         'assigned_counter': assigned_counter
                     })
+
+            if cook_needed and need_clear and not clear_pot_added:
+                # 鍋が塞がっている。煮上がりを待って皿に取り、空いた台へ置く。
+                # 「取り出す」工程は注文の材料とは無関係だが、この注文の cook の
+                # 前提なので、この注文の工程として持たせる(順序を付けやすい)。
+                stuck = stuck_pots[0]
+                stuck_name = '-'.join(sorted(n.lower() for n in stuck['names']))                     + SOUP_SUFFIX
+                dur_clear = self._task_duration_frames(
+                    env, 'clear_pot', stuck_name, order_idx, assigned_counter)
+                if dur_clear is not None:
+                    tasks.append({
+                        'id': ('clear_pot', stuck_name, order_uid),
+                        'verb': 'clear_pot', 'obj': stuck_name, 'order': order_uid,
+                        'slot_idx': order_idx,
+                        'display_order': display_order,
+                        'dur': dur_clear,
+                        'res_candidates': [('pot', r) for r in resources['pots']],
+                        'assigned_counter': assigned_counter,
+                    })
+                    clear_pot_added = True
 
             if cook_needed:
                 # 材料は置き場(assigned_counter)に集めてから鍋へ運ぶ。置き場を
@@ -6630,6 +6713,14 @@ class CSPAgent:
                 chops = [v for v in order_vars if v['task']['verb'] == 'chop']
                 for c in chops:
                     model.Add(starts[i] >= c['end'])
+                # 鍋に違う中身が入っているなら、空けてからでないと入れられない。
+                for c in [v for v in order_vars
+                          if v['task']['verb'] == 'clear_pot']:
+                    model.Add(starts[i] >= c['end'])
+            elif verb == 'clear_pot':
+                # 煮上がっていないと皿に取れない(環境の決まり)。いつ煮上がるかは
+                # 下の pot_ready で足す。ここでは他の工程との順序は付けない。
+                pass
             elif verb == 'mix':
                 # ミキサーに入れられるのは、フルーツを全部刻んでから。cook と同じ形。
                 order_vars = vars_by_order.get(t['order'], [])
@@ -6734,10 +6825,12 @@ class CSPAgent:
         # 後になることだけを求める。
         for i in range(num_tasks):
             t = tasks[i]
-            if t['verb'] not in ('serve', 'handover') or dish_kind_of(t['obj']) != KIND_SOUP:
+            if (t['verb'] not in ('serve', 'handover', 'clear_pot')
+                    or dish_kind_of(t['obj']) != KIND_SOUP):
                 continue
             order_vars = vars_by_order.get(t['order'], [])
-            if any(v['task']['verb'] == 'cook' for v in order_vars):
+            if (t['verb'] != 'clear_pot'
+                    and any(v['task']['verb'] == 'cook' for v in order_vars)):
                 continue
             key = tuple(sorted(p.capitalize() for p in dish_ingredients(t['obj'])))
             if key in pot_ready:
