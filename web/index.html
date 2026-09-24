@@ -160,6 +160,30 @@
      ボタンを押したつもりが画面が動いただけ、ということが起きる。
      ボタンは画面下に固定し、OS のジェスチャー領域(ホームバー)の分だけ
      持ち上げる。 */
+  /* ---- パソコンの画面 ----
+     指で触る端末とは作りを分ける。こちらはキーボードで操作するので、
+     画面の操作ボタンは出さず、盤面を画面の真ん中に置く。
+     スクロールさせない(下のほうが見切れていた)。 */
+  body:not(.compact) {
+    height: 100dvh; overflow: hidden; display: flex; flex-direction: column;
+    padding: 16px 24px;
+  }
+  body:not(.compact) #stage {
+    flex: 1; min-height: 0; justify-content: center; align-items: center;
+  }
+  /* 操作ボタンは出さない。設定はそのボタンの設定なので、こちらも出さない */
+  body:not(.compact) #pad, body:not(.compact) #gear { display: none; }
+  /* 操作の説明は、盤面の邪魔にならないよう右端へ小さく置く */
+  body:not(.compact) .keys {
+    position: fixed; right: 24px; top: 50%; transform: translateY(-50%);
+    width: 200px; margin: 0; text-align: left; line-height: 1.8;
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  .keys .k-title {
+    color: var(--text); font-weight: 600; font-size: 13px;
+    border-bottom: 1px solid var(--btn-line); padding-bottom: 4px;
+  }
+
   body.compact {
     height: 100dvh; overflow: hidden; display: flex; flex-direction: column;
     padding: calc(env(safe-area-inset-top) + 8px) 10px 0;
@@ -362,10 +386,11 @@
 </div>
 
 <div class="keys">
-  <kbd>↑</kbd> <kbd>↓</kbd> <kbd>←</kbd> <kbd>→</kbd> で移動 / 向いている先へインタラクト<br>
-  <kbd>Space</kbd> で向いている先に手を出す（拾う / 置く / 刻む）<br>
-  <kbd>Enter</kbd> でAIへの指示パネル（パネル内はカードをクリック / タップ）、<kbd>Esc</kbd> で閉じる<br>
-  画面下のボタンでも同じ操作ができます。ボタンの大きさや位置は「⚙ 設定」で変えられます
+  <div class="k-title">操作</div>
+  <div><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> または <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><br>
+    向きを変える / 進む</div>
+  <div><kbd>Space</kbd><br>向いている先に手を出す<br>（拾う / 置く / 刻む）</div>
+  <div><kbd>Enter</kbd> AIへの指示<br><kbd>Esc</kbd> 閉じる</div>
 </div>
 
 <div id="overlay"><div id="overlay-text"></div></div>
@@ -509,13 +534,11 @@
   function fit(cv, w, h) {
     if (cv.width !== w) cv.width = w;
     if (cv.height !== h) cv.height = h;
-    let k;
-    if (document.body.classList.contains('compact')) {
-      // 操作ボタンを置いた残りの高さに、縦横とも収める。
-      k = Math.min(MAX_SCALE, stage.clientWidth / w, stage.clientHeight / h);
-    } else {
-      k = Math.min(MAX_SCALE, (stage.clientWidth || document.body.clientWidth) / w);
-    }
+    // 残りの場所に、縦横とも収める。横だけで決めると、パソコンの画面で
+    // 下のほうが見切れていた。
+    const availW = stage.clientWidth || document.body.clientWidth;
+    const availH = stage.clientHeight || document.body.clientHeight;
+    let k = Math.min(MAX_SCALE, availW / w, availH / h);
     k = Math.max(k, 0.1);
     cv.style.width = Math.floor(w * k) + 'px';
     cv.style.height = Math.floor(h * k) + 'px';
@@ -523,6 +546,18 @@
   function fitAll() {
     fit(gameCv, baseW, baseH);
     if (!panelCv.classList.contains('hidden')) fit(panelCv, panelCv.width, panelCv.height);
+  }
+  // 盤面を置ける場所の大きさが変わったら、そのつど合わせ直す。
+  // 窓の大きさを変えたときだけでなく、指示の帯が出入りして高さが変わった
+  // ときにも効く(合わせ直さないと、盤面の下が見切れる)。
+  if (window.ResizeObserver) {
+    let last = '';
+    new ResizeObserver(() => {
+      const now = `${stage.clientWidth}x${stage.clientHeight}`;
+      if (now === last) return;      // 自分で大きさを変えた分で回り続けない
+      last = now;
+      fitAll();
+    }).observe(stage);
   }
 
   function applyMeta(msg) {
@@ -1941,16 +1976,20 @@
   // ---- 入力 ------------------------------------------------------------
   const KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
                         'Space', 'Enter', 'Escape']);
+  // WASD でも同じように動けるようにする。ここで矢印キーに読み替えるので、
+  // ここから先(送信・先読み・長押し)は矢印キーと同じ扱いになる。
+  const WASD = { KeyW: 'ArrowUp', KeyA: 'ArrowLeft', KeyS: 'ArrowDown', KeyD: 'ArrowRight' };
   window.addEventListener('keydown', (e) => {
-    if (!KEYS.has(e.code)) return;
+    const code = WASD[e.code] || e.code;
+    if (!KEYS.has(code)) return;
     e.preventDefault();   // 矢印/Space でのページスクロールを止める
     // 押しっぱなしは OS のキーリピートに任せず、こちらで一定の間隔にする
     // (実験条件をそろえるため。速さは入力の速さ n Hz と同じ)。
     if (e.repeat) return;
-    if (DIRS[e.code] || e.code === 'Space') { if (playing) holdStart(e.code); return; }
-    send({ type: 'key', code: e.code });
+    if (DIRS[code] || code === 'Space') { if (playing) holdStart(code); return; }
+    send({ type: 'key', code });
   });
-  window.addEventListener('keyup', (e) => { holdEnd(e.code); });
+  window.addEventListener('keyup', (e) => { holdEnd(WASD[e.code] || e.code); });
   window.addEventListener('blur', () => { [...held].forEach(holdEnd); });
 
   // マウス座標はサーバー側 Surface の座標へ戻して送る。
