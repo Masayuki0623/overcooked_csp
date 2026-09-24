@@ -114,6 +114,15 @@ INSTRUCTION_TIMINGS = (
 # 3 なら、連打しても最大 0.2 秒ぶんしか遅れて動き続けない。
 HUMAN_INPUT_BACKLOG = 3
 
+# 「使うボタンを離した」を、行動と同じ列に並べるための合図。
+#
+# 押した分は待ち行列に溜まり、1手ずつ消化される。離したことだけを別に
+# 扱うと、まだ処理していない「使う」が残っているのに押しっぱなしの印が
+# 先に消え、残りが新しい押し始めとして通ってしまう(実測: 切り終えた直後に
+# 離すと、取ったばかりの材料をもう一度台に置いた)。同じ列に並べれば、
+# 押した順・離した順のとおりに効く。
+HUMAN_INTERACT_RELEASE = 'interact_release'
+
 
 class GamePlay(Game):
     def __init__(self, env, replay: Replay, agent_set: AgentSetting, debug_mode: bool = False, human_agent_idx: int | None = 1, ai_agent_idx: int | None = 0, sc_2agent: bool = False, instruction_request_timing: str = INSTRUCTION_TIMING_FREE):
@@ -292,6 +301,46 @@ class GamePlay(Game):
         except Exception:
             return False
 
+    def _take_human_action(self):
+        """待ち行列から、この手で人が出す行動を1つ取り出す。
+
+        「離した」の合図も同じ列に並んでいる。合図に当たったらそこで
+        押しっぱなしの印を消し、行動ではないので次を取り出す。こうすると
+        押した順・離した順のとおりに効く。
+        """
+        while True:
+            with self._backlog_lock:
+                item = self._human_backlog.popleft() if self._human_backlog else None
+            if item is None:
+                return None
+            if item == HUMAN_INTERACT_RELEASE:
+                self.interact_held = False
+                self.interact_used = False
+                continue
+            self.human_inputs_done += 1
+            return item
+
+    def _gate_interact(self, agent, action_dict):
+        """その手の「使う」を通すか、この長押しでは見送るかを決める。
+
+        1回の長押しで「置く/取る」をするのは1度だけ。押しっぱなしのまま
+        何度も置いたり取ったりすると、置いた物をすぐ取り直してしまう。
+
+        返すのは (手を出したか, 出す前の持ち物)。
+        """
+        if agent is None:
+            return False, None
+        if tuple(action_dict.get(agent.name) or (0, 0)) != tuple(INTERACT):
+            return False, None
+        if not self.interact_held:
+            # ここが押し始め。この長押しではまだ手を出していない。
+            self.interact_held = True
+            self.interact_used = False
+        if self.interact_used:
+            action_dict[agent.name] = (0, 0)
+            return False, None
+        return True, getattr(agent.holding, 'full_name', None)
+
     def _hold_still_usable(self, agent, held_before, held_after):
         """押しっぱなしのまま、次の「使う」を続けてよいか。
 
@@ -392,34 +441,10 @@ class GamePlay(Game):
 
         elif event.type == pygame.KEYUP:
             if pygame.key.name(event.key) == "space":
-                # 離したら、まだ処理していない「使う」を整理する。
-                #
-                # 入力は1手ずつしか消化されないので、離した知らせだけが先に
-                # 届き、待ち行列に残った「使う」があとから新しい押し始めと
-                # して処理されていた(実測: 長押しで切って取ったあと、指を
-                # 離すと材料が台に戻る。切り終えた直後に離すと、取ってから
-                # もう一度置いてしまう)。
-                #
-                # 残すのは、その長押しでまだ一度も手を出していないときの
-                # 1つだけ。軽くたたいただけの操作を取りこぼさないため。
-                # それ以外は捨てる(離したあとに何度も手を出さない)。
-                keep_one = not self.interact_used
-                with self._backlog_lock:
-                    kept, dropped = [], 0
-                    for a in self._human_backlog:
-                        if tuple(a or (0, 0)) != tuple(INTERACT):
-                            kept.append(a)
-                        elif keep_one:
-                            kept.append(a)
-                            keep_one = False
-                        else:
-                            dropped += 1
-                    self._human_backlog.clear()
-                    self._human_backlog.extend(kept)
-                # 捨てた分も「処理した」と数える(端末側の先読みと合わせる)
-                self.human_inputs_done += dropped
-                self.interact_held = False
-                self.interact_used = False
+                # 離したことも行動と同じ列に流す。ここで印を消すと、まだ
+                # 処理していない「使う」が新しい押し始めとして通ってしまう。
+                self._q_env.put(
+                    ('Action', {"agent": "human", "action": HUMAN_INTERACT_RELEASE}))
 
         elif event.type == pygame.KEYDOWN:
             if event.key in KeyToTuple.keys():
@@ -434,10 +459,8 @@ class GamePlay(Game):
                     ('Action', {"agent": "human", "action": action}))
 
             if pygame.key.name(event.key) == "space":
-                # 押し始めなら、この長押しでの「置く/取る」をまだ使っていない。
-                if not self.interact_held:
-                    self.interact_held = True
-                    self.interact_used = False
+                # 押し始めかどうかは、行動を取り出すときに決める
+                # (押した順・離した順のとおりに効かせるため)。
                 # 向いている先に手を出す(拾う/置く/刻む/入れる)。
                 # 以前は「台の方向へ進む」が手を出すことを兼ねていたが、
                 # 長押しで歩けるようにしたので別のキーに分けた。
@@ -721,7 +744,14 @@ class GamePlay(Game):
                                 # 溜まりすぎて捨てる分も「処理した」と数える。
                                 # Web 版は、この数を見て端末側の先読みと実際の
                                 # 位置を合わせている(数え落とすとズレたままになる)。
-                                self.human_inputs_done += 1
+                                if human_backlog[0] == HUMAN_INTERACT_RELEASE:
+                                    # 捨てるのが「離した」の合図なら、ここで
+                                    # 効かせておく。落とすと押しっぱなしの印が
+                                    # 残ったままになり、次から手が出せなくなる。
+                                    self.interact_held = False
+                                    self.interact_used = False
+                                else:
+                                    self.human_inputs_done += 1
                             human_backlog.append(args['action'])
                     elif args['agent'] == "ai" and self.ai_agent_idx is not None:
                         action_dict[self.sim_agents[self.ai_agent_idx].name] = args['action']
@@ -751,24 +781,13 @@ class GamePlay(Game):
                 # 覚えておいて、そちらを「適用した行動」として知らせる。
                 ai_sent = {k: v for k, v in action_dict.items()}
                 self._translate_ai_actions(action_dict, idx_human)
-                if idx_human is not None and human_backlog:
-                    with self._backlog_lock:
-                        nxt = human_backlog.popleft() if human_backlog else None
-                    if nxt is not None:
-                        action_dict[self.sim_agents[idx_human].name] = nxt
-                        self.human_inputs_done += 1
-                # 長押し中に「置く/取る」を済ませていたら、離すまで手は出さない。
-                # 切る・混ぜるは持ち物が変わらないので、そのまま続けられる。
                 me = self.sim_agents[idx_human] if idx_human is not None else None
-                interact_applied = False
-                held_before = None
+                if me is not None:
+                    nxt = self._take_human_action()
+                    if nxt is not None:
+                        action_dict[me.name] = nxt
                 facing_before = tuple(getattr(me, 'facing', (0, 1))) if me else None
-                if me is not None and tuple(action_dict.get(me.name) or (0, 0)) == INTERACT:
-                    if self.interact_held and self.interact_used:
-                        action_dict[me.name] = (0, 0)
-                    else:
-                        interact_applied = True
-                        held_before = getattr(me.holding, 'full_name', None)
+                interact_applied, held_before = self._gate_interact(me, action_dict)
                 ad = {k: v if v is not None else (
                     0, 0) for k, v in action_dict.items()}
                 if self.debug_mode:
@@ -782,7 +801,7 @@ class GamePlay(Game):
                     # 向きを変えたら、また1回ぶん手を出せる。押しっぱなしで
                     # 別の台の方を向いたときに、いちいち離さなくてよい。
                     self.interact_used = False
-                if interact_applied and self.interact_held:
+                if interact_applied:
                     after = getattr(me.holding, 'full_name', None)
                     if not self._hold_still_usable(me, held_before, after):
                         self.interact_used = True
