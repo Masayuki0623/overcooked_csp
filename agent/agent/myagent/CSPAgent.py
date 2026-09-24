@@ -1969,6 +1969,30 @@ class CSPAgent:
 
         return 'carrying_item'
 
+    def _matches_pending_dish(self, env, parts, kind):
+        """その材料の組み合わせが、まだ残っている注文と一致するか。
+
+        「皿に刻んだ材料が乗っていれば完成品」と決めつけると、材料を1つ
+        だけ乗せた皿を完成したサラダと見なして提供口へ運んでしまう。
+        注文に無い物を出しても提供口は受け取ってしまい、皿ごと材料が
+        消えて作り直しになる(実測: バグ報告2件。ChoppedOnion-Plate と
+        ChoppedTomato-Plate を出してしまった)。
+        """
+        want = set(parts)
+        if not want:
+            return False
+        orders = []
+        if hasattr(env, 'order') and hasattr(env.order, 'current_orders'):
+            orders = env.order.current_orders or []
+        for order_tuple in orders:
+            goal = order_tuple[0] if order_tuple else None
+            name = str(getattr(goal, 'full_name', '')).lower()
+            if not name or goal_dish_kind(name) != kind:
+                continue
+            if {ing for ing in ALL_INGREDIENTS if ing in name} == want:
+                return True
+        return False
+
     def _get_carry_override_task(self, env, agent_idx, scheduled_task):
         agents = getattr(env, 'agents', [])
         if agent_idx >= len(agents):
@@ -2020,7 +2044,7 @@ class CSPAgent:
             mixed_parts = sorted(
                 part.replace('Mixed', '').lower()
                 for part in holding_name.split('-') if part.startswith('Mixed'))
-            if mixed_parts:
+            if mixed_parts and self._matches_pending_dish(env, mixed_parts, KIND_JUICE):
                 return finish_or_handover(
                     'serve_juice', f"{'-'.join(mixed_parts)}{JUICE_SUFFIX}", KIND_JUICE)
 
@@ -2035,8 +2059,12 @@ class CSPAgent:
                 chopped_parts = []
             if chopped_parts:
                 chopped_parts.sort()
-                return finish_or_handover(
-                    'serve_salad', f"{'-'.join(chopped_parts)}{SALAD_SUFFIX}", KIND_SALAD)
+                # 注文に無い組み合わせは完成品ではない。足りない材料を
+                # 足しに行くので、ここでは持ち物を理由に横取りしない。
+                if self._matches_pending_dish(env, chopped_parts, KIND_SALAD):
+                    return finish_or_handover(
+                        'serve_salad', f"{'-'.join(chopped_parts)}{SALAD_SUFFIX}",
+                        KIND_SALAD)
 
         chopped_combo_parts = []
         if 'Plate' not in holding_name and '-' in holding_name:

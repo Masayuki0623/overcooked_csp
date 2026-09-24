@@ -265,6 +265,7 @@ class OvercookedEnvironment(gym.Env):
                     'dish': name,
                     'time': round(float(self.current_time), 1),
                     'ok': ok,
+                    'by': getattr(event, 'playerA', None),
                 })
             if event.event not in self.all_events:
                 print("Invalid event detected: {}".format(event.event))
