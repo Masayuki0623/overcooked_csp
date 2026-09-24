@@ -39,6 +39,17 @@ MAP_SETTINGS = dict(
     exp_partition_veg=dict(level="exp_partition_veg", max_num_orders=3,),
     exp_bottleneck_veg=dict(level="exp_bottleneck_veg", max_num_orders=3,),
     exp_ring_veg=dict(level="exp_ring_veg", max_num_orders=3,),
+    # チュートリアル用。1人で遊ぶ小さい台所で、その回に使う材料と道具だけを
+    # 置いてある。時間制限は付けない(max_num_timesteps=0 で無制限)。
+    #   tutorial_salad : 切って皿に乗せて出す
+    #   tutorial_soup  : 切って鍋で煮て、皿に取って出す
+    #   tutorial_juice : 切ってミキサーで混ぜ、コップに注いで出す
+    tutorial_salad=dict(level="tutorial_salad", max_num_orders=2,
+                        max_num_timesteps=0, num_agents=1,),
+    tutorial_soup=dict(level="tutorial_soup", max_num_orders=2,
+                       max_num_timesteps=0, num_agents=1,),
+    tutorial_juice=dict(level="tutorial_juice", max_num_orders=2,
+                        max_num_timesteps=0, num_agents=1,),
 )
 
 if __name__ == '__main__':

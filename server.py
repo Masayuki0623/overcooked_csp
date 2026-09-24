@@ -116,6 +116,20 @@ RECIPE_CHOICES = [
     ('experiment1', '野菜のみ', 'サラダ2品 + スープ1品'),
     ('experiment2', '野菜 + フルーツ', 'サラダ + スープ + ジュース'),
 ]
+# チュートリアルの段取り。前から順に1つずつ遊んでもらう。
+#   最初の3つは1人用の小さい台所で、その回に使う材料と道具だけが置いてある。
+#   最後の1つだけ、本番と同じリングの地図で AI と一緒に遊ぶ(指示あり)。
+TUTORIAL_STEPS = [
+    {'key': 'salad', 'map': 'tutorial_salad', 'solo': True,
+     'title': 'サラダを作る', 'orders': 2},
+    {'key': 'soup', 'map': 'tutorial_soup', 'solo': True,
+     'title': 'スープを作る', 'orders': 2},
+    {'key': 'juice', 'map': 'tutorial_juice', 'solo': True,
+     'title': 'ジュースを作る', 'orders': 2},
+    {'key': 'ai', 'map': 'exp_ring', 'solo': False,
+     'title': 'AI と一緒に作る', 'orders': 3},
+]
+
 _JP_FOOD = {'Lettuce': 'レタス', 'Onion': '玉ねぎ', 'Tomato': 'トマト',
             'Apple': 'リンゴ', 'Orange': 'オレンジ', 'Banana': 'バナナ'}
 _JP_DISH = {'Salad': 'サラダ', 'Soup': 'スープ', 'Juice': 'ジュース'}
@@ -619,6 +633,46 @@ class WebGamePlay:
         参加者ID が入っているときは実験のセッション。地図とレシピは選ばせず、
         その参加者に割り当てた順番どおりの条件で遊ぶ。
         """
+        mode = str(choice.get('mode') or '').strip()
+
+        if mode == 'tutorial':
+            # 順に1つずつ。最後の回だけ AI と一緒に、指示ありで遊ぶ。
+            try:
+                step = int(choice.get('step') or 0)
+            except (TypeError, ValueError):
+                step = 0
+            step = max(0, min(step, len(TUTORIAL_STEPS) - 1))
+            spec = TUTORIAL_STEPS[step]
+            out = {'mode': 'tutorial', 'step': step, 'map': spec['map'],
+                   'preset': None, 'case': None, 'recipes': None,
+                   'picked_by': 'tutorial', 'solo': spec['solo'],
+                   'instruction': INSTRUCTION_TIMING_NO_INSTRUCTION,
+                   'skip_budget': None}
+            if not spec['solo']:
+                # 本番と同じ形(指示を1回受け取ってから始める)。効き方は真ん中。
+                preset = EXPERIMENT_MAP_PRESETS[spec['map']]
+                sets = order_sets_for(preset)
+                cases = experiment_case_indices(preset) or list(range(len(sets)))
+                case = random.choice(cases)
+                out.update({'preset': preset, 'case': case,
+                            'recipes': list(sets[case]),
+                            'instruction': INSTRUCTION_TIMING_ONCE_AT_START,
+                            'skip_budget': SKIP_BUDGETS[len(SKIP_BUDGETS) // 2]})
+            return out
+
+        if mode == 'practice':
+            # 本番と同じ条件を、毎回くじ引きで決める。設定は選ばせない。
+            map_name = random.choice([m for m, _, _ in MAP_CHOICES])
+            preset = EXPERIMENT_MAP_PRESETS[map_name]
+            sets = order_sets_for(preset)
+            cases = experiment_case_indices(preset) or list(range(len(sets)))
+            case = random.choice(cases)
+            return {'mode': 'practice', 'map': map_name, 'preset': preset,
+                    'case': case, 'recipes': list(sets[case]),
+                    'picked_by': 'practice',
+                    'instruction': INSTRUCTION_TIMING_ONCE_AT_START,
+                    'skip_budget': random.choice(list(SKIP_BUDGETS))}
+
         participant = str(choice.get('participant') or '').strip()
         if participant:
             rec = assignment_for(participant)
@@ -857,9 +911,12 @@ class WebGamePlay:
         return {
             'instruction': sel.get('instruction'),
             'skip_budget': sel.get('skip_budget'),
-            'map': dict((m, l) for m, l, _ in MAP_CHOICES).get(sel.get('map')),
+            'mode': sel.get('mode'),
+            'step': sel.get('step'),
+            'map': (dict((m, l) for m, l, _ in MAP_CHOICES).get(sel.get('map'))
+                    or sel.get('map')),
             'preset': dict((r, l) for r, l, _ in RECIPE_CHOICES).get(sel.get('preset')),
-            'orders': [recipe_label(r) for r in sel.get('recipes', [])],
+            'orders': [recipe_label(r) for r in (sel.get('recipes') or [])],
         }
 
     def instruction_record(self):
@@ -1122,7 +1179,11 @@ class WebGamePlay:
         sel = self.selection
         map_name = sel['map'] if sel else a.map
         orders = sel['recipes'] if sel else a.orders
-        if sel and not uses_fruit(orders):
+        if sel and sel.get('mode') == 'tutorial' and sel.get('solo'):
+            # チュートリアルの1人用の地図は、それ自体が注文まで持っている。
+            # 野菜だけの版へ差し替える必要も無い。
+            pass
+        elif sel and not uses_fruit(orders):
             # 野菜だけの注文では、フルーツ・ミキサー・コップのない版の地図を使う
             map_name = f'{map_name}_veg'
         # 実験のセッションでは、指示は開始直後に1回だけ(見送り不可)。
@@ -1139,6 +1200,11 @@ class WebGamePlay:
             orders, a.order_seed,
             timing,
         )
+        if sel and not sel.get('recipes'):
+            # チュートリアルの1人用の地図は、注文を地図そのものが持っている。
+            # 画面に出すために、実際に出た注文をここで控える。
+            sel['recipes'] = [type(r).__name__
+                              for r in (getattr(self.env, 'recipes', None) or [])]
         if sel:
             # 何を選んで遊んだかをリプレイにも残す
             self.replay['web_selection'] = dict(sel)
@@ -1785,6 +1851,15 @@ async def bug(req: Request):
     return JSONResponse({'ok': True, **saved})
 
 
+@app.get('/api/tutorial')
+async def tutorial():
+    """チュートリアルの段取り。画面はこれを見て順番と見出しを出す。"""
+    return JSONResponse({'ok': True, 'steps': [
+        {'key': s['key'], 'title': s['title'], 'solo': s['solo'],
+         'orders': s['orders']}
+        for s in TUTORIAL_STEPS]})
+
+
 @app.get('/api/assignment')
 async def assignment(participant: str = ''):
     """参加者に割り当てた条件の並びと、次のセッション番号。"""
@@ -1937,6 +2012,7 @@ async def ws(sock: WebSocket):
                 if session.player is not token:
                     session.try_acquire(token)
                 session.start(token, {
+                    'mode': msg.get('mode'), 'step': msg.get('step'),
                     'map': msg.get('map'), 'preset': msg.get('preset'),
                     'case': msg.get('case'),
                     'instruction': msg.get('instruction'),

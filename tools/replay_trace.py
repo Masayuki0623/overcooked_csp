@@ -52,9 +52,11 @@ def load(path):
 def rebuild(sel):
     """その回と同じ地図・同じ注文で環境を作り直す。"""
     name = sel['map']
-    # フルーツを使わない回は、器具を外した版の地図で遊んでいる
-    if not any(f in r for r in sel.get('recipes', [])
-               for f in ('Apple', 'Orange', 'Banana', 'Juice')):
+    # フルーツを使わない回は、器具を外した版の地図で遊んでいる。
+    # チュートリアルの地図は最初から必要な物しか置いていないので、そのまま。
+    if (not name.startswith('tutorial_')
+            and not any(f in r for r in sel.get('recipes', [])
+                        for f in ('Apple', 'Orange', 'Banana', 'Juice'))):
         name = f"{name}_veg"
     kw = dict(MAP_SETTINGS[name])
     kw['order_recipes'] = tuple(sel['recipes'])

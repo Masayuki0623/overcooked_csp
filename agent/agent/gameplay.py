@@ -649,7 +649,8 @@ class GamePlay(Game):
                      time=info['current_time'],
                      chg_grid=info['chg_grid'])
         self._latest_env_state = dcopy(e)
-        self._q_ai.put_nowait(('Env', {"EnvState": e}))
+        if self.ai is not None:
+            self._q_ai.put_nowait(('Env', {"EnvState": e}))
 
         while True:
             if getattr(self, '_quit_requested', False):
@@ -761,7 +762,9 @@ class GamePlay(Game):
                 for name, before in ai_sent.items():
                     if before is not None and name in applied:
                         applied[name] = before
-                self._q_ai.put(('Env', {"EnvState": dcopy(e), "applied_actions": applied}))
+                if self.ai is not None:
+                    # 相方が居ないときは誰も取り出さない。溜め続けないよう送らない。
+                    self._q_ai.put(('Env', {"EnvState": dcopy(e), "applied_actions": applied}))
                 action_dict = {agent.name: None for agent in self.sim_agents}
 
             # 描画は step の直後、sleep より前に行うこと。
@@ -1061,10 +1064,12 @@ class GamePlay(Game):
             exit()
 
         thread_env = threading.Thread(target=self._run_env, daemon=True)
-        thread_ai = threading.Thread(target=self._run_ai, daemon=True)
         # thread_listen = threading.Thread(target=self._run_listen, daemon=True)
         thread_env.start()
-        thread_ai.start()
+        # 1人だけの地図(チュートリアル)では相方が居ない。AI の輪は回さない。
+        if self.ai is not None:
+            thread_ai = threading.Thread(target=self._run_ai, daemon=True)
+            thread_ai.start()
         # thread_listen.start()
 
         try:

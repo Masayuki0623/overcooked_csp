@@ -1,5 +1,6 @@
 from agent.mind.agent import AgentSetting, get_agent
-from agent.gameplay import GamePlay, INSTRUCTION_TIMINGS, INSTRUCTION_TIMING_FREE
+from agent.gameplay import (GamePlay, INSTRUCTION_TIMINGS, INSTRUCTION_TIMING_FREE,
+                            INSTRUCTION_TIMING_NO_INSTRUCTION)
 
 from gym_cooking.utils.gui import *
 from gym_cooking.utils.replay import Replay
@@ -188,7 +189,17 @@ def init_env_replay(map_name, agent0_name, agent1_name, task_name=None, no_resch
 
     use_two_agent_mode = bool(arglist.sc_2agent)
 
-    if agent1_name == "CSP":
+    # 1人だけの地図(チュートリアル)では相方が居ない。AI を作らず、指示も
+    # 出さない。AI の席が無い盤面に AI を割り当てると、居ないエージェントへ
+    # 行動を送ることになって落ちる。
+    solo = len(env.sim_agents) < 2
+
+    if solo:
+        ai = None
+        ai_idx = None
+        human_idx = 0
+        instruction_request_timing = INSTRUCTION_TIMING_NO_INSTRUCTION
+    elif agent1_name == "CSP":
         if agent0_name == "choponly":
             chop_agent = ChopOnlyAgent(agent_set.speed, replay)
             csp_agent = CSPAgent(agent_set.speed, replay, no_reschedule=no_reschedule, sc_2agent=use_two_agent_mode, skip_budget=int(arglist.deadline) if arglist.deadline is not None else None)
@@ -263,8 +274,9 @@ def init_env_replay(map_name, agent0_name, agent1_name, task_name=None, no_resch
     # AI が毎フレーム動けなくなる。
     if hasattr(ai, 'debug_counter_trace'):
         ai.debug_counter_trace = debug_mode
-    for task_agent in _iter_task_agents(ai):
-        task_agent.debug_trace = debug_mode
+    if ai is not None:
+        for task_agent in _iter_task_agents(ai):
+            task_agent.debug_trace = debug_mode
     replay['set_map'] = deepcopy(map_set)
     replay['set_agent'] = deepcopy(agent_set)
     replay['order_rand'] = deepcopy(env.order_scheduler.rand_recipe_list)

@@ -198,6 +198,26 @@
   }
   #overlay button:disabled { opacity: .55; }
   #overlay .big { font-size: 20px; font-weight: 600; margin-bottom: 10px; }
+  /* ---- 最初の選択(チュートリアル/練習/実験) ---- */
+  .modes { display: flex; flex-direction: column; gap: 10px; margin: 14px 0 4px; }
+  .modes button {
+    display: block; width: 100%; text-align: left; padding: 12px 14px;
+    font: inherit; color: var(--text); background: var(--btn-bg);
+    border: 1px solid var(--btn-line); border-radius: 10px; cursor: pointer;
+  }
+  .modes button:hover { background: #333c48; }
+  .modes .name { font-size: 16px; font-weight: 600; }
+  .modes .why { font-size: 13px; color: var(--muted); margin-top: 4px; line-height: 1.6; }
+  /* ---- レシピ表 ---- */
+  .recipe { display: flex; flex-wrap: wrap; justify-content: center;
+            align-items: flex-start; gap: 4px; margin: 14px 0; }
+  .recipe .step { width: 84px; text-align: center; }
+  .recipe .step img { width: 44px; height: 44px; image-rendering: pixelated; }
+  .recipe .step .cap { font-size: 11.5px; color: var(--muted); line-height: 1.5;
+                       margin-top: 4px; }
+  .recipe .arrow { align-self: center; color: var(--muted); font-size: 18px;
+                   padding-bottom: 18px; }
+  .dishes { font-size: 13.5px; color: var(--text); line-height: 1.9; margin: 6px 0 2px; }
   #overlay .sub { color: var(--muted); font-size: 14px; line-height: 1.8; }
   #overlay .count { font-size: 40px; font-weight: 700; margin: 14px 0 4px; }
   #overlay button, #settings button {
@@ -758,7 +778,9 @@
     const b = document.getElementById('start');
     if (b) {
       b.disabled = !spritesAllLoaded;
-      b.textContent = spritesAllLoaded ? 'スタート'
+      // 画面ごとに呼び名が違う(チュートリアルは「はじめる」)。
+      // 読み込みが終わったら、その画面の呼び名に戻す。
+      b.textContent = spritesAllLoaded ? (b.dataset.label || 'スタート')
         : `画像を読み込み中 ${spriteDone}/${spriteTotal || '?'}`;
     }
     const note = document.getElementById('dl-note');
@@ -1136,7 +1158,9 @@
       .join('');
 
     // 実験の参加者は、地図もレシピも選ばない(割り当てどおり)。
-    const experiment = !!participantId;
+    // 練習も条件はくじ引きなので、設定をいじる画面はもう出さない。
+    // 動作確認のときだけ ?dev=1 で従来の選択画面を出す。
+    const experiment = !!participantId || !DEV;
     const idBox =
       '<div class="pick"><div class="lab">参加者ID(実験のときだけ入れてください)</div>' +
       `<input type="text" id="pid" value="${esc(participantId)}" placeholder="例: p01" ` +
@@ -1172,9 +1196,13 @@
             `class="${Number(pick.skip_budget) === b ? 'on' : ''}">${b}</button>`).join('') +
           `</div><div class="hint">${esc(SKIP_BUDGET_DESC[String(pick.skip_budget)] || '')}` +
           '</div></div>' : '')) +
-      '<div class="go"><button class="primary" id="start" disabled>スタート</button>' +
+      '<div class="go"><button class="primary" id="start" disabled>スタート</button> ' +
+      '<button id="pick-back">最初に戻る</button>' +
       '<div class="sub" id="dl-note" style="margin-top:8px"></div></div>' +
       '</div>');
+    document.getElementById('pick-back').addEventListener('click', () => {
+      setMode(''); renderModePick();
+    });
 
     const pid = document.getElementById('pid');
     const applyPid = () => {
@@ -1275,7 +1303,147 @@
     tick();
   }
 
+  // ---- 最初の選択とチュートリアル ----------------------------------
+  // 遊び方は3つ。どれを選んだかと、チュートリアルの何番目まで進んだかは
+  // 読み込み直しても残す(途中で画面を閉じても続きから戻れるように)。
+  const MODE_STORE = 'overcooked-mode-v1';
+  const STEP_STORE = 'overcooked-tutorial-step-v1';
+  const DEV = new URLSearchParams(location.search).has('dev');
+  let mode = '';
+  let tutorialStep = 0;
+  try {
+    mode = sessionStorage.getItem(MODE_STORE) || '';
+    tutorialStep = Number(sessionStorage.getItem(STEP_STORE) || 0) || 0;
+  } catch (e) {}
+  function setMode(v) {
+    mode = v;
+    try { sessionStorage.setItem(MODE_STORE, v); } catch (e) {}
+  }
+  function setStep(n) {
+    tutorialStep = n;
+    try { sessionStorage.setItem(STEP_STORE, String(n)); } catch (e) {}
+  }
+
+  // レシピ表。本家のレシピカードと同じで、材料から提供までを絵で並べる。
+  // 絵はゲームで使っているものをそのまま使う(遊び始めて迷わないように)。
+  const G = (n) => `/graphics/${n}.png`;
+  const TUTORIALS = [
+    { key: 'salad', title: 'サラダ',
+      lead: '切った野菜を皿に乗せて出します。火は使いません。',
+      dishes: ['玉ねぎ・トマトのサラダ', 'トマト・レタスのサラダ'],
+      steps: [
+        [G('FreshOnion'), '材料を取る'],
+        [G('cutboard'), 'まな板に置いて、<br>もう一度使うで切る'],
+        [G('ChoppedOnion-ChoppedTomato'), '切った材料を<br>重ねる'],
+        [G('PlateTile'), '皿置き場で<br>皿に乗せる'],
+        [G('delivery'), '提供口へ運ぶ'],
+      ] },
+    { key: 'soup', title: 'スープ',
+      lead: '切った野菜を鍋で煮てから、皿に取って出します。',
+      dishes: ['玉ねぎ・レタスのスープ', 'トマト・レタスのスープ'],
+      steps: [
+        [G('cutboard'), '材料を切る'],
+        [G('pot'), '鍋に入れる<br>(2つとも)'],
+        [G('CookedLettuce-CookedOnion'), '煮えるまで待つ'],
+        [G('PlateTile'), '空の皿を持って<br>鍋から取る'],
+        [G('delivery'), '提供口へ運ぶ'],
+      ] },
+    { key: 'juice', title: 'ジュース',
+      lead: '切った果物をミキサーで混ぜ、コップに注いで出します。',
+      dishes: ['リンゴ・オレンジのジュース', 'バナナ・オレンジのジュース'],
+      steps: [
+        [G('cutboard'), '果物を切る'],
+        [G('blender'), 'ミキサーに入れ、<br>手ぶらで何度も使う'],
+        [G('MixedApple-MixedOrange'), '混ざるまで回す'],
+        [G('CupTile'), '空のコップを持って<br>ミキサーから注ぐ'],
+        [G('delivery'), '提供口へ運ぶ'],
+      ] },
+    { key: 'ai', title: 'AI と一緒に',
+      lead: 'ここからは本番と同じです。AI が相方として一緒に料理します。' +
+            '<br>始まる前に、AI にやってほしいことを1つだけ選べます。',
+      dishes: ['注文は3つ。サラダ・スープ・ジュースが混ざります'],
+      steps: [
+        [G('agent-blue-front'), 'あなた'],
+        [G('agent-magenta-front'), 'AI'],
+        [G('cutboard'), '手分けして作る'],
+        [G('delivery'), '3品とも出せたら<br>終わり'],
+      ] },
+  ];
+
+  function renderModePick() {
+    const item = (id, name, why) =>
+      `<button type="button" data-mode="${id}">` +
+      `<div class="name">${name}</div><div class="why">${why}</div></button>`;
+    showOverlay(
+      '<div class="stage-pick">' +
+      '<div class="big">どれをやりますか</div>' +
+      '<div class="modes">' +
+      item('tutorial', 'チュートリアル',
+           'はじめての人はこちら。サラダ → スープ → ジュースの順に<br>' +
+           '1人で作り方を覚えてから、AI と一緒に遊びます。') +
+      item('practice', '練習',
+           '本番と同じ条件で、好きなだけ練習できます。<br>' +
+           '地図も注文も毎回くじ引きです。記録は残りません。') +
+      item('experiment', '実験に参加',
+           '参加者IDを入れて、決められた順番で遊びます。<br>' +
+           '1回ごとにアンケートがあります。') +
+      '</div></div>');
+    el.overlayText.querySelectorAll('.modes button').forEach((b) => {
+      b.addEventListener('click', () => {
+        setMode(b.dataset.mode);
+        if (b.dataset.mode === 'tutorial') { setStep(0); showTutorialCard(); }
+        else if (b.dataset.mode === 'practice') startPractice();
+        else showStart();
+      });
+    });
+  }
+
+  function showTutorialCard() {
+    const t = TUTORIALS[Math.min(tutorialStep, TUTORIALS.length - 1)];
+    const steps = t.steps.map(([src, cap]) =>
+      `<div class="step"><img src="${src}" alt=""><div class="cap">${cap}</div></div>`)
+      .join('<div class="arrow">→</div>');
+    showOverlay(
+      '<div class="stage-pick">' +
+      `<div class="big">${tutorialStep + 1} / ${TUTORIALS.length}　${t.title}</div>` +
+      `<div class="sub">${t.lead}</div>` +
+      `<div class="recipe">${steps}</div>` +
+      `<div class="dishes">${t.dishes.map((d) => '・' + esc(d)).join('<br>')}</div>` +
+      '<div class="go"><button class="primary" id="start" data-label="はじめる" ' +
+      'disabled>はじめる</button> ' +
+      '<button id="tut-quit">やめる</button></div></div>');
+    document.getElementById('tut-quit').addEventListener('click', () => {
+      setMode(''); renderModePick();
+    });
+    updateStartButton();
+    document.getElementById('start').addEventListener('click', () => {
+      if (!spritesAllLoaded) return;
+      send({ type: 'start', mode: 'tutorial', step: tutorialStep });
+      showOverlay('<div class="big">準備しています</div><div class="sub">数秒かかります</div>');
+    });
+  }
+
+  function startPractice() {
+    optionsReady.then(() => whenSpritesLoaded(() => {
+      send({ type: 'start', mode: 'practice' });
+      showOverlay('<div class="big">準備しています</div><div class="sub">数秒かかります</div>');
+    }));
+  }
+
   function showStart() {
+    if (!mode && !DEV) { renderModePick(); return; }
+    if (mode === 'tutorial') { showTutorialCard(); return; }
+    if (mode === 'practice') {
+      showOverlay('<div class="stage-pick"><div class="big">練習</div>' +
+        '<div class="sub">本番と同じ条件で遊びます。地図も注文も毎回くじ引きです。</div>' +
+        '<div class="go"><button class="primary" id="prac-go">はじめる</button> ' +
+        '<button id="prac-back">最初に戻る</button></div></div>');
+      document.getElementById('prac-go').addEventListener('click', startPractice);
+      document.getElementById('prac-back').addEventListener('click', () => {
+        setMode(''); renderModePick();
+      });
+      return;
+    }
     if (participantId && !assignment) { loadAssignment(); }
     if (options) { renderPick(); return; }
     showOverlay('<div class="big">読み込み中...</div>');
@@ -1384,6 +1552,16 @@
           showOverlay('<div class="big">ゲームが途中で終わりました</div>' + summary +
                       '<div class="sub">この回は数えません。もう一度同じ条件で遊びます。</div>' +
                       '<button onclick="location.reload()">やり直す</button>');
+        } else if (mode === 'tutorial') {
+          showTutorialResult(msg.result, summary);
+        } else if (mode === 'practice') {
+          showOverlay('<div class="big">練習おしまい</div>' + summary +
+                      '<div class="go"><button class="primary" id="again">もう一度練習する</button> ' +
+                      '<button id="to-top">最初に戻る</button></div>');
+          document.getElementById('again').addEventListener('click', startPractice);
+          document.getElementById('to-top').addEventListener('click', () => {
+            setMode(''); renderModePick();
+          });
         } else {
           showOverlay('<div class="big">ゲーム終了</div>' + summary +
                       '<button onclick="location.reload()">もう一度遊ぶ</button>');
@@ -1391,6 +1569,40 @@
       }
     }
   };
+
+  // チュートリアルの1段階が終わったあと。途中で切れた回は数えず、
+  // 同じ段階をもう一度。最後まで行ったら最初の選択へ戻す。
+  function showTutorialResult(result, summary) {
+    if (result.aborted) {
+      showOverlay('<div class="big">途中で終わりました</div>' + summary +
+                  '<div class="go"><button class="primary" id="tut-next">' +
+                  'もう一度やる</button></div>');
+      document.getElementById('tut-next').addEventListener('click', showTutorialCard);
+      return;
+    }
+    const last = tutorialStep >= TUTORIALS.length - 1;
+    if (last) {
+      setStep(0);
+      setMode('');
+      showOverlay('<div class="big">チュートリアルは終わりです</div>' + summary +
+                  '<div class="sub">おつかれさまでした。<br>' +
+                  '続けて練習するか、実験に進んでください。</div>' +
+                  '<div class="go"><button class="primary" id="tut-next">' +
+                  '最初に戻る</button></div>');
+      document.getElementById('tut-next').addEventListener('click', renderModePick);
+      return;
+    }
+    const done = TUTORIALS[tutorialStep].title;
+    setStep(tutorialStep + 1);
+    showOverlay(`<div class="big">${done}はここまで</div>` + summary +
+                '<div class="go"><button class="primary" id="tut-next">' +
+                `次へ (${TUTORIALS[tutorialStep].title})</button> ` +
+                '<button id="tut-stop">やめる</button></div>');
+    document.getElementById('tut-next').addEventListener('click', showTutorialCard);
+    document.getElementById('tut-stop').addEventListener('click', () => {
+      setMode(''); renderModePick();
+    });
+  }
 
   // ---- バグの報告 --------------------------------------------------------
   // 遊んでいる最中に様子がおかしかったら、その場で書いて残してもらう。
