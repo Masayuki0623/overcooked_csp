@@ -3574,6 +3574,27 @@ class CSPAgent:
                 return False       # この人だけで刻める
         return True
 
+    def _raw_ingredient_within_reach(self, env, ing_lower, comp):
+        """その側の手の届く場所に、まだ切っていないその材料が置いてあるか。
+
+        供給口が向こう側にしか無くても、相手が台まで運んできてくれたなら
+        こちらで刻める。供給口だけを見ていると、目の前に材料があっても
+        「自分には刻めない材料」と見なして手を付けない。
+        """
+        if comp is None:
+            return False
+        cap = ing_lower.capitalize()
+        names = (f'Fresh{cap}', f'Chopping{cap}')
+        for pos, obj in env.pos_obj.items():
+            if obj is None or getattr(obj, 'is_held', False):
+                continue
+            name = getattr(obj, 'full_name', '') or ''
+            if not any(n in name for n in names):
+                continue
+            if comp in self._components_touching(env, tuple(pos)):
+                return True
+        return False
+
     def _usable_counters(self, env, counters):
         """隣に立てる床マスがあるカウンターだけを返す。
 
@@ -3717,7 +3738,9 @@ class CSPAgent:
             comp = resources.get('component')
             if comp is not None:
                 tiles = env.get_pos_by_obj_gs(gs=INGREDIENT_TILE.get(obj, ""))
-                if not any(comp in self._components_touching(env, tuple(q)) for q in tiles):
+                if (not any(comp in self._components_touching(env, tuple(q))
+                            for q in tiles)
+                        and not self._raw_ingredient_within_reach(env, obj, comp)):
                     return False
         return True
 
@@ -3876,6 +3899,9 @@ class CSPAgent:
                     base_name = raw_base_name(world_obj)
                     if base_name is not None and base_name.lower() == obj:
                         raw_candidates.append(pos)
+                # 向こう側に置かれた材料を起点にすると経路が引けない。
+                # 担当者の手の届くものだけを見る。
+                raw_candidates = own_side(raw_candidates)
 
                 if raw_candidates:
                     ing_pos = self._nearest_by_path(env, default_start_pos, raw_candidates) or get_nearest(default_start_pos, raw_candidates)
@@ -4173,6 +4199,35 @@ class CSPAgent:
             self._human_prediction_doubt = 0
             self._mark_reschedule_needed('human_prediction_missed_by_cost')
 
+    def _handed_over_to_me(self, env, task):
+        """相手が運んできてくれて、こちら側で刻める状態になった工程か。
+
+        仕切りのある地図では、供給口が片側にしか無い材料がある。共有台に
+        その材料を置くのは「そちらで刻んで」という合図なので、置かれた
+        時点でこちらの仕事になる。相手の仕事のままにすると、AI は目の前の
+        材料を見ながら待ち続ける(実測: 共有台に置かれた生のバナナが
+        最後まで刻まれずに残った)。
+
+        相手がまだ手に持っている間は、自分で刻むつもりかもしれないので
+        横取りしない(手の中の物は数えない)。
+        """
+        if task.get('verb') != 'chop':
+            return False
+        if not self._map_is_partitioned(env):
+            return False
+        my_comp = self._agent_component(env, self.own_agent_idx)
+        if my_comp is None:
+            return False
+        obj = str(task.get('obj') or '')
+        tiles = env.get_pos_by_obj_gs(gs=INGREDIENT_TILE.get(obj, ""))
+        if any(my_comp in self._components_touching(env, tuple(q)) for q in tiles):
+            # もともと自分の側で取れる材料。運んでもらった物ではない。
+            return False
+        my_res = self._resources_for_agent(env, self.own_agent_idx)
+        if not my_res.get('cutboards'):
+            return False
+        return self._raw_ingredient_within_reach(env, obj, my_comp)
+
     def _predict_human_current_task(self, env, tasks, human_pos):
         """残りタスクの中から「人間がいま手をつけているタスク」を推測する。
 
@@ -4182,6 +4237,13 @@ class CSPAgent:
         持ち物から分からなければ、既存の貪欲予測(人間は自分の位置から
         一番早く終わるタスクを取る)を1件だけ使う。
         """
+        if not tasks:
+            return None
+
+        # 相手が共有台まで運んできてくれた材料を刻む工程は、こちらの仕事。
+        # 置いた本人がもう一度拾って刻むと見なすと、AI はその工程を相手の
+        # ものとして待ち続け、目の前の材料に手を付けない。
+        tasks = [t for t in tasks if not self._handed_over_to_me(env, t)]
         if not tasks:
             return None
 
