@@ -1439,12 +1439,37 @@
     updateStartButton();
     document.getElementById('start').addEventListener('click', () => {
       if (!spritesAllLoaded) return;
+      resetForNewGame();
       send({ type: 'start', mode: 'tutorial', step: tutorialStep });
       showOverlay('<div class="big">準備しています</div><div class="sub">数秒かかります</div>');
     });
   }
 
+  // 1回ぶんの状態を、次のゲームのために戻す。
+  //
+  // 実験のセッションは毎回ページごと読み込み直すので、この手当てが要らない。
+  // チュートリアルと練習は読み込み直さずに次を始めるため、前の回の印が
+  // 残っていると先へ進めなくなる(実測: サラダが終わってスープを始めると
+  // 「盤面を描いています」のまま固まった。数え始めたかどうかの印が立った
+  // ままで、カウントダウンが二度と始まらなかった)。
+  function resetForNewGame() {
+    settled = false;
+    started = false;
+    reporting = false;
+    playing = false;
+    boardDrawn = false;
+    boardWaiters.length = 0;
+    countdownStarted = false;
+    countdownRan = false;
+    instructDone = false;
+    instructShown = false;
+    needInstruction = false;
+    hideInstruct();
+    cancelCountdown();
+  }
+
   function startPractice() {
+    resetForNewGame();
     optionsReady.then(() => whenSpritesLoaded(() => {
       send({ type: 'start', mode: 'practice' });
       showOverlay('<div class="big">準備しています</div><div class="sub">数秒かかります</div>');
