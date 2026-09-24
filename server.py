@@ -710,7 +710,7 @@ class WebGamePlay:
                       'free_rank', 'bound_rank',
                       'served', 'failed', 'completed',
                       'makespan_s', 'serve_times_s', 'serve_dishes', 'misserved',
-                      'aborted', 'game_id']
+                      'aborted', 'discard_reason', 'accepted', 'game_id']
 
     def _log_session(self):
         """実験のセッションを results/web_sessions.csv に1行ずつ残す。
@@ -725,6 +725,8 @@ class WebGamePlay:
         env = self.env
         # 注文に合っていた提供だけを「出せた」と数える(注文にない皿も
         # 提供口には置けてしまうため)。
+        reason = getattr(self, 'discard_reason', '') or (
+            'quit' if res.get('aborted') else '')
         deliveries = [d for d in (getattr(env, 'delivery_log', None) or [])
                       if d.get('ok', True)]
         misserved = len([d for d in (getattr(env, 'delivery_log', None) or [])
@@ -745,10 +747,16 @@ class WebGamePlay:
             'serve_dishes': '|'.join(d['dish'] for d in deliveries),
             # 注文に無い物を提供口へ出してしまった回数(材料の無駄)
             'misserved': misserved,
-            'aborted': int(bool(res.get('aborted'))), 'game_id': self.game_id,
+            'aborted': int(bool(res.get('aborted'))),
+            # 正式な記録として数える回かどうか。バグ報告の出た回と、
+            # 途中で抜けた回は外す。やり直した回が正式な1回になる。
+            'discard_reason': reason,
+            'accepted': int(not reason),
+            'game_id': self.game_id,
         })
-        if not res.get('aborted'):
-            # 最後までやったセッションだけ数える(途中で切れた回はやり直し)
+        if not reason:
+            # 正式に受理した回だけ数える。バグ報告の出た回と途中で抜けた回は
+            # 同じ条件でやり直しになり、やり直した回が正式な1回になる。
             note_session_done(sel['participant'])
 
     def save_bug_report(self, message):
@@ -1185,6 +1193,9 @@ class WebGamePlay:
             self._aborted = False
             self.timeline = []
             self.disconnect_reason = None
+            # この回を正式な記録から外す理由。'bug' はバグ報告、
+            # 'quit' は途中で抜けた回。空なら正式に受理する。
+            self.discard_reason = ''
             self.instruction_natural_rank = None
             self.instruction_kinds = ''
             with self._pending_lock:
@@ -1744,8 +1755,10 @@ async def bug(req: Request):
     if saved is None:
         return JSONResponse({'ok': False, 'error': '保存できませんでした'},
                             status_code=500)
-    # 報告したあとは、その回を打ち切ってやり直してもらう
+    # 報告したあとは、その回を打ち切ってやり直してもらう。
+    # この回は正式な記録に数えず、同じ条件のやり直しが正式な1回になる。
     try:
+        session.discard_reason = 'bug'
         session._abort()
     except Exception as e:
         print(f'[server] 報告後の打ち切りに失敗: {e}')

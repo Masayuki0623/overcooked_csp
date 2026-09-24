@@ -11,6 +11,8 @@
     wait_after_instruction_s は、着手時刻との引き算で出す。
     serve_times_s / serve_dishes <- リプレイをその場で再生して、料理を
         出した時刻を拾う(記録に残っていないので作り直す。1件あたり数秒)。
+    discard_reason / accepted <- results/bug_reports の報告と突き合わせて、
+        バグの出た回を正式な記録から外す(やり直した回が正式な1回になる)。
 
     python tools/backfill_session_log.py            # 中身を見るだけ
     python tools/backfill_session_log.py --write    # 実際に書き戻す
@@ -18,6 +20,7 @@
 import argparse
 import csv
 import io
+import json
 import os
 import sys
 from datetime import datetime
@@ -101,6 +104,25 @@ def facts_from(path):
     return {k: v for k, v in got.items() if v is not None}
 
 
+def bug_reported_runs():
+    """バグ報告の出た回を (参加者, セッション, ゲーム番号) で集める。
+
+    報告のたびにその回は打ち切られ、同じ条件でやり直しになる。報告の
+    出た回は正式な記録に数えない。
+    """
+    out = set()
+    for path in sorted((ROOT / 'results' / 'bug_reports').glob('*.json')):
+        try:
+            rec = json.loads(io.open(path, encoding='utf-8').read())
+        except Exception:
+            continue
+        pid = str(rec.get('participant_id') or '')
+        if not pid:
+            continue
+        out.add((pid, str(rec.get('session')), str(rec.get('game_id'))))
+    return out
+
+
 def serve_times_from(path):
     """リプレイを再生して、1品ずつ出せた時刻を拾う。
 
@@ -146,7 +168,19 @@ def main():
 
     rows = collect_rows()
     reps = replay_index()
+    bugs = bug_reported_runs()
     filled = 0
+    for row in rows:
+        # 正式に受理する回かどうか。バグ報告の出た回と途中で抜けた回は外す。
+        key = (str(row.get('participant_id')), str(row.get('session')),
+               str(row.get('game_id')))
+        if key in bugs:
+            row['discard_reason'] = 'bug'
+        elif row.get('aborted') == '1':
+            row['discard_reason'] = row.get('discard_reason') or 'quit'
+        else:
+            row['discard_reason'] = row.get('discard_reason') or ''
+        row['accepted'] = int(not row['discard_reason'])
     for row in rows:
         when = row.get('timestamp')
         if not when:
@@ -183,7 +217,12 @@ def main():
                 pass
         filled += int(added)
 
+    ok = [r for r in rows if r.get('accepted') == 1]
     print(f'集めた行: {len(rows)} / リプレイから補えた行: {filled}')
+    print('  うち正式に受理: %d 行 / バグ報告で外した: %d 行 / 途中で抜けた: %d 行'
+          % (len(ok),
+             len([r for r in rows if r.get('discard_reason') == 'bug']),
+             len([r for r in rows if r.get('discard_reason') == 'quit'])))
     print()
     print('%-19s %-9s %-2s %-4s %-12s %6s %6s %6s %6s'
           % ('時刻', '参加者', '回', 'skip', '指示', '待ち秒', 'L(秒)', 'f(秒)', '所要'))
@@ -198,7 +237,8 @@ def main():
                  r.get('baseline_seconds', '') or '-',
                  r.get('makespan_s', '') or '-',
                  (('  提供 ' + r['serve_times_s']) if r.get('serve_times_s') else '')
-                 + ('  (打ち切り)' if r.get('aborted') == '1' else '')))
+                 + {'bug': '  (バグ報告で除外)', 'quit': '  (途中で抜けた)'}
+                 .get(r.get('discard_reason'), '')))
 
     if not args.write:
         print()
