@@ -709,8 +709,8 @@ class WebGamePlay:
                       'free_start_s', 'bound_start_s', 'start_gain_s',
                       'free_rank', 'bound_rank',
                       'served', 'failed', 'completed',
-                      'makespan_s', 'serve_times_s', 'serve_dishes', 'aborted',
-                      'game_id']
+                      'makespan_s', 'serve_times_s', 'serve_dishes', 'misserved',
+                      'aborted', 'game_id']
 
     def _log_session(self):
         """実験のセッションを results/web_sessions.csv に1行ずつ残す。
@@ -723,7 +723,12 @@ class WebGamePlay:
             return
         res = self.result or {}
         env = self.env
-        deliveries = list(getattr(env, 'delivery_log', None) or [])
+        # 注文に合っていた提供だけを「出せた」と数える(注文にない皿も
+        # 提供口には置けてしまうため)。
+        deliveries = [d for d in (getattr(env, 'delivery_log', None) or [])
+                      if d.get('ok', True)]
+        misserved = len([d for d in (getattr(env, 'delivery_log', None) or [])
+                         if not d.get('ok', True)])
         append_csv(SESSION_LOG_PATH, self.SESSION_FIELDS, {
             **self.instruction_record(),
             'timestamp': datetime.now().isoformat(timespec='seconds'),
@@ -738,6 +743,8 @@ class WebGamePlay:
             # 途中の1品ごとにどれだけかかったかはこちらで見る。
             'serve_times_s': '|'.join(str(d['time']) for d in deliveries),
             'serve_dishes': '|'.join(d['dish'] for d in deliveries),
+            # 注文に無い物を提供口へ出してしまった回数(材料の無駄)
+            'misserved': misserved,
             'aborted': int(bool(res.get('aborted'))), 'game_id': self.game_id,
         })
         if not res.get('aborted'):

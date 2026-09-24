@@ -124,10 +124,12 @@ def serve_times_from(path):
         print(f'  ({Path(path).name} は再生できませんでした: {e})')
         return {}
     log = list(getattr(env, 'delivery_log', None) or [])
+    ok = [d for d in log if d.get('ok', True)]
     if not log:
         return {}
-    return {'serve_times_s': '|'.join(str(d['time']) for d in log),
-            'serve_dishes': '|'.join(d['dish'] for d in log)}
+    return {'serve_times_s': '|'.join(str(d['time']) for d in ok),
+            'serve_dishes': '|'.join(d['dish'] for d in ok),
+            'misserved': len(log) - len(ok)}
 
 
 def main():

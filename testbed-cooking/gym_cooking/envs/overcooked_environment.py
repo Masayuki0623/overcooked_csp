@@ -241,14 +241,30 @@ class OvercookedEnvironment(gym.Env):
 
         # Execute.
         events = self.execute_navigation()
+        pending_order_names = None   # 提供があったときだけ作る
         for event in events:
             self._event_history.append(event)
             if len(self._event_history) > self._EVENT_HISTORY_MAX_LEN:
                 self._event_history.pop(0)
             if str(event.event).startswith('Deliver_'):
+                # 出した物が注文に合っていたかも分けて控える。提供口には
+                # 注文にない物も置けてしまい(材料1つだけの皿など)、それも
+                # 同じ Deliver イベントになる。数だけ見ると「出せた」と
+                # 誤解するので、ここで見分けておく。
+                # 注文の消し込み(order_scheduler.update)はこの後なので、
+                # いま残っている注文と突き合わせればよい。
+                name = str(event.event)[len('Deliver_'):]
+                if pending_order_names is None:
+                    pending_order_names = [
+                        getattr(o[0], 'full_name', None)
+                        for o in self.order_scheduler.current_orders]
+                ok = name in pending_order_names
+                if ok:
+                    pending_order_names.remove(name)
                 self.delivery_log.append({
-                    'dish': str(event.event)[len('Deliver_'):],
+                    'dish': name,
                     'time': round(float(self.current_time), 1),
+                    'ok': ok,
                 })
             if event.event not in self.all_events:
                 print("Invalid event detected: {}".format(event.event))
