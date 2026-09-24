@@ -392,23 +392,32 @@ class GamePlay(Game):
 
         elif event.type == pygame.KEYUP:
             if pygame.key.name(event.key) == "space":
-                if self.interact_used:
-                    # この長押しでもう手を出している。待ち行列に残っている
-                    # 「使う」は、離したあとに1回ぶん余計に手を出すことに
-                    # なるので捨てる。
-                    #
-                    # 入力は1手ずつしか消化されないので、離した知らせだけが
-                    # 先に届き、残りはそのあとで新しい押し始めとして処理
-                    # されていた(実測: 長押しで切って取ったあと、指を離すと
-                    # 材料が台に戻る)。
-                    with self._backlog_lock:
-                        keep = [a for a in self._human_backlog
-                                if tuple(a or (0, 0)) != tuple(INTERACT)]
-                        dropped = len(self._human_backlog) - len(keep)
-                        self._human_backlog.clear()
-                        self._human_backlog.extend(keep)
-                    # 捨てた分も「処理した」と数える(端末側の先読みと合わせる)
-                    self.human_inputs_done += dropped
+                # 離したら、まだ処理していない「使う」を整理する。
+                #
+                # 入力は1手ずつしか消化されないので、離した知らせだけが先に
+                # 届き、待ち行列に残った「使う」があとから新しい押し始めと
+                # して処理されていた(実測: 長押しで切って取ったあと、指を
+                # 離すと材料が台に戻る。切り終えた直後に離すと、取ってから
+                # もう一度置いてしまう)。
+                #
+                # 残すのは、その長押しでまだ一度も手を出していないときの
+                # 1つだけ。軽くたたいただけの操作を取りこぼさないため。
+                # それ以外は捨てる(離したあとに何度も手を出さない)。
+                keep_one = not self.interact_used
+                with self._backlog_lock:
+                    kept, dropped = [], 0
+                    for a in self._human_backlog:
+                        if tuple(a or (0, 0)) != tuple(INTERACT):
+                            kept.append(a)
+                        elif keep_one:
+                            kept.append(a)
+                            keep_one = False
+                        else:
+                            dropped += 1
+                    self._human_backlog.clear()
+                    self._human_backlog.extend(kept)
+                # 捨てた分も「処理した」と数える(端末側の先読みと合わせる)
+                self.human_inputs_done += dropped
                 self.interact_held = False
                 self.interact_used = False
 

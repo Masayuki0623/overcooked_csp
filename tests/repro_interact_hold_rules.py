@@ -116,6 +116,12 @@ def main():
     check('まだ手を出していないなら残す(軽くたたいた分)',
           left == [INTERACT], f'残り={left}')
 
+    # 切り終えた直後に離すと、取る1回ぶんだけが残っていてほしい。
+    # 2つ残ると、取ったあとにもう一度置いてしまう。
+    left, _, _ = release(False, [INTERACT, INTERACT])
+    check('まだ手を出していなくても、残すのは1つだけ',
+          left == [INTERACT], f'残り={left}')
+
     left, _, _ = release(True, [(0, -1), INTERACT])
     check('移動の入力は捨てない', left == [(0, -1)], f'残り={left}')
 
