@@ -1,6 +1,6 @@
 # modules for game
 from gym_cooking.misc.game.game import Game
-from gym_cooking.utils.core import Cutboard, Floor
+from gym_cooking.utils.core import Blender, Cutboard, Floor
 from gym_cooking.utils.interact import INTERACT, resolve_action
 from gym_cooking.utils import config
 from gym_cooking.misc.game.utils import *
@@ -272,14 +272,38 @@ class GamePlay(Game):
             self.screen.blit(snapshot, (0, 0))
             pygame.display.flip()
 
-    def _facing_is_cutboard(self, agent):
-        """そのキャラが向いている先がまな板かどうか。"""
+    def _facing_is_station(self, agent):
+        """向いている先が、置いてから続けて手を動かす台かどうか。
+
+        まな板(置く → 切る → 取る)とミキサー(入れる → 混ぜる)は、
+        置いたあとも同じ長押しのまま続けられる。鍋は置いたあと待つだけ
+        なので含めない。
+        """
         try:
             f = tuple(getattr(agent, 'facing', (0, 1)))
             target = (agent.location[0] + f[0], agent.location[1] + f[1])
-            return isinstance(self.env.world.get_gridsquare_at(target), Cutboard)
+            gs = self.env.world.get_gridsquare_at(target)
+            return isinstance(gs, (Cutboard, Blender))
         except Exception:
             return False
+
+    def _hold_still_usable(self, agent, held_before, held_after):
+        """押しっぱなしのまま、次の「使う」を続けてよいか。
+
+        押しっぱなしで何度も「置く/取る」を繰り返すと、置いた物をすぐ
+        取り直してしまう。そこで持ち物が変わったら、その長押しはそこで
+        おしまいにする。
+
+        ただし、まな板とミキサーに「置いた」ときだけは続けてよい。
+        まな板は 置く → 切る → 取る、ミキサーは 入れる → 混ぜる までを
+        一息でできるようにするため。ミキサーに入れると、コップだけが手に
+        残ることがある。
+        """
+        if held_before == held_after:
+            return True          # 切っている/混ぜている途中。持ち物は変わらない
+        return (held_before is not None
+                and (held_after is None or held_after == 'Cup')
+                and self._facing_is_station(agent))
 
     AI_IDLE_REPORT_S = 3.0
 
@@ -725,14 +749,8 @@ class GamePlay(Game):
                     self.interact_used = False
                 if interact_applied and self.interact_held:
                     after = getattr(me.holding, 'full_name', None)
-                    if held_before != after:
-                        # 持ち物が変わった = 置く/取るをした。この長押しでは
-                        # 終わり。ただし「まな板に置いた」ときだけは続けて
-                        # よい(置く→切る→取る までを押しっぱなしでできる)。
-                        placed_on_board = (held_before is not None and after is None
-                                           and self._facing_is_cutboard(me))
-                        if not placed_on_board:
-                            self.interact_used = True
+                    if not self._hold_still_usable(me, held_before, after):
+                        self.interact_used = True
                 if self.debug_mode:
                     a0 = self.sim_agents[0]
                     print(f"[ENVTRACE] step_end   wall={time.time():.4f} pos_after={a0.location} "

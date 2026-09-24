@@ -951,6 +951,7 @@
     }
     lastSendAt = now;
     const code = keyQueue.shift();
+    const upAfter = pendingUp.has(code) && !keyQueue.includes(code);
     if (predPos && grid) {
       const before = predPos;
       pendingInputs.push(DIRS[code] || INTERACT_CODE);
@@ -962,11 +963,20 @@
     }
     sendNow({ type: 'key', code });
     sentInputs += 1;
+    if (upAfter) {
+      // 残していた1つを送り終えたので、ここで「離した」を伝える。
+      pendingUp.delete(code);
+      sendNow({ type: 'key', code, up: true });
+    }
     if (keyQueue.length) setTimeout(flushKeys, stepMs);
   }
 
   // 長押しで歩き続ける。離すまで 1手ぶんの間隔で送る。
   const held = new Set();
+  // 「離した」を伝えるのを待っている入力。まだ送っていない分を送り終えて
+  // から伝える(先に伝えると、あとから届く1つが新しい長押しの1手目と
+  // 見なされてしまう)。
+  const pendingUp = new Set();
   let holdTimer = null;
   function holdStart(code) {
     if (held.has(code)) return;
@@ -995,7 +1005,16 @@
     }
     // 離したことをサーバーにも伝える。長押しの間に「置く/取る」を何度も
     // 繰り返さないよう、ゲーム側が押しっぱなしかどうかを見ている。
-    if (code === INTERACT_CODE) sendNow({ type: 'key', code, up: true });
+    //
+    // ただし、まだ送っていない同じ入力が1つ残っているときは、それを
+    // 送り終えてから伝える。先に「離した」を伝えると、あとから届く1つが
+    // 「新しい長押しの1手目」と見なされ、切って取ったばかりの材料を
+    // その場に置いてしまう(実測: 長押しで切り終えたあと、指を離すと
+    // 材料が台に戻った)。
+    if (code === INTERACT_CODE) {
+      if (keyQueue.includes(code)) pendingUp.add(code);
+      else sendNow({ type: 'key', code, up: true });
+    }
   }
 
   let paintSwap = null;         // 差し替える絵 {idx, name}
