@@ -62,7 +62,9 @@
   }
 
   /* ---- ゲーム画面 ---- */
-  #stage { position: relative; display: flex; align-items: flex-start; gap: 12px; }
+  /* 盤面のまわりでは、拡大も画面送りもしない */
+  #stage { position: relative; display: flex; align-items: flex-start; gap: 12px;
+           touch-action: none; }
   #stage canvas {
     image-rendering: pixelated; display: block; background: #000;
     border-radius: 6px; box-shadow: 0 6px 24px rgba(0,0,0,.45);
@@ -416,6 +418,25 @@
   ['gesturestart', 'gesturechange'].forEach((name) => {
     document.addEventListener(name, (e) => e.preventDefault(), { passive: false });
   });
+  // ダブルタップでの拡大は、iOS では touch-action だけでは止まらないことが
+  // ある。同じ場所を続けて2回叩いたときだけ、2回目の既定の動き(拡大)を
+  // 止める。画面の中のボタンは click で動いているので、そこには触らない
+  // (止めると押せなくなる)。操作ボタンは pointerdown で動いているので、
+  // ここで止めても効かなくならない。
+  let lastTap = { t: 0, x: 0, y: 0 };
+  document.addEventListener('touchend', (e) => {
+    const touch = e.changedTouches && e.changedTouches[0];
+    const now = Date.now();
+    const x = touch ? touch.clientX : 0;
+    const y = touch ? touch.clientY : 0;
+    const samePlace = Math.abs(x - lastTap.x) < 40 && Math.abs(y - lastTap.y) < 40;
+    const control = e.target && e.target.closest
+      && e.target.closest('button, input, textarea, select, a, label');
+    if (!control && now - lastTap.t < 400 && samePlace) e.preventDefault();
+    lastTap = { t: now, x, y };
+  }, { passive: false });
+  // 念のため、ダブルタップが click 2回として届いたときの既定の動きも止める。
+  document.addEventListener('dblclick', (e) => e.preventDefault(), { passive: false });
 
   // ---- 画面の型 ------------------------------------------------------
   // 指で触る端末か、幅の狭い画面では、スマホ用の配置にする。
