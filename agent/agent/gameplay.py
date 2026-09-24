@@ -17,6 +17,7 @@ import threading
 import queue
 import time
 import logging
+import traceback
 import sys
 import os
 from datetime import datetime
@@ -305,6 +306,38 @@ class GamePlay(Game):
             self._ai_idle_logged = True
             print(f'[AI] {self.AI_IDLE_REPORT_S:.0f} 秒以上動いていません: {str(reason)[:120]}',
                   flush=True)
+
+    def _ai_decide(self, env):
+        """AI に次の手を聞く。例外が出ても、この呼び出しで止めない。
+
+        以前はここで例外がそのまま上がり、AI を動かしている輪ごと終わって
+        いた。輪が終わると AI は二度と手を出さず、ゲームは動いたまま相方
+        だけが固まる(実測: バグ報告「トマトを切っている途中で動かなく
+        なった」。8.0秒以降、試合の最後まで17.6秒間、AI は1度も手を
+        出していなかった)。
+
+        判断1回ぶんを捨てて次のフレームでやり直す。世界は動いているので、
+        次の判断では別の結果になることが多い。原因を追えるよう、同じ
+        失敗は1度だけ出し、リプレイにも残す。
+        """
+        try:
+            return self.ai(env)
+        except Exception:
+            detail = traceback.format_exc()
+            key = detail.strip().splitlines()[-1] if detail.strip() else 'unknown'
+            seen = self.__dict__.setdefault('_ai_error_seen', set())
+            if key not in seen:
+                seen.add(key)
+                print('[AI] 判断に失敗しました(この手は飛ばして続けます)',
+                      flush=True)
+                print(detail, flush=True)
+            try:
+                self.replay.log('ai_error', {
+                    'time': float(getattr(env, 'time', 0.0) or 0.0),
+                    'error': key, 'traceback': detail})
+            except Exception:
+                pass
+            return None, ''
 
     def _translate_ai_actions(self, action_dict, idx_human):
         """AI の「その方向へ進む」を、新しい規則の行動に読み替える。
@@ -939,7 +972,7 @@ class GamePlay(Game):
                 # 判断時間の計測は --debug のときだけ行う(pace_env_to_ai=debug_mode)。
                 # 通常プレイでは計測も進行の引き伸ばしも一切行わない。
                 decide_started = time.time() if self.pace_env_to_ai else None
-                move, chat_ret = self.ai(env)
+                move, chat_ret = self._ai_decide(env)
                 self._note_ai_idle(move, chat_ret)
                 if decide_started is not None:
                     # 環境側が「AIより速く進まない」ようにするための実測値。

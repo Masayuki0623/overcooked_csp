@@ -759,6 +759,22 @@ class WebGamePlay:
             # 同じ条件でやり直しになり、やり直した回が正式な1回になる。
             note_session_done(sel['participant'])
 
+    def _ai_errors_so_far(self):
+        """この回で AI の判断が落ちた回数と、その中身。"""
+        out = []
+        try:
+            for h in list(self.game.replay):
+                if h.get('name') == 'ai_error':
+                    out.append(h.get('args') or {})
+        except Exception:
+            return []
+        kinds = {}
+        for e in out:
+            kinds.setdefault(str(e.get('error')), []).append(e.get('time'))
+        return [{'error': k, 'count': len(v),
+                 'first_time_s': min([t for t in v if t is not None] or [None])}
+                for k, v in kinds.items()]
+
     def save_bug_report(self, message):
         """「バグを報告」で送られた内容を、あとで原因を追える形で残す。
 
@@ -797,6 +813,10 @@ class WebGamePlay:
             'connection': self.connection_info,
             'replay': replay_name,
             'code': running_code_version(),
+            # AI の判断が落ちていたら、その中身をここに出す。手が止まる
+            # 報告のほとんどはこれが原因なので、報告を開いてすぐ分かる
+            # ようにしておく。
+            'ai_errors': self._ai_errors_so_far(),
             'instructions': [
                 {k: v for k, v in (p or {}).items()
                  if k in ('task', 'status', 'skip_budget', 'accepted_env_time',

@@ -38,11 +38,14 @@ def load(path):
             info[key] = rep[key]
         except Exception:
             info[key] = None
+    info['ai_errors'] = []
     for h in his:
         if h['name'] == 'instruction_accepted':
             info['accepted'] = h['args']
         elif h['name'] == 'instruction_time_loss':
             info['loss'] = h['args']
+        elif h['name'] == 'ai_error':
+            info['ai_errors'].append(h['args'])
     return info
 
 
@@ -162,6 +165,15 @@ def summarize(info):
     print('  結果: 提供%s件 / 失敗%s件 / スコア%s  (記録 %d ステップ)'
           % (res.get('success', '-'), res.get('fail', '-'), res.get('reward', '-'),
              sum(1 for h in info['his'] if h['name'] == 'env.step')))
+    errs = info.get('ai_errors') or []
+    if errs:
+        kinds = {}
+        for e in errs:
+            kinds.setdefault(e.get('error', '?'), []).append(e.get('time'))
+        print('  AI の判断が %d 回失敗しています:' % len(errs))
+        for kind, times in kinds.items():
+            print('    %s (最初は %.1f秒)' % (kind, min(t for t in times if t is not None)
+                                              if any(t is not None for t in times) else -1))
 
 
 def main():
