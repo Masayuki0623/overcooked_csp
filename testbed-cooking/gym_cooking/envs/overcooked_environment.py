@@ -69,6 +69,11 @@ class OvercookedEnvironment(gym.Env):
         # For event logging
         self._event_history = []
         self._EVENT_HISTORY_MAX_LEN = 200
+        # 提供できた料理と、その時刻(ゲーム内の秒)。
+        # _event_history は直近200件までしか残らないので、長い試合では
+        # 最初の提供が消えてしまう。提供の記録は試合ごとに数件しかないため、
+        # 落とさずに別に取っておく。
+        self.delivery_log = []
 
         # changeable
         self.chg_grid = None
@@ -187,6 +192,7 @@ class OvercookedEnvironment(gym.Env):
         self.interact_history = []
         self.t = 0
         self.current_time = 0.
+        self.delivery_log = []
 
         # For visualizing episode.
         self.rep = []
@@ -239,6 +245,11 @@ class OvercookedEnvironment(gym.Env):
             self._event_history.append(event)
             if len(self._event_history) > self._EVENT_HISTORY_MAX_LEN:
                 self._event_history.pop(0)
+            if str(event.event).startswith('Deliver_'):
+                self.delivery_log.append({
+                    'dish': str(event.event)[len('Deliver_'):],
+                    'time': round(float(self.current_time), 1),
+                })
             if event.event not in self.all_events:
                 print("Invalid event detected: {}".format(event.event))
 

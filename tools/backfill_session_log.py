@@ -9,6 +9,8 @@
     loss_num_tasks        <- instruction_time_loss (時間損失量 L(d) と内訳)
     instruction_accepted_s <- instruction_accepted (指示を受け取った時刻)
     wait_after_instruction_s は、着手時刻との引き算で出す。
+    serve_times_s / serve_dishes <- リプレイをその場で再生して、料理を
+        出した時刻を拾う(記録に残っていないので作り直す。1件あたり数秒)。
 
     python tools/backfill_session_log.py            # 中身を見るだけ
     python tools/backfill_session_log.py --write    # 実際に書き戻す
@@ -22,6 +24,7 @@ from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 for _p in ('.', 'agent', 'testbed-cooking'):
     sys.path.insert(0, str(ROOT / _p))
 os.environ.setdefault('SDL_VIDEODRIVER', 'dummy')
@@ -98,9 +101,40 @@ def facts_from(path):
     return {k: v for k, v in got.items() if v is not None}
 
 
+def serve_times_from(path):
+    """リプレイを再生して、1品ずつ出せた時刻を拾う。
+
+    提供の時刻はどこにも書き出されていないので、同じ地図・同じ注文で
+    盤面を作り直し、記録どおりの行動を流し込んで数え直す。
+    """
+    import replay_trace as RT
+    try:
+        info = RT.load(path)
+        sel = info.get('web_selection')
+        if not sel:
+            return {}
+        env = RT.rebuild(sel)
+        for h in info['his']:
+            if h['name'] != 'env.step':
+                continue
+            acts = {a.name: tuple(h['args']['action_dict'].get(a.name) or (0, 0))
+                    for a in env.sim_agents}
+            env.step(acts, passed_time=h['args'].get('passed_time', 0.2))
+    except Exception as e:
+        print(f'  ({Path(path).name} は再生できませんでした: {e})')
+        return {}
+    log = list(getattr(env, 'delivery_log', None) or [])
+    if not log:
+        return {}
+    return {'serve_times_s': '|'.join(str(d['time']) for d in log),
+            'serve_dishes': '|'.join(d['dish'] for d in log)}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--write', action='store_true', help='実際に書き戻す')
+    ap.add_argument('--replay-sim', action='store_true',
+                    help='リプレイを再生して提供時刻も補う(時間がかかる)')
     args = ap.parse_args()
 
     # 列そろえは server.py の定義をそのまま使う(食い違いを起こさないため)。
@@ -130,6 +164,11 @@ def main():
                 if k in fields and row.get(k) in (None, ''):
                     row[k] = v
                     added = True
+            if (args.replay_sim and 'serve_times_s' in fields
+                    and row.get('serve_times_s') in (None, '')):
+                for k, v in serve_times_from(best[1]).items():
+                    row[k] = v
+                    added = True
         # 指示からの経過秒は、受け取った時刻との引き算で出せる
         if row.get('wait_after_instruction_s') in (None, ''):
             try:
@@ -146,6 +185,7 @@ def main():
     print()
     print('%-19s %-9s %-2s %-4s %-12s %6s %6s %6s %6s'
           % ('時刻', '参加者', '回', 'skip', '指示', '待ち秒', 'L(秒)', 'f(秒)', '所要'))
+    # 提供の時刻は行ごとに長さが変わるので、表の右に添える。
     for r in rows:
         print('%-19s %-9s %-2s %-4s %-12s %6s %6s %6s %6s%s'
               % (r.get('timestamp', '')[:19], r.get('participant_id', ''),
@@ -155,7 +195,8 @@ def main():
                  r.get('loss_seconds', '') if r.get('loss_seconds', '') != '' else '-',
                  r.get('baseline_seconds', '') or '-',
                  r.get('makespan_s', '') or '-',
-                 '  (打ち切り)' if r.get('aborted') == '1' else ''))
+                 (('  提供 ' + r['serve_times_s']) if r.get('serve_times_s') else '')
+                 + ('  (打ち切り)' if r.get('aborted') == '1' else '')))
 
     if not args.write:
         print()

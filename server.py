@@ -709,7 +709,8 @@ class WebGamePlay:
                       'free_start_s', 'bound_start_s', 'start_gain_s',
                       'free_rank', 'bound_rank',
                       'served', 'failed', 'completed',
-                      'makespan_s', 'aborted', 'game_id']
+                      'makespan_s', 'serve_times_s', 'serve_dishes', 'aborted',
+                      'game_id']
 
     def _log_session(self):
         """実験のセッションを results/web_sessions.csv に1行ずつ残す。
@@ -722,6 +723,7 @@ class WebGamePlay:
             return
         res = self.result or {}
         env = self.env
+        deliveries = list(getattr(env, 'delivery_log', None) or [])
         append_csv(SESSION_LOG_PATH, self.SESSION_FIELDS, {
             **self.instruction_record(),
             'timestamp': datetime.now().isoformat(timespec='seconds'),
@@ -731,6 +733,11 @@ class WebGamePlay:
             'served': res.get('served'), 'failed': res.get('failed'),
             'completed': int(bool(res.get('success'))),
             'makespan_s': round(float(getattr(env, 'current_time', 0.0) or 0.0), 1),
+            # 1品ずつ、実際に出せた時刻(ゲーム内の秒)。出した順に並ぶ。
+            # makespan_s は「最後に何かを出した/時間切れになった」時刻なので、
+            # 途中の1品ごとにどれだけかかったかはこちらで見る。
+            'serve_times_s': '|'.join(str(d['time']) for d in deliveries),
+            'serve_dishes': '|'.join(d['dish'] for d in deliveries),
             'aborted': int(bool(res.get('aborted'))), 'game_id': self.game_id,
         })
         if not res.get('aborted'):
