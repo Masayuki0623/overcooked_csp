@@ -169,6 +169,11 @@ class GamePlay(Game):
         # 長押しでまた置いてしまうのを防ぐ)。
         self.interact_held = False
         self.interact_used = False
+        # 人の入力の待ち行列。環境の輪が1手ずつ取り出す。離したときに
+        # 余っている「使う」を捨てるため、入力を受ける側からも触れるように
+        # ここに持たせる(触るのは別のスレッドなので鍵をかける)。
+        self._human_backlog = collections.deque(maxlen=HUMAN_INPUT_BACKLOG)
+        self._backlog_lock = threading.Lock()
         self.ai = get_agent(self.agent_set, self.replay)
 
         # concurrent control variables
@@ -387,6 +392,23 @@ class GamePlay(Game):
 
         elif event.type == pygame.KEYUP:
             if pygame.key.name(event.key) == "space":
+                if self.interact_used:
+                    # この長押しでもう手を出している。待ち行列に残っている
+                    # 「使う」は、離したあとに1回ぶん余計に手を出すことに
+                    # なるので捨てる。
+                    #
+                    # 入力は1手ずつしか消化されないので、離した知らせだけが
+                    # 先に届き、残りはそのあとで新しい押し始めとして処理
+                    # されていた(実測: 長押しで切って取ったあと、指を離すと
+                    # 材料が台に戻る)。
+                    with self._backlog_lock:
+                        keep = [a for a in self._human_backlog
+                                if tuple(a or (0, 0)) != tuple(INTERACT)]
+                        dropped = len(self._human_backlog) - len(keep)
+                        self._human_backlog.clear()
+                        self._human_backlog.extend(keep)
+                    # 捨てた分も「処理した」と数える(端末側の先読みと合わせる)
+                    self.human_inputs_done += dropped
                 self.interact_held = False
                 self.interact_used = False
 
@@ -658,7 +680,7 @@ class GamePlay(Game):
         # 1回ぶん消えていた。ネット越し(Web 版)では入力がまとまって届く
         # ことがあり、「ボタンを押しても動かない」ように見える原因だった。
         # 押しすぎて後から遅れて動き続けないよう、溜めるのは少しだけにする。
-        human_backlog = collections.deque(maxlen=HUMAN_INPUT_BACKLOG)
+        human_backlog = self._human_backlog
         # 人の入力をいくつ処理したか。Web 版が先読みの補正に使う。
         self.human_inputs_done = 0
         ai_sent = {}          # 読み替える前に AI が送ってきた行動
@@ -685,12 +707,13 @@ class GamePlay(Game):
                 event_type, args = event
                 if event_type == 'Action':
                     if args['agent'] == "human" and idx_human is not None:
-                        if len(human_backlog) == human_backlog.maxlen:
-                            # 溜まりすぎて捨てる分も「処理した」と数える。
-                            # Web 版は、この数を見て端末側の先読みと実際の
-                            # 位置を合わせている(数え落とすとズレたままになる)。
-                            self.human_inputs_done += 1
-                        human_backlog.append(args['action'])
+                        with self._backlog_lock:
+                            if len(human_backlog) == human_backlog.maxlen:
+                                # 溜まりすぎて捨てる分も「処理した」と数える。
+                                # Web 版は、この数を見て端末側の先読みと実際の
+                                # 位置を合わせている(数え落とすとズレたままになる)。
+                                self.human_inputs_done += 1
+                            human_backlog.append(args['action'])
                     elif args['agent'] == "ai" and self.ai_agent_idx is not None:
                         action_dict[self.sim_agents[self.ai_agent_idx].name] = args['action']
                     elif args['agent'] == "ai_0":
@@ -720,8 +743,11 @@ class GamePlay(Game):
                 ai_sent = {k: v for k, v in action_dict.items()}
                 self._translate_ai_actions(action_dict, idx_human)
                 if idx_human is not None and human_backlog:
-                    action_dict[self.sim_agents[idx_human].name] = human_backlog.popleft()
-                    self.human_inputs_done += 1
+                    with self._backlog_lock:
+                        nxt = human_backlog.popleft() if human_backlog else None
+                    if nxt is not None:
+                        action_dict[self.sim_agents[idx_human].name] = nxt
+                        self.human_inputs_done += 1
                 # 長押し中に「置く/取る」を済ませていたら、離すまで手は出さない。
                 # 切る・混ぜるは持ち物が変わらないので、そのまま続けられる。
                 me = self.sim_agents[idx_human] if idx_human is not None else None

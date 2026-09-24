@@ -131,7 +131,7 @@ TUTORIAL_STEPS = [
 ]
 
 _JP_FOOD = {'Lettuce': 'レタス', 'Onion': '玉ねぎ', 'Tomato': 'トマト',
-            'Apple': 'リンゴ', 'Orange': 'オレンジ', 'Banana': 'バナナ'}
+            'Apple': 'ブルーベリー', 'Orange': 'オレンジ', 'Banana': 'バナナ'}
 _JP_DISH = {'Salad': 'サラダ', 'Soup': 'スープ', 'Juice': 'ジュース'}
 
 

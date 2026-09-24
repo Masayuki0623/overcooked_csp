@@ -55,7 +55,7 @@ VERB_STYLE = {
 }
 
 INGREDIENT_JP = {'onion': 'たまねぎ', 'tomato': 'トマト', 'lettuce': 'レタス',
-                 'apple': 'リンゴ', 'orange': 'オレンジ', 'banana': 'バナナ'}
+                 'apple': 'ブルーベリー', 'orange': 'オレンジ', 'banana': 'バナナ'}
 VERB_ACTION_JP = {'chop': '切って', 'cook': '調理して', 'serve': '提供して',
                   'serve_salad': '提供して', 'mix': '混ぜて', 'serve_juice': '提供して',
                   'carry': '運んで', 'handover': '渡して', 'serve_from_counter': '提供して'}
