@@ -3,6 +3,7 @@ from pathlib import Path
 import pygame.draw
 
 import gym_cooking
+from gym_cooking.utils.config import blending_steps, chopping_steps
 from gym_cooking.utils.core import *
 from gym_cooking.misc.game.utils import *
 import numpy as np
@@ -333,7 +334,7 @@ class Game:
             rest = obj.contents[0].state._rest_steps
             self.draw_bar(loc[0] + (0.6 - 0.4) * self.tile_size[0],
                           loc[1] + (0.5 + 0.35) * self.tile_size[1],
-                          0.7 * self.tile_size[0] * rest / BLENDING_NUM_STEPS,
+                          0.7 * self.tile_size[0] * rest / max(1, blending_steps()),
                           0.1 * self.tile_size[1], (60, 140, 220))
 
     def draw_cooking_object(self, obj):
@@ -388,10 +389,13 @@ class Game:
         self.draw(obj.full_name.replace('Chopping', 'Fresh'), self.container_size,
                   self.container_location(obj.location))
         loc = self.scaled_location(obj.location)
+        # ゲージは「あと何回か」を端から端で表す。実際に要る回数は遊ぶ速さで
+        # 決まる(5Hz なら4回)。元は速さを変える前の回数(8回)で割っていたので、
+        # 切り始めた時点でゲージが半分しかなかった。
         self.draw_bar(loc[0] + (0.5 - 0.4) * self.tile_size[0], loc[1] + (0.5 + 0.35) * self.tile_size[1],
                       0.7 *
                       self.tile_size[0] *
-                      obj.contents[0].state._rest_steps / CHOPPING_NUM_STEPS,
+                      obj.contents[0].state._rest_steps / max(1, chopping_steps()),
                       0.1 * self.tile_size[1], (220, 70, 1))
 
     def draw_by_scale_loc(self, path, loc, scale):
@@ -436,16 +440,9 @@ class Game:
             0.75: (124, 178, 66),
             1.0: (0, 138, 122),
         }
-        w = t / MAX_ORDER_LENGTH_SECONDS
-        color = (0, 0, 0)
-        for l, r in zip([0., 0.25, 0.5, 0.75], [0.25, 0.5, 0.75, 1.0]):
-            if l - 1e-3 <= w and w <= r + 1e-3:
-                color = np.array(
-                    colors[l]) + (np.array(colors[r]) - np.array(colors[l])) * (w - l) / (r - l)
-        self.draw_bar((idx + 0.1) * self.tile_size[0], (self.world.height + 1) * self.tile_size[1],
-                      int(self.tile_size[0] * 0.9 * t / MAX_ORDER_LENGTH_SECONDS), self.tile_size[1] // 5, color)
-
-        # Order name display removed for cleaner UI
+        # 注文の残り時間のゲージは出さない。いまの実験では注文が時間切れに
+        # なることが無く(制限時間まで持たない)、減っていく帯があると
+        # 急かされているように見えるだけで、読み取れる情報が無い。
         pass
 
     def draw_soup_hint(self):

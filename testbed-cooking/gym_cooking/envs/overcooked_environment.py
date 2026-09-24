@@ -6,6 +6,7 @@ import gym_cooking.recipe_planner.recipe as RECIPY
 
 # Other core modules
 import gym_cooking
+from gym_cooking.utils.config import chopping_steps
 from gym_cooking.utils.interact import INTERACT, interact
 from gym_cooking.utils.world import World
 from gym_cooking.utils.core import *
@@ -648,7 +649,7 @@ class OvercookedEnvironment(gym.Env):
         for cutboard in self.world.get_all_gridsquares('Cutboard'):
             if cutboard.holding is not None and cutboard.holding.full_name.startswith('Chopping'):
                 obj_map['chopping_num_steps'][cutboard.location[0], cutboard.location[1]] = cutboard.holding.contents[
-                    0].state._rest_steps / CHOPPING_NUM_STEPS
+                    0].state._rest_steps / max(1, chopping_steps())
 
         # agents
         agent_map = {
