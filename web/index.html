@@ -587,6 +587,21 @@
   const defs = new Map();   // 番号 -> 命令
   let seq = [];             // いまのコマで描く命令の番号の列
   const sprites = new Map();
+  // 絵の版。絵を描き直したとき、端末が前の絵を使い回さないようにする
+  // (URL が同じだと、しまい込んだ古い絵をそのまま出してしまう)。
+  // サーバーがこのページを配るときに埋める。埋まっていなければ
+  // (ファイルを直接開いたときなど)版なしで動く。
+  let gfxVer = '__GFX_VER__';
+  if (gfxVer.indexOf('__') === 0) gfxVer = '';
+  function gfxUrl(name) {
+    return '/graphics/' + encodeURIComponent(name) + '.png'
+      + (gfxVer ? '?v=' + gfxVer : '');
+  }
+  function setGfxVersion(v) {
+    if (!v || v === gfxVer) return;
+    gfxVer = v;
+    sprites.clear();          // 版が分かる前に作った分は作り直す
+  }
 
   function sprite(name) {
     let im = sprites.get(name);
@@ -594,7 +609,7 @@
       im = new Image();
       // 初めて使う絵は読み込み待ちになる。読み込めたら描き直す。
       im.onload = () => { bgIds = []; paint(); };
-      im.src = '/graphics/' + encodeURIComponent(name) + '.png';
+      im.src = gfxUrl(name);
       sprites.set(name, im);
     }
     return im;
@@ -780,6 +795,7 @@
   }
   function whenSpritesLoaded(f) { if (spritesAllLoaded) f(); else spriteWaiters.push(f); }
   fetch('/api/sprites').then(r => r.json()).then((d) => {
+    setGfxVersion(d.version);
     spriteTotal = d.names.length;
     spriteBytes = d.total_bytes || 0;
     if (!spriteTotal) { spritesAllLoaded = true; updateStartButton(); return; }
@@ -1366,7 +1382,7 @@
 
   // レシピ表。本家のレシピカードと同じで、材料から提供までを絵で並べる。
   // 絵はゲームで使っているものをそのまま使う(遊び始めて迷わないように)。
-  const G = (n) => `/graphics/${n}.png`;
+  const G = (n) => gfxUrl(n);
   const TUTORIALS = [
     { key: 'salad', title: 'サラダ',
       lead: '切った野菜を皿に乗せて出します。火は使いません。',
@@ -1863,13 +1879,13 @@
     }
     hideOverlay();              // 盤面を見ながら選べるように
     const who = (msg.players || []).map((p) =>
-      `<span><img src="/graphics/${esc(p.sprite || 'agent-blue')}-front.png" ` +
-      `onerror="this.src='/graphics/${esc(p.sprite || 'agent-blue')}.png'">` +
+      `<span><img src="${esc(gfxUrl((p.sprite || 'agent-blue') + '-front'))}" ` +
+      `onerror="this.src='${esc(gfxUrl(p.sprite || 'agent-blue'))}'">` +
       `${esc(p.name)}</span>`).join('');
     document.getElementById('instruct-who').innerHTML = who;
     const cards = (msg.items || []).map((it, i) =>
       `<button type="button" data-i="${i}">` +
-      (it.icon ? `<img src="/graphics/${esc(it.icon)}.png" alt="">` : '') +
+      (it.icon ? `<img src="${esc(gfxUrl(it.icon))}" alt="">` : '') +
       `<span>${esc(it.label)}<br><span class="act">${esc(it.action)}</span></span></button>`
     ).join('');
     // 指示を選ぶ間は移動・使うボタンを隠す。盤面の位置が動かないよう、

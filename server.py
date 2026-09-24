@@ -37,6 +37,7 @@ os.environ.setdefault('SDL_AUDIODRIVER', 'dummy')
 import argparse
 import asyncio
 import csv
+import hashlib
 from copy import deepcopy
 import io
 import json
@@ -1581,6 +1582,19 @@ app = FastAPI(title='Overcooked CSP Web')
 app.mount('/graphics', StaticFiles(directory=str(WEB_GRAPHICS_DIR)), name='graphics')
 
 
+@app.middleware('http')
+async def revalidate_graphics(request: Request, call_next):
+    """絵は毎回「変わっていないか」を確かめてから使わせる。
+
+    版を付けた URL で取り直させてはいるが、古い URL をしまい込んだままの
+    端末もある。確かめるだけなら中身は送られないので軽い。
+    """
+    response = await call_next(request)
+    if request.url.path.startswith('/graphics/'):
+        response.headers['Cache-Control'] = 'no-cache'
+    return response
+
+
 # いま使っている低遅延の入口(Cloudflare のトンネル)の URL。
 # tools/serve_public.py が起動のたびにここへ書く。
 PUBLIC_URL_PATH = ROOT / '.cache' / 'public_url.txt'
@@ -1653,13 +1667,32 @@ async def index(req: Request):
                 '</body>')
         return HTMLResponse(body, headers={'Cache-Control': 'no-store'})
     # 画面を直したときに、参加者の端末に古い版が残らないようにする。
-    return FileResponse(WEB_DIR / 'index.html',
-                        headers={'Cache-Control': 'no-store'})
+    # 絵の版もここで埋める。画面を組み立てる前に分かっていないと、
+    # 版の付いていない URL で古い絵を出してしまう。
+    html = (WEB_DIR / 'index.html').read_text(encoding='utf-8')
+    html = html.replace('__GFX_VER__', graphics_version())
+    return HTMLResponse(html, headers={'Cache-Control': 'no-store'})
 
 
 @app.get('/api/public_url')
 async def api_public_url():
     return JSONResponse({'url': public_url()})
+
+
+def graphics_version():
+    """いま配っている絵の版。中身が変われば変わる。
+
+    絵を描き直しても URL が同じだと、端末はしまい込んだ古い絵を使い回す
+    (実測: リンゴを青く塗り替えたのに、スマホでは赤いままだった)。
+    URL に版を付けて、変わったら取り直させる。
+    """
+    h = hashlib.md5()
+    for p in sorted(WEB_GRAPHICS_DIR.glob('*.png')):
+        st = p.stat()
+        h.update(p.name.encode('utf-8'))
+        h.update(str(int(st.st_mtime)).encode())
+        h.update(str(st.st_size).encode())
+    return h.hexdigest()[:10]
 
 
 @app.get('/api/sprites')
@@ -1670,6 +1703,7 @@ async def sprites():
         'names': [p.stem for p in files],
         # 端末に「どれくらい落とすか」を見せるための合計バイト数
         'total_bytes': sum(p.stat().st_size for p in files),
+        'version': graphics_version(),
     })
 
 
