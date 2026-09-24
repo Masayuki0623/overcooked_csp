@@ -195,6 +195,10 @@ class CSPAgent:
         self.next_order_uid = 0
         self.counter_policy_by_order = {}
         self.counter_invalid_since_by_order = {}
+        # サラダの提供を、その注文ではどちらの順で回ると決めたか。
+        # 一度決めたら注文が終わるまで変えない(下の _serve_route_by_order の
+        # 説明を参照)。
+        self._serve_route_by_order = {}
         self.order_display_labels = []
         self.carry_task_by_agent = {0: None, 1: None} if self.sc_2agent else None
         # 詳細トレースの既定は OFF。
@@ -1637,6 +1641,8 @@ class CSPAgent:
         stale_uids = [uid for uid in list(self.counter_policy_by_order) if uid not in active_uids]
         for uid in stale_uids:
             self.counter_policy_by_order.pop(uid, None)
+        for uid in [u for u in list(self._serve_route_by_order) if u not in active_uids]:
+            self._serve_route_by_order.pop(uid, None)
 
         self.active_order_entries = next_entries
         return current_uids
@@ -6710,6 +6716,18 @@ class CSPAgent:
                 continue
             route_plate_first[i] = model.NewBoolVar(f'plate_first_{tasks[i]["id"]}')
             route_durations[i] = (int(by_ing['dur']), int(by_plate['dur']))
+            # 一度決めた回り方は、その注文が終わるまで変えない。
+            #
+            # 2通りの差は1手ぶんしかないことが多く、世界がわずかに動くたびに
+            # 入れ替わる。入れ替わると実行側の手順も入れ替わるので、
+            # 「皿を取りに行く」と「材料を置きに行く」を毎フレーム交互に
+            # 繰り返して前に進まなくなる(実測: バグ報告「AIが皿を持ったまま
+            # うろちょろしていた」。13秒間ずっと往復していた)。
+            fixed = self._serve_route_by_order.get(tasks[i].get('order'))
+            if fixed == self.SALAD_ROUTE_PLATE:
+                model.Add(route_plate_first[i] == 1)
+            elif fixed == self.SALAD_ROUTE_INGREDIENT:
+                model.Add(route_plate_first[i] == 0)
             alt_pos = tuple(by_plate['start_pos'])
             for k in all_nodes:
                 if k == i:
@@ -7234,12 +7252,19 @@ class CSPAgent:
         self._emit_counter_debug(f"[CSPAgent] ソルバー状態: {status_name}")
 
         def chosen_route(task_idx):
-            """サラダの提供をどちらの順で回ると決まったか。実行側へ渡す。"""
+            """サラダの提供をどちらの順で回ると決まったか。実行側へ渡す。
+
+            決まった答えは注文ごとに覚えておき、次の計画でもそれを使う。
+            """
             var = route_plate_first.get(task_idx)
             if var is None:
                 return None
-            return (self.SALAD_ROUTE_PLATE if solver.Value(var)
-                    else self.SALAD_ROUTE_INGREDIENT)
+            route = (self.SALAD_ROUTE_PLATE if solver.Value(var)
+                     else self.SALAD_ROUTE_INGREDIENT)
+            uid = tasks[task_idx].get('order')
+            if uid is not None:
+                self._serve_route_by_order[uid] = route
+            return route
 
         self._last_solve_metrics.update(status=status_name, num_tasks=num_tasks)
 

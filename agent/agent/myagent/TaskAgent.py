@@ -1578,10 +1578,15 @@ class TaskAgent:
                     reason="台に完成したサラダがあるため",
                     dynamic_obstacles=dynamic_obstacles, allow_strict_override=True)
             # 指定テーブルに料理が既に全部そろっているなら、いま持っている
-            # ものは余り。同じ食材は重ねられないので、置きに行っても何も
+            # 食材は余り。同じ食材は重ねられないので、置きに行っても何も
             # 起きず永久に固まる。手放して、完成した山を取りに行く。
             # (別の注文がその食材を待っていることも多い)
-            if self._counter_covers(env, assigned_counter, target_ing_names):
+            #
+            # ただし、空の皿は余りではない。山を取りに行くために持って
+            # いるので、これを手放すと「皿を取る → 置きに行く」を延々と
+            # 繰り返す(実測: バグ報告「AIが皿を持ったままうろちょろして
+            # いた」。13秒間ずっと皿を取っては戻していた)。
+            if held_ings and self._counter_covers(env, assigned_counter, target_ing_names):
                 return self.drop_unwanted_item(
                     env, holding,
                     reason=f"指定テーブルにサラダの材料が揃っているため",
