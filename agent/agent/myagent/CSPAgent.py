@@ -3729,6 +3729,15 @@ class CSPAgent:
         obj = task.get('obj') or (task['id'][1] if task.get('id') else '')
         kind = dish_kind_of(obj) if obj else None
 
+        if verb == 'chop' and task.get('carry_from'):
+            # 「切らずに運ぶだけ」の工程。もう切ってある物を別の台から
+            # 取ってきて置き場へ移すだけなので、まな板も材料の供給口も
+            # 要らない。ここで普通の chop と同じ条件を課すと、供給口の
+            # 無い側の担当者には「できない」と判定され、相手にしか割り
+            # 当てられない。相手が人間だと誰も運ばず、材料は台に残った
+            # まま全員が待ち続ける(実測: バグ報告「動かなくなった」)。
+            return True
+
         need = []
         if verb == 'carry':
             # 材料の供給口が自分の側にあれば運べる。まな板は要らない。
@@ -3904,7 +3913,15 @@ class CSPAgent:
             if order_idx is None:
                 order_idx = (tid[2] if tid and isinstance(tid[2], int) and tid[2] >= 0 else 0)
 
-            if verb == 'chop' and t.get('from_counter') and t.get('assigned_counter'):
+            if verb == 'chop' and t.get('carry_from'):
+                # 切らずに運ぶだけ。出発点はもう切ってある物が乗っている台。
+                src = tuple(t['carry_from'])
+                dest = t.get('assigned_counter') or src
+                t['start_pos'] = src
+                t['end_pos'] = tuple(dest)
+                t['fixed_res'] = None
+
+            elif verb == 'chop' and t.get('from_counter') and t.get('assigned_counter'):
                 # 運んでもらった材料を共有テーブルから取って刻む。
                 board = get_nearest(tuple(t['assigned_counter']),
                                     resources['cutboards'] or [default_start_pos])
@@ -4246,6 +4263,14 @@ class CSPAgent:
         my_comp = self._agent_component(env, self.own_agent_idx)
         if my_comp is None:
             return False
+        src = task.get('carry_from')
+        if src is not None:
+            # 「切らずに運ぶだけ」の工程。もう切ってある物を台から台へ
+            # 移すだけなので、こちらの手が届くならこちらの仕事。相手の枠に
+            # 入れると、相手が運んでくれるのを当てにしたまま止まる
+            # (実測: 刻んだレタスが共有台に乗っているのに、鍋の前で
+            #  「不足分がそろうのを待機中」のまま動かなかった)。
+            return my_comp in self._components_touching(env, tuple(src))
         obj = str(task.get('obj') or '')
         tiles = env.get_pos_by_obj_gs(gs=INGREDIENT_TILE.get(obj, ""))
         if any(my_comp in self._components_touching(env, tuple(q)) for q in tiles):
@@ -7733,7 +7758,10 @@ class CSPAgent:
         # 置き場が両側から使えても「自分にも煮られる」ことにはならない。
         # 器具が複数ある(まな板が両側にある等)ときは、どれか1つ使えれば
         # よいので和を取り、他の条件と積を取る。
-        gs = self.VERB_EQUIPMENT.get(task.get('verb') or (task.get('id') or (None,))[0])
+        verb_here = task.get('verb') or (task.get('id') or (None,))[0]
+        gs = self.VERB_EQUIPMENT.get(verb_here)
+        if verb_here == 'chop' and task.get('carry_from'):
+            gs = None      # 運ぶだけなので、まな板は要らない
         equip_comps = None
         if gs:
             equip_comps = set()
