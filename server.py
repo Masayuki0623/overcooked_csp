@@ -590,6 +590,29 @@ class WebGamePlay:
             self.state = 'running'
             print(f'[server] #{self.game_id} ゲームを開始します')
 
+    def set_paused(self, token, on):
+        """バグ報告を書いている間など、ゲームの時間を止める/動かす。
+
+        止めている間は env.step を回さないので、ゲーム内時刻も残り時間も
+        進まない。AI も新しい盤面を受け取らないため手を止める。
+
+        ゲーム側のポーズは重ねがけの数で管理されている。二重に止めたり、
+        止めていないのに動かしたりすると数が釣り合わなくなり、二度と
+        動かなくなる。いま止めているかを持っておき、変わったときだけ伝える。
+        """
+        with self._player_lock:
+            if self.player is not token or self.game is None:
+                return
+            if self.state != 'running':
+                return
+            on = bool(on)
+            if on == getattr(self, '_user_paused', False):
+                return
+            self._user_paused = on
+            self.game._q_env.put(('Pause', {}) if on else ('Continue', {}))
+            print(f"[server] #{self.game_id} ゲームを{'止めました' if on else '再開します'}"
+                  f"(バグ報告)")
+
     def _resolve_choice(self, choice):
         """画面で選ばれた内容を、組み立てに使える形にする。おかしな値は既定に戻す。
 
@@ -1167,6 +1190,7 @@ class WebGamePlay:
             # スマホではまだ絵が描けていないうちにゲームが始まっていた。
             self.game._q_env.put(('Pause', {}))
             self._released = False
+            self._user_paused = False
             self.state = 'ready'
             self.perf.update(rendered=0, encoded=0, sent=0, started=time.time(),
                              client_rtt_ms=[], client_paint_ms=[], client_recv_fps=[],
@@ -1880,6 +1904,9 @@ async def ws(sock: WebSocket):
                 session.answer_instruction(msg.get('seq'), msg.get('index'))
             elif kind == 'go':
                 session.go(token)
+            elif kind == 'pause':
+                # バグ報告を書いている間は時間を止める
+                session.set_paused(token, msg.get('on'))
             elif kind == 'hello':
                 mode[0] = 'png' if msg.get('mode') == 'png' else 'draw'
                 if isinstance(msg.get('net'), dict):

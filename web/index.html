@@ -1378,10 +1378,13 @@
   function showBugForm() {
     const wasPlaying = playing;
     playing = false;
+    // 書いている間はゲームの時間を止める(残り時間も減らない)。
+    sendNow({ type: 'pause', on: true });
     showOverlay(
       '<div class="survey">' +
       '<div class="big">バグを報告</div>' +
-      '<div class="sub">どこがおかしかったか、覚えている範囲で書いてください。<br>' +
+      '<div class="sub">書いている間、ゲームは止まっています。<br>' +
+      'どこがおかしかったか、覚えている範囲で書いてください。<br>' +
       'そのときの状況は自動で保存されます。</div>' +
       '<div class="q"><textarea id="bug-text" rows="4" ' +
       'placeholder="例: AIがミキサーの前で止まったまま動かなかった"></textarea></div>' +
@@ -1395,6 +1398,7 @@
     document.getElementById('bug-cancel').addEventListener('click', () => {
       hideOverlay();
       playing = wasPlaying;
+      sendNow({ type: 'pause', on: false });
     });
     document.getElementById('bug-send').addEventListener('click', () => {
       const btn = document.getElementById('bug-send');
