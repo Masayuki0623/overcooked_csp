@@ -2,7 +2,9 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- スマホで倍率が変わらないようにする。ダブルタップや二本指で拡大されると、
+     盤面と操作ボタンの位置がずれて遊べなくなる。 -->
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Overcooked CSP</title>
 <style>
   :root {
@@ -18,7 +20,15 @@
     --lift: 16px;
   }
   * { box-sizing: border-box; }
-  html, body { margin: 0; background: var(--bg); }
+  html, body {
+    margin: 0; background: var(--bg);
+    /* ダブルタップでの拡大を止める(iOS は viewport の user-scalable を
+       無視するので、こちらで止める)。指1本の操作と画面送りはそのまま。 */
+    touch-action: manipulation;
+    /* 横向きにしたときに字だけ勝手に大きくならないように */
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
   body {
     color: var(--text);
     font-family: "Segoe UI", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", sans-serif;
@@ -56,6 +66,9 @@
   #stage canvas {
     image-rendering: pixelated; display: block; background: #000;
     border-radius: 6px; box-shadow: 0 6px 24px rgba(0,0,0,.45);
+    /* 盤面の上では拡大も画面送りもしない */
+    touch-action: none; -webkit-user-select: none; user-select: none;
+    -webkit-touch-callout: none;
   }
   #panel { cursor: pointer; touch-action: none; }
   #panel.hidden { display: none; }
@@ -375,6 +388,14 @@
     overlay: document.getElementById('overlay'),
     overlayText: document.getElementById('overlay-text'),
   };
+
+  // ---- 倍率を変えさせない --------------------------------------------
+  // 二本指の拡大は、iOS では viewport の指定では止まらない。拡大されると
+  // 盤面と操作ボタンの位置がずれて遊べなくなるので、ここで止める。
+  // (この2つの出来事は二本指のときだけ起きるので、普通の操作には触らない)
+  ['gesturestart', 'gesturechange'].forEach((name) => {
+    document.addEventListener(name, (e) => e.preventDefault(), { passive: false });
+  });
 
   // ---- 画面の型 ------------------------------------------------------
   // 指で触る端末か、幅の狭い画面では、スマホ用の配置にする。
