@@ -539,10 +539,15 @@ class GamePlay(Game):
     def _request_instruction(self, trigger='space', allow_text_fallback=True):
         """指示画面を出し、選ばれた指示を env / AI / リプレイへ登録する。
 
-        Space 押下と、enable_cook の自動呼び出しの共通処理。
+        Space 押下と、自動呼び出し(once_at_start / every_n_tasks /
+        enable_cook)の共通処理。
+
+        戻り値は「指示を受け取れたか」。いま着手できる作業が1つも無くて
+        画面を出せなかったときは False を返す。every_n_tasks はこれを見て、
+        出せなかった回を消費せずに次の機会へ回す。
         """
         if self._instruction_panel_active:
-            return
+            return False
 
         self._q_env.put(('Pause', {}))
         try:
@@ -552,6 +557,14 @@ class GamePlay(Game):
             elif allow_text_fallback:
                 s = popup_text("Say to AI:")
             else:
+                # いま着手できる作業が1つも無い。仕切りの地図では AI 側に
+                # 置いてある材料しか触れないので、その材料を使い切ると
+                # ここへ来る(実測: フルーツ中心の注文が並んだ回で、りんごを
+                # 切ったあと指示できるものが無くなった)。
+                # 画面を出さなかったことを呼び出し側へ伝え、次の機会に
+                # 出し直させる。
+                print(f"[Instruction] {trigger}: いま指示できる作業がありません",
+                      flush=True)
                 s = None
 
             if s is not None:
@@ -629,6 +642,8 @@ class GamePlay(Game):
                 # send human-readable display to chat queues
                 self._q_env.put(('ChatIn', {"chat": display_text, "mode": "text"}))
                 self._q_ai.put(('Chat', dict(chat=display_text)))
+                return True
+            return False
         finally:
             self._q_env.put(('Continue', {}))
 
@@ -709,17 +724,18 @@ class GamePlay(Game):
         if self._latest_env_state is None:
             return
         n = self._count_ai_task_switches()
-        if self._instructed_at_switch is None:
-            # 開始直後の1回目。once_at_start と同じ位置で出す。
+        first = self._instructed_at_switch is None
+        if not first and n - self._instructed_at_switch < self.instruct_every:
+            return
+        # 出せなかった(候補が無かった)ときは枠を消費せず、作業が1つ進むたびに
+        # もう一度試す。消費してしまうと、候補が戻ってきても n 個ぶん待つことに
+        # なり、そのまま最後まで一度も出ないことがある。
+        shown = self._request_instruction(trigger='every_n_tasks',
+                                          allow_text_fallback=False)
+        if shown or first:
             self._instructed_at_switch = n
-            self._request_instruction(trigger='every_n_tasks',
-                                      allow_text_fallback=False)
-            return
-        if n - self._instructed_at_switch < self.instruct_every:
-            return
-        self._instructed_at_switch = n
-        self._request_instruction(trigger='every_n_tasks',
-                                  allow_text_fallback=False)
+        else:
+            self._instructed_at_switch = n - self.instruct_every + 1
 
     def _poll_cook_instruction_trigger(self):
         """enable_cook: 調理タスクに今すぐ着手できる状態になった瞬間、指示画面を出す。
