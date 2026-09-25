@@ -3,6 +3,7 @@ from gym_cooking.utils.config import ORDER_EXPIRE_PUNISH
 
 import numpy as np
 import copy
+import random
 from pathlib import Path
 import gym_cooking.recipe_planner.recipe as RECIPE
 import gym_cooking
@@ -35,9 +36,28 @@ class OrderScheduler:
         self.rand_recipe_list = list(range(len(self.recipes)))
         self.rand_recipe_idx = 0
 
-        self.max_num_orders = len(self.recipes)
+        # エンドレス方式: 注文が出るたびに、同じ数になるよう補充する。
+        # 固定列と違って「全部片づいたら終わり」が起きないので、
+        # セッションは max_num_timesteps(秒) で終わる。
+        self.endless = bool(getattr(arglist, 'endless_orders', False))
+        self.active_orders = int(getattr(arglist, 'max_num_orders', 3) or 3)
+        self._rng = random.Random(getattr(arglist, 'order_seed', None))
+        self.order_history = []
 
-        self.current_orders = [self.new_order(recipe) for recipe in self.recipes]
+        if self.endless:
+            pool = getattr(arglist, 'order_pool', None) or self.recipe_name_list
+            if pool:
+                self.pool_recipes = [getattr(RECIPE, n)() for n in pool]
+            else:
+                self.pool_recipes = list(self.recipes)
+            # done() の「全部片づいたら終わり」を無効にする。
+            self.max_num_orders = 0
+            self.current_orders = [self.new_order(self._draw())
+                                   for _ in range(self.active_orders)]
+        else:
+            self.pool_recipes = list(self.recipes)
+            self.max_num_orders = len(self.recipes)
+            self.current_orders = [self.new_order(recipe) for recipe in self.recipes]
 
         self.reward = 0
         self.successful_orders = 0
@@ -93,10 +113,23 @@ class OrderScheduler:
         new.rand_recipe_list = copy.copy(self.rand_recipe_list)
         new.rand_recipe_idx = self.rand_recipe_idx
         new.current_orders = copy.copy(self.current_orders)
+        # 複製の側で注文を引いても、本番の並びがずれないようにする。
+        new.endless = getattr(self, 'endless', False)
+        new.active_orders = getattr(self, 'active_orders', new.max_num_orders)
+        new.pool_recipes = getattr(self, 'pool_recipes', list(self.recipes))
+        new.max_num_orders = self.max_num_orders
+        new._rng = copy.deepcopy(self._rng)
+        new.order_history = list(getattr(self, 'order_history', []))
         new.reward = self.reward
         new.successful_orders = self.successful_orders
         new.failed_orders = self.failed_orders
         return new
+
+    def _draw(self):
+        """補充する注文を1つ引く。どれが出たかは order_history に残す。"""
+        recipe = self._rng.choice(self.pool_recipes)
+        self.order_history.append(type(recipe).__name__)
+        return recipe
 
     def new_order(self, recipe):
         goal_obj = copy.deepcopy(recipe.final_task)
@@ -135,7 +168,10 @@ class OrderScheduler:
                     self.reward -= ORDER_EXPIRE_PUNISH
             self.current_orders = current_orders
 
-        # 固定注文列モードでは、新しい注文は生成しない
+        # エンドレス方式では、出た(または期限切れになった)ぶんを補充する。
+        if getattr(self, 'endless', False):
+            while len(self.current_orders) < self.active_orders:
+                self.current_orders.append(self.new_order(self._draw()))
 
     def consume_reward(self):
         # temp = self.reward

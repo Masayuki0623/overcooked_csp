@@ -35,6 +35,27 @@ MAP_SETTINGS = dict(
     exp_partition=dict(level="exp_partition", max_num_orders=3,),
     exp_bottleneck=dict(level="exp_bottleneck", max_num_orders=3,),
     exp_ring=dict(level="exp_ring", max_num_orders=3,),
+    # エンドレス方式。60秒のあいだ、常に3件の注文が出ている。片づくたびに
+    # 下の9種類からランダムで補充する。スコアは提供数と、実際にこなした
+    # 工程数(env.interact_history から数える)で見る。
+    exp_partition_endless=dict(level="exp_partition", max_num_orders=3,
+                               max_num_timesteps=60, endless_orders=True,
+                               order_pool=('TomatoLettuceSalad', 'OnionTomatoSalad', 'OnionLettuceSalad',
+          'TomatoLettuceSoup', 'OnionTomatoSoup', 'OnionLettuceSoup',
+          'AppleOrangeJuice', 'AppleBananaJuice', 'BananaOrangeJuice')),
+    exp_ring_endless=dict(level="exp_ring", max_num_orders=3,
+                          max_num_timesteps=60, endless_orders=True,
+                          order_pool=('TomatoLettuceSalad', 'OnionTomatoSalad', 'OnionLettuceSalad',
+          'TomatoLettuceSoup', 'OnionTomatoSoup', 'OnionLettuceSoup',
+          'AppleOrangeJuice', 'AppleBananaJuice', 'BananaOrangeJuice')),
+    #   exp_far        : 仕切り地図。AI側の奥にりんごだけを置き、鍋・
+    #                    玉ねぎ・オレンジは手元に固めた。「りんごを先に」
+    #                    という指示だけが長い往復になる。
+    exp_far=dict(level="exp_far", max_num_orders=3,),
+    #   exp_tight      : 狭い仕切り地図。注文2品用。左(AI側)に鍋と
+    #                    フルーツ一式、右に野菜。移動が短いぶん煮込みが
+    #                    律速になりやすく、最初の一手の間違いが効く。
+    exp_tight=dict(level="exp_tight", max_num_orders=2,),
     #   exp_dualpot    : 鍋を2つ、中央の島に置いた版。どちらの鍋にも
     #                    両側から触れるので、待つ側が入口を塞がない。
     #                    煮込みの開始をずらすと「残り時間の違う鍋」が

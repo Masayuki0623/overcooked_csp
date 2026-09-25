@@ -41,6 +41,11 @@ class MapSetting:
     # --orders のプリセットはここへ解決済みのレシピ名を載せるため、
     # リプレイには「プリセット名」ではなく実際に出た注文が残る。
     order_recipes: tuple[str, ...] | None = None
+    # エンドレス方式。注文が出るたびに order_pool から引いて補充し、
+    # 常に max_num_orders 件を表示し続ける。終わりは max_num_timesteps(秒)。
+    endless_orders: bool = False
+    order_pool: tuple[str, ...] | None = None
+    order_seed: int | None = None
 
     num_agents: int = 2  # fixed
 
@@ -305,6 +310,33 @@ class OvercookedEnvironment(gym.Env):
         info = {"t": self.t, "done": done,
                 "termination_info": self.termination_info, "events": events}
         return state, reward, done, info
+
+    # 実際にこなした工程とみなす操作。Move/Pickup/Put は「手数」であって
+    # 仕事の完了ではないので分けて数える。Chop_X は材料1つにつき1回だけ出る
+    # (押した回数ではない)ことを実測で確認済み。
+    WORK_EVENTS = ('Chop', 'Cook', 'Mix', 'Assemble', 'Deliver')
+
+    def work_counts(self):
+        """誰がどの工程を何回こなしたかを、実際の操作履歴から数える。
+
+        計画側の completed_task_ids は cook しか記録しない(chop と serve は
+        「置くと決めた瞬間」であって実行確認ではないため)。こちらは盤面で
+        実際に起きたことなので、そのまま成績として使える。
+        """
+        out = {}
+        for agent in self.sim_agents:
+            out[agent.name] = {'work': 0, 'moves': 0, 'detail': {}}
+        for e in getattr(self, 'interact_history', []) or []:
+            rec = out.get(e.playerA)
+            if rec is None:
+                continue
+            kind = str(e.event).split('_')[0]
+            if kind in self.WORK_EVENTS:
+                rec['work'] += 1
+                rec['detail'][kind] = rec['detail'].get(kind, 0) + 1
+            else:
+                rec['moves'] += 1
+        return out
 
     def done(self):
         # 注文が全部片づいたら終わり。残っていない盤面を動かし続けても
