@@ -102,11 +102,15 @@ INSTRUCTION_TIMING_NO_INSTRUCTION = 'no_instruction'
 #                    見送り不可(ESCで閉じられない)。実験条件としてタイミングと
 #                    回数を完全に固定するためのモード。
 INSTRUCTION_TIMING_ONCE_AT_START = 'once_at_start'
+# 開始直後に1回出し、その後は AI が n 個の作業を終えるたびに出し直す。
+# 1回だけだと損失が「間違った一手ぶん」で打ち止まるため、積めるようにしたもの。
+INSTRUCTION_TIMING_EVERY_N_TASKS = 'every_n_tasks'
 INSTRUCTION_TIMINGS = (
     INSTRUCTION_TIMING_FREE,
     INSTRUCTION_TIMING_ENABLE_COOK,
     INSTRUCTION_TIMING_NO_INSTRUCTION,
     INSTRUCTION_TIMING_ONCE_AT_START,
+    INSTRUCTION_TIMING_EVERY_N_TASKS,
 )
 
 
@@ -125,7 +129,7 @@ HUMAN_INTERACT_RELEASE = 'interact_release'
 
 
 class GamePlay(Game):
-    def __init__(self, env, replay: Replay, agent_set: AgentSetting, debug_mode: bool = False, human_agent_idx: int | None = 1, ai_agent_idx: int | None = 0, sc_2agent: bool = False, instruction_request_timing: str = INSTRUCTION_TIMING_FREE):
+    def __init__(self, env, replay: Replay, agent_set: AgentSetting, debug_mode: bool = False, human_agent_idx: int | None = 1, ai_agent_idx: int | None = 0, sc_2agent: bool = False, instruction_request_timing: str = INSTRUCTION_TIMING_FREE, instruct_every: int = 3):
         Game.__init__(self, env, play=True)
         self.replay = replay
         self.agent_set = agent_set
@@ -204,6 +208,13 @@ class GamePlay(Game):
         self._seen_ready_cook_actions = set()
         # once_at_start で、開始直後の1回を出したかどうか。
         self._once_instruction_done = False
+        # every_n_tasks 用。AI の担当作業が切り替わった回数で数える。
+        # CSPAgent の completed_task_ids は cook しか記録しない(chop と serve は
+        # 「置くと決めた瞬間」であって実行確認ではない)ため、そちらは使えない。
+        self.instruct_every = max(1, int(instruct_every or 1))
+        self._ai_task_switches = 0
+        self._last_ai_task_id = None
+        self._instructed_at_switch = None
         # 指示の選ばせ方を差し替える口。Web 版はブラウザ側に出したいので、
         # ここに「候補を渡すと選ばれた1つを返す」関数を入れる。
         # 何も入っていなければ、これまでどおり pygame の画面を出す。
@@ -275,7 +286,8 @@ class GamePlay(Game):
             widened = pygame.display.set_mode((old_size[0] + panel_width, old_size[1]))
             # once_at_start は見送り不可。ESC で閉じられないようにする。
             allow_cancel = (self.instruction_request_timing
-                            != INSTRUCTION_TIMING_ONCE_AT_START)
+                            not in (INSTRUCTION_TIMING_ONCE_AT_START,
+                                    INSTRUCTION_TIMING_EVERY_N_TASKS))
             panel = InstructionPanel(candidates, env_summary=self._build_env_summary(),
                                      allow_cancel=allow_cancel)
             return panel.run(widened, snapshot)
@@ -672,6 +684,42 @@ class GamePlay(Game):
             return
         self._once_instruction_done = True
         self._request_instruction(trigger='once_at_start', allow_text_fallback=False)
+
+    def _count_ai_task_switches(self):
+        """AI の担当作業が切り替わった回数。作業を1つ終えるごとに1増える。"""
+        ai = getattr(self, 'ai', None)
+        if ai is None:
+            return self._ai_task_switches
+        sched = (getattr(ai, 'schedule_per_agent', None) or {}).get(
+            getattr(ai, 'own_agent_idx', 0)) or []
+        idx = (getattr(ai, 'current_task_idx', None) or {}).get(
+            getattr(ai, 'own_agent_idx', 0), 0)
+        cur = sched[idx]['id'] if idx < len(sched) else None
+        if cur is not None and cur != self._last_ai_task_id:
+            self._last_ai_task_id = cur
+            self._ai_task_switches += 1
+        return self._ai_task_switches
+
+    def _poll_every_n_tasks_trigger(self):
+        """every_n_tasks: 開始直後に1回、以後は n 個の作業ごとに指示画面を出す。"""
+        if self.instruction_request_timing != INSTRUCTION_TIMING_EVERY_N_TASKS:
+            return
+        if self._instruction_panel_active or self.ai is None:
+            return
+        if self._latest_env_state is None:
+            return
+        n = self._count_ai_task_switches()
+        if self._instructed_at_switch is None:
+            # 開始直後の1回目。once_at_start と同じ位置で出す。
+            self._instructed_at_switch = n
+            self._request_instruction(trigger='every_n_tasks',
+                                      allow_text_fallback=False)
+            return
+        if n - self._instructed_at_switch < self.instruct_every:
+            return
+        self._instructed_at_switch = n
+        self._request_instruction(trigger='every_n_tasks',
+                                  allow_text_fallback=False)
 
     def _poll_cook_instruction_trigger(self):
         """enable_cook: 調理タスクに今すぐ着手できる状態になった瞬間、指示画面を出す。
@@ -1116,6 +1164,7 @@ class GamePlay(Game):
             # 自動呼び出しの監視もこのループに置く。
             self._poll_cook_instruction_trigger()
             self._poll_once_at_start_trigger()
+            self._poll_every_n_tasks_trigger()
             if not self._q_control.empty():
                 event, args = self._q_control.get_nowait()
                 if event == 'Quit':

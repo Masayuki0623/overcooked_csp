@@ -1184,6 +1184,8 @@
   const INSTRUCTION_CHOICES = [
     { id: 'once_at_start', label: '指示あり(最初に1回)',
       desc: '始まってすぐ、AIに何をしてほしいかを1つ選びます' },
+    { id: 'every_n_tasks', label: 'n回ごとに指示',
+      desc: '始まってすぐ1回、そのあとはAIが作業をn個終えるたびに選び直します' },
     { id: 'no_instruction', label: '指示なし',
       desc: 'AIは自分で段取りを決めて動きます' },
   ];
@@ -1238,7 +1240,8 @@
   const DEBUG_DEFAULT = { on: false, endless: false, seconds: 60,
                           orders_active: 3, cook_seconds: 15, chop_steps: 8 };
   let pick = { map: null, preset: null, case: '', instruction: 'once_at_start',
-               skip_budget: 0, debug: Object.assign({}, DEBUG_DEFAULT) };
+               skip_budget: 0, instruct_every: 3,
+               debug: Object.assign({}, DEBUG_DEFAULT) };
   try { Object.assign(pick, JSON.parse(localStorage.getItem(PICK_STORE) || '{}')); } catch (e) {}
   const optionsReady = fetch('/api/options').then(r => r.json()).then(o => { options = o; })
     .catch(() => {});
@@ -1296,7 +1299,14 @@
           `class="${pick.instruction === c.id ? 'on' : ''}">${esc(c.label)}</button>`).join('') +
         `</div><div class="hint">${esc((INSTRUCTION_CHOICES.find(
             (c) => c.id === pick.instruction) || {}).desc || '')}</div></div>` +
-        (pick.instruction === 'once_at_start' ?
+        (pick.instruction === 'every_n_tasks' ?
+          '<div class="pick"><div class="lab">何作業ごとに指示するか</div>' +
+          '<label class="dbg-row"><span>n</span>' +
+          `<input type="number" id="pick-every" value="${Number(pick.instruct_every) || 3}" ` +
+          'min="1" max="20" step="1"><em>既定 3</em></label>' +
+          '<div class="hint">開始直後に1回、そのあとはn個ごと。' +
+          '小さくするほど指示の回数が増えます</div></div>' : '') +
+        (pick.instruction !== 'no_instruction' ?
           '<div class="pick"><div class="lab">指示の効き方(AIが先に挟める作業の数)</div>' +
           '<div class="opts">' +
           SKIP_BUDGETS.map((b) =>
@@ -1336,6 +1346,11 @@
         pick.case = e.target.value;
         savePick();
       });
+      const every = document.getElementById('pick-every');
+      if (every) every.addEventListener('change', () => {
+        pick.instruct_every = Math.max(1, Math.min(20, Number(every.value) || 3));
+        savePick();
+      });
     }
     wireDebug();
     updateStartButton();
@@ -1348,6 +1363,7 @@
              case: pick.case === '' ? null : Number(pick.case),
              instruction: pick.instruction,
              skip_budget: Number(pick.skip_budget) || 0,
+             instruct_every: Number(pick.instruct_every) || 3,
              debug: d.on ? {
                endless: !!d.endless,
                seconds: Number(d.seconds) || 60,

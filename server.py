@@ -67,6 +67,7 @@ for extra in (ROOT / 'agent', ROOT / 'testbed-cooking'):
 from agent import play_main  # noqa: E402
 from agent.gameplay import (  # noqa: E402
     INSTRUCTION_TIMINGS,
+    INSTRUCTION_TIMING_EVERY_N_TASKS,
     INSTRUCTION_TIMING_FREE,
     INSTRUCTION_TIMING_NO_INSTRUCTION,
     INSTRUCTION_TIMING_ONCE_AT_START,
@@ -772,14 +773,20 @@ class WebGamePlay:
             picked_by = 'chosen'
         instruction = choice.get('instruction')
         if instruction not in (INSTRUCTION_TIMING_ONCE_AT_START,
-                               INSTRUCTION_TIMING_NO_INSTRUCTION):
+                               INSTRUCTION_TIMING_NO_INSTRUCTION,
+                               INSTRUCTION_TIMING_EVERY_N_TASKS):
             instruction = INSTRUCTION_TIMING_ONCE_AT_START
+        try:
+            instruct_every = max(1, min(20, int(choice.get('instruct_every') or 3)))
+        except (TypeError, ValueError):
+            instruct_every = 3
         skip_budget = choice.get('skip_budget')
         if skip_budget not in SKIP_BUDGETS:
             skip_budget = SKIP_BUDGETS[0]
         out = {'map': map_name, 'preset': preset, 'case': case,
                'recipes': list(sets[case]), 'picked_by': picked_by,
-               'instruction': instruction, 'skip_budget': skip_budget}
+               'instruction': instruction, 'skip_budget': skip_budget,
+               'instruct_every': instruct_every}
         # デバッグ画面からの上書き。参加者IDのある回や、チュートリアル・
         # 練習には効かせない(上の分岐で先に返している)。
         debug = sanitize_debug(choice.get('debug'))
@@ -1290,6 +1297,7 @@ class WebGamePlay:
             orders, a.order_seed,
             timing,
             map_overrides=map_overrides,
+            instruct_every=int((sel or {}).get('instruct_every') or 3),
         )
         if sel and map_overrides and map_overrides.get('endless_orders'):
             # エンドレスでは env.recipes は地図が持っている既定の並びで、
@@ -2157,6 +2165,7 @@ async def ws(sock: WebSocket):
                     'case': msg.get('case'),
                     'instruction': msg.get('instruction'),
                     'skip_budget': msg.get('skip_budget'),
+                    'instruct_every': msg.get('instruct_every'),
                     'debug': msg.get('debug'),
                     'participant': msg.get('participant')})
             elif kind == 'ack':

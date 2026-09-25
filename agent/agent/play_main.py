@@ -161,7 +161,7 @@ def resolve_orders(orders, order_seed=None):
     return {'order_file': orders}
 
 
-def init_env_replay(map_name, agent0_name, agent1_name, task_name=None, no_reschedule=False, debug_mode=False, orders=None, order_seed=None, instruction_request_timing=INSTRUCTION_TIMING_FREE, map_overrides=None):
+def init_env_replay(map_name, agent0_name, agent1_name, task_name=None, no_reschedule=False, debug_mode=False, orders=None, order_seed=None, instruction_request_timing=INSTRUCTION_TIMING_FREE, map_overrides=None, instruct_every=3):
     map_kwargs = dict(MAP_SETTINGS[map_name])
     map_kwargs.update(resolve_orders(orders, order_seed))
     # デバッグ用に地図の設定を上書きする(エンドレス・セッション長など)。
@@ -269,7 +269,8 @@ def init_env_replay(map_name, agent0_name, agent1_name, task_name=None, no_resch
             raise NotImplementedError("This mode currently supports one AI and one human, or CSP on agent1/agent0.")
 
     game = GamePlay(env, replay, agent_set, debug_mode=debug_mode, human_agent_idx=human_idx, ai_agent_idx=ai_idx,
-                    instruction_request_timing=instruction_request_timing)
+                    instruction_request_timing=instruction_request_timing,
+                    instruct_every=instruct_every)
     game.ai = ai
     # 詳細トレースは --debug のときだけ出す。
     # これらは1回の判断ごとに数十行を出力するため、常時ONだと実コンソールへの
