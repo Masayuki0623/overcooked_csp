@@ -214,6 +214,8 @@ class GamePlay(Game):
         self.instruct_every = max(1, int(instruct_every or 1))
         self._ai_tasks_done = 0
         self._hist_cursor = 0
+        self._world_changes = 0
+        self._world_cursor = 0
         self._instructed_at_switch = None
         # 出す番が来たのに指示できる作業が1つも無かったとき、その番を
         # 持ち越す。できるようになった瞬間に出す。
@@ -762,6 +764,26 @@ class GamePlay(Game):
                 self._ai_tasks_done += 1
         return self._ai_tasks_done
 
+    def _count_world_changes(self):
+        """誰かが物を置いた・使った回数。指示できる作業が増えうる合図。
+
+        候補を作るにはゲームを止めて AI の内部を読む必要があり、1回 40〜160ms
+        かかる。定期的に試すと、その間ずっと一瞬ずつ固まって見える。
+        盤面が動いたときだけ試すための合図として使う。
+        """
+        hist = getattr(self.env, 'interact_history', None) or []
+        total = len(hist)
+        while self._world_cursor < total:
+            try:
+                e = hist[self._world_cursor]
+            except IndexError:
+                break
+            self._world_cursor += 1
+            kind = str(getattr(e, 'event', '')).split('_')[0]
+            if kind not in ('Move', 'No-op'):
+                self._world_changes += 1
+        return self._world_changes
+
     def _poll_every_n_tasks_trigger(self):
         """every_n_tasks: 開始直後に1回、以後は n 個の作業ごとに指示画面を出す。"""
         if self.instruction_request_timing != INSTRUCTION_TIMING_EVERY_N_TASKS:
@@ -776,15 +798,18 @@ class GamePlay(Game):
             if not first and n - self._instructed_at_switch < self.instruct_every:
                 return
         else:
-            # 持ち越し中。盤面が動いたときだけ試す。候補を作るには AI の
-            # 内部を読む必要があり、計画中のスレッドと重なると壊れるので、
-            # 毎フレーム確かめには行かない。
+            # 持ち越し中。盤面が動いたときだけ試す。候補を作るのは
+            # 1回 40〜160ms かかり、その間ゲームを止めるので、
+            # 定期的に試すと一瞬ずつ固まって見える(実測)。
+            # 「誰かが物を置いた」「注文が入れ替わった」のどちらかが
+            # 起きない限り、指示できる作業が増えることはない。
             orders = len(getattr(getattr(self.env, 'order_scheduler', None),
                                  'current_orders', ()) or ())
-            moved = (n != self._pending_seen[0] or orders != self._pending_seen[1])
-            if not moved and time.time() - self._last_candidate_check < 2.0:
+            changes = self._count_world_changes()
+            seen = (changes, orders)
+            if seen == self._pending_seen:
                 return
-            self._pending_seen = (n, orders)
+            self._pending_seen = seen
 
         self._last_candidate_check = time.time()
         was_pending = self._instruction_pending
