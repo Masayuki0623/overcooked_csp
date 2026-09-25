@@ -1265,7 +1265,9 @@
     // 実験の参加者は、地図もレシピも選ばない(割り当てどおり)。
     // 練習も条件はくじ引きなので、設定をいじる画面はもう出さない。
     // 動作確認のときだけ ?dev=1 で従来の選択画面を出す。
-    const experiment = !!participantId || !DEV;
+    // 条件を指定して練習するときは、参加者IDを見ずに全部の選択を出す。
+    const custom = (mode === 'custom');
+    const experiment = custom ? false : (!!participantId || !DEV);
     const idBox =
       '<div class="pick"><div class="lab">参加者ID(実験のときだけ入れてください)</div>' +
       `<input type="text" id="pid" value="${esc(participantId)}" placeholder="例: p01" ` +
@@ -1278,8 +1280,9 @@
 
     showOverlay(
       '<div class="stage-pick">' +
-      `<div class="big">${experiment ? 'セッションを始めます' : 'ステージを選んでください'}</div>` +
-      idBox +
+      `<div class="big">${custom ? '条件を指定して練習'
+        : (experiment ? 'セッションを始めます' : 'ステージを選んでください')}</div>` +
+      (custom ? '<div class="sub">好きな条件で遊べます。記録は残りません。</div>' : idBox) +
       (experiment ? '' :
         `<div class="pick"><div class="lab">地図</div><div class="opts">${btns(options.maps, 'map')}</div>` +
         `<div class="hint">${esc(map.desc)}</div></div>` +
@@ -1311,13 +1314,15 @@
     });
 
     const pid = document.getElementById('pid');
-    const applyPid = () => {
-      if (pid.value.trim() === participantId) return;
-      saveParticipant(pid.value);
-      loadAssignment();
-    };
-    pid.addEventListener('change', applyPid);
-    pid.addEventListener('blur', applyPid);
+    if (pid) {
+      const applyPid = () => {
+        if (pid.value.trim() === participantId) return;
+        saveParticipant(pid.value);
+        loadAssignment();
+      };
+      pid.addEventListener('change', applyPid);
+      pid.addEventListener('blur', applyPid);
+    }
 
     el.overlayText.querySelectorAll('.opts button').forEach((b) => b.addEventListener('click', () => {
       pick[b.dataset.key] = b.dataset.key === 'skip_budget'
@@ -1336,7 +1341,8 @@
     updateStartButton();
     document.getElementById('start').addEventListener('click', () => {
       if (!spritesAllLoaded) return;
-      saveParticipant(document.getElementById('pid').value);
+      const pidEl = document.getElementById('pid');
+      if (pidEl) saveParticipant(pidEl.value);
       const d = pick.debug || {};
       send({ type: 'start', map: pick.map, preset: pick.preset,
              case: pick.case === '' ? null : Number(pick.case),
@@ -1349,7 +1355,7 @@
                cook_seconds: Number(d.cook_seconds) || 15,
                chop_steps: Number(d.chop_steps) || 8,
              } : null,
-             participant: participantId || null });
+             participant: custom ? null : (participantId || null) });
       showOverlay('<div class="big">準備しています</div><div class="sub">数秒かかります</div>');
     });
   }
@@ -1539,6 +1545,9 @@
       item('practice', '練習',
            '本番と同じ条件で、好きなだけ練習できます。<br>' +
            '地図も注文も毎回くじ引きです。記録は残りません。') +
+      item('custom', '条件を指定して練習',
+           '地図・注文・指示の効き方に加えて、煮込み時間や切る回数、<br>' +
+           'エンドレス注文なども自分で決めて遊べます。記録は残りません。') +
       item('experiment', '実験に参加',
            '参加者IDを入れて、決められた順番で遊びます。<br>' +
            '1回ごとにアンケートがあります。') +
@@ -1548,7 +1557,12 @@
         setMode(b.dataset.mode);
         if (b.dataset.mode === 'tutorial') { setStep(0); showTutorialCard(); }
         else if (b.dataset.mode === 'practice') startPractice();
-        else showStart();
+        else if (b.dataset.mode === 'custom') {
+          // 条件を指定して練習。デバッグ設定は最初から開いた状態にする。
+          pick.debug = Object.assign({}, pick.debug || DEBUG_DEFAULT, { on: true });
+          savePick();
+          showStart();
+        } else showStart();
       });
     });
   }

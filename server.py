@@ -1292,8 +1292,21 @@ class WebGamePlay:
             map_overrides=map_overrides,
         )
         if sel and map_overrides and map_overrides.get('endless_orders'):
-            sel['recipes'] = [type(r).__name__
-                              for r in (getattr(self.env, 'recipes', None) or [])]
+            # エンドレスでは env.recipes は地図が持っている既定の並びで、
+            # 実際に出ている注文とは違う。抽選した順(order_history)の
+            # 先頭ぶんが、いま出ている注文。
+            sch = getattr(self.env, 'order_scheduler', None)
+            drawn = list(getattr(sch, 'order_history', []) or [])
+            sel['recipes'] = drawn[:getattr(sch, 'active_orders', 3)]
+            print(f"[server] デバッグ設定: エンドレス "
+                  f"(同時{getattr(sch, 'active_orders', '?')}件 / "
+                  f"{dbg.get('seconds')}秒 / 煮込み{dbg.get('cook_seconds')}秒 / "
+                  f"切る{dbg.get('chop_steps')}回) 最初の注文="
+                  f"{getattr(sch, 'order_history', [])}", flush=True)
+        elif dbg:
+            print(f"[server] デバッグ設定: 煮込み{dbg.get('cook_seconds')}秒 / "
+                  f"切る{dbg.get('chop_steps')}回 / {dbg.get('seconds')}秒",
+                  flush=True)
         if sel and not sel.get('recipes'):
             # チュートリアルの1人用の地図は、注文を地図そのものが持っている。
             # 画面に出すために、実際に出た注文をここで控える。
