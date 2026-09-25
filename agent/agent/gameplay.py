@@ -705,9 +705,34 @@ class GamePlay(Game):
         self._once_instruction_done = True
         self._request_instruction(trigger='once_at_start', allow_text_fallback=False)
 
-    # AI が1つの工程を終えたとみなす操作。Assemble / Pickup / Put / Move は
-    # 工程そのものではなく途中の手順なので数えない。
-    AI_TASK_EVENTS = ('Chop', 'Cook', 'Mix', 'Deliver')
+    @staticmethod
+    def _is_ai_task_done(event):
+        """その操作で AI が工程を1つ終えて、手が空いたか。
+
+        Chop_X は「まな板で切り終えた瞬間」で、切った物はまだまな板の上に
+        ある。そこから拾って台に置くまでが1つの工程なので、Chop では数えず、
+        置いた(Put / Assemble)ところで数える。
+
+            0.4s Pickup_FreshOnion
+            1.2s Chop_FreshOnion              <- ここではまだ終わっていない
+            2.2s Pickup_ChoppedOnion
+            4.0s Put_ChoppedOnion_on_Counter  <- ここで1件
+
+        鍋・ミキサーへ入れる(Cook / Mix)と提供(Deliver)は、その操作で
+        手が空くのでそのまま1件。皿やコップを戻すだけの Put、皿に盛る
+        途中の Assemble(まだ持っている)は数えない。
+        """
+        name = str(event)
+        kind = name.split('_')[0]
+        if kind in ('Cook', 'Mix', 'Deliver'):
+            return True
+        if kind == 'Put':
+            return not (name.startswith('Put_Plate_on')
+                        or name.startswith('Put_Cup_on'))
+        if kind == 'Assemble':
+            # 皿(コップ)に乗せる Assemble は持ったままなので、まだ途中。
+            return '-Plate' not in name and '-Cup' not in name
+        return False
 
     def _count_ai_finished_tasks(self):
         """AI が実際に終えた工程の数。
@@ -733,7 +758,7 @@ class GamePlay(Game):
             self._hist_cursor += 1
             if getattr(e, 'playerA', None) != name:
                 continue
-            if str(getattr(e, 'event', '')).split('_')[0] in self.AI_TASK_EVENTS:
+            if self._is_ai_task_done(getattr(e, 'event', '')):
                 self._ai_tasks_done += 1
         return self._ai_tasks_done
 
