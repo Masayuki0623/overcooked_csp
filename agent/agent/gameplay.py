@@ -386,7 +386,16 @@ class GamePlay(Game):
         まれに、待ちの判定が外れて何十秒も止まることがある。あとから
         原因を追えるように、止まり始めと再開を残す。
         """
-        acts = list(move.values()) if isinstance(move, dict) else [move]
+        # 見るのは AI 自身の行動だけ。AI は相方のぶんの行動も一緒に返すので、
+        # 全部を見ると「相方が動く計画になっている」だけで動いている扱いに
+        # なり、AI が止まっていても記録が出ない。実測で、AI が15秒固まった
+        # 回に1行も残っていなかった。
+        if isinstance(move, dict):
+            idx = self.ai_agent_idx if self.ai_agent_idx is not None else 0
+            own = move.get(f'ai_{idx}')
+            acts = [own] if own is not None else list(move.values())
+        else:
+            acts = [move]
         moving = any(a and tuple(a) != (0, 0) for a in acts)
         now = time.time()
         if moving:
