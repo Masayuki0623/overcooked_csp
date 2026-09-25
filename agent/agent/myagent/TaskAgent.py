@@ -506,6 +506,50 @@ class TaskAgent:
             #print(f"  [MoveTo] 一時目的地 {best_temp_pos} への向かいます。次のステップ: {next_step}")
             return (next_step[0] - self_pos[0], next_step[1] - self_pos[1])
 
+    def station_access_tiles(self, env, station_loc):
+        """その設備に手を出せる床マス。"""
+        grid = env.to_grid
+        tiles = []
+        for d in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            p = (station_loc[0] + d[0], station_loc[1] + d[1])
+            if not (0 <= p[0] < env.world_width and 0 <= p[1] < env.world_height):
+                continue
+            if grid[p[0]][p[1]] == 1:
+                tiles.append(p)
+        return tiles
+
+    def wait_clear_of_station(self, env, station_loc, dynamic_obstacles=None):
+        """設備が空くのを待つあいだ、その入口には立たない。
+
+        入口が1マスしかない台所(exp_ring の鍋は (0,7) で、接する床は
+        (1,7) だけ)では、待っている本人がそこに立つと、中身を取り出しに
+        来た相手が設備へ近づけない。取り出されなければ設備は空かないので、
+        待ちは永久に終わらない。実測では2人が24秒すくみ、その間にスープが
+        焦げて、100秒で1品も出せなかった。
+
+        入口に立っているならどく。立っていないならその場で待つ。
+        """
+        access = self.station_access_tiles(env, station_loc)
+        self_pos = env.self_pos
+        if self_pos not in access:
+            return (0, 0)
+        obstacles = set(dynamic_obstacles or ())
+        grid = env.to_grid
+        best = None
+        for x in range(env.world_width):
+            for y in range(env.world_height):
+                p = (x, y)
+                if p == self_pos or p in access or p in obstacles:
+                    continue
+                if grid[x][y] != 1:
+                    continue
+                dist = abs(x - self_pos[0]) + abs(y - self_pos[1])
+                if best is None or dist < best[0]:
+                    best = (dist, p)
+        if best is None:
+            return (0, 0)
+        return self.move_to(env, best[1], dynamic_obstacles=dynamic_obstacles)
+
     def move_to_safe_position(self, env, blocking_task, own_next_task=None, dynamic_obstacles=None):
         """
         依存待ち状態のときに他エージェントのじゃまにならない場所へ移動する。
@@ -1223,7 +1267,12 @@ class TaskAgent:
         if not target_pot_loc:
             if blocked_pot_loc:
                 # print(f"[DEBUG] cook:wait_for_pot blocked_pot={blocked_pot_loc}")
-                return self.move_to(env, blocked_pot_loc, dynamic_obstacles=dynamic_obstacles), "鍋が空くまで待機中"
+                # 鍋へ寄って待つと、入口が1マスしかない台所では自分が
+                # そこを塞いでしまう。中身を取り出しに来た相手が鍋へ
+                # 近づけず、取り出されないので鍋も空かない。
+                return (self.wait_clear_of_station(env, blocked_pot_loc,
+                                                   dynamic_obstacles=dynamic_obstacles),
+                        "鍋が空くまで待機中")
             return (0, 0), "利用可能な鍋がありません"
             
         if not missing_ings:
