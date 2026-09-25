@@ -1,0 +1,1172 @@
+[
+ {
+  "t_in": 8.400000000000002,
+  "t_cook": 8.400000000000002,
+  "t_done": 23.599999999999948,
+  "deliveries": [
+   {
+    "dish": "CookedOnion-CookedTomato-Plate",
+    "time": 26.2,
+    "ok": true,
+    "by": "agent-1"
+   },
+   {
+    "dish": "ChoppedLettuce-ChoppedTomato-Plate",
+    "time": 29.8,
+    "ok": true,
+    "by": "agent-1"
+   },
+   {
+    "dish": "Cup-MixedBanana-MixedOrange",
+    "time": 41.6,
+    "ok": true,
+    "by": "agent-1"
+   }
+  ],
+  "pot_locs": [
+   [
+    0,
+    7
+   ]
+  ],
+  "map": "exp_partition",
+  "recipes": [
+   "TomatoLettuceSalad",
+   "OnionTomatoSoup",
+   "BananaOrangeJuice"
+  ],
+  "skip_budget": 1,
+  "pid": "924test1",
+  "ts": "2026-09-24T17:32:19",
+  "makespan": 41.6,
+  "instruction": "chop_onion",
+  "serve_times": "26.2|29.8|41.6",
+  "serve_dishes": "CookedOnion-CookedTomato-Plate|ChoppedLettuce-ChoppedTomato-Plate|Cup-MixedBanana-MixedOrange",
+  "loss": "0.0",
+  "natural_rank": "1",
+  "exec_rank": "1",
+  "start_gain": "0.0"
+ },
+ {
+  "t_in": 11.99999999999999,
+  "t_cook": 11.99999999999999,
+  "t_done": 27.199999999999935,
+  "deliveries": [
+   {
+    "dish": "ChoppedOnion-ChoppedTomato-Plate",
+    "time": 21.8,
+    "ok": true,
+    "by": "agent-1"
+   },
+   {
+    "dish": "ChoppedOnion-ChoppedTomato-Plate",
+    "time": 26.6,
+    "ok": true,
+    "by": "agent-1"
+   },
+   {
+    "dish": "CookedLettuce-CookedOnion-Plate",
+    "time": 28.8,
+    "ok": true,
+    "by": "agent-1"
+   }
+  ],
+  "pot_locs": [
+   [
+    0,
+    7
+   ]
+  ],
+  "map": "exp_ring",
+  "recipes": [
+   "OnionTomatoSalad",
+   "OnionTomatoSalad",
+   "OnionLettuceSoup"
+  ],
+  "skip_budget": 2,
+  "pid": "924test2",
+  "ts": "2026-09-24T17:41:16",
+  "makespan": 28.8,
+  "instruction": "chop_onion",
+  "serve_times": "21.8|26.6|28.8",
+  "serve_dishes": "ChoppedOnion-ChoppedTomato-Plate|ChoppedOnion-ChoppedTomato-Plate|CookedLettuce-CookedOnion-Plate",
+  "loss": "0.0",
+  "natural_rank": "1",
+  "exec_rank": "1",
+  "start_gain": "0.0"
+ },
+ {
+  "t_in": 18.199999999999967,
+  "t_cook": 18.199999999999967,
+  "t_done": 33.399999999999935,
+  "deliveries": [
+   {
+    "dish": "ChoppedOnion-ChoppedTomato-Plate",
+    "time": 24.6,
+    "ok": true,
+    "by": "agent-1"
+   },
+   {
+    "dish": "Cup-MixedApple-MixedBanana",
+    "time": 29.0,
+    "ok": true,
+    "by": "agent-1"
+   },
+   {
+    "dish": "CookedLettuce-CookedTomato-Plate",
+    "time": 34.2,
+    "ok": true,
+    "by": "agent-1"
+   }
+  ],
+  "pot_locs": [
+   [
+    0,
+    7
+   ]
+  ],
+  "map": "exp_partition",
+  "recipes": [
+   "OnionTomatoSalad",
+   "TomatoLettuceSoup",
+   "AppleBananaJuice"
+  ],
+  "skip_budget": 0,
+  "pid": "924test2",
+  "ts": "2026-09-24T17:42:18",
+  "makespan": 34.2,
+  "instruction": "chop_onion",
+  "serve_times": "24.6|29.0|34.2",
+  "serve_dishes": "ChoppedOnion-ChoppedTomato-Plate|Cup-MixedApple-MixedBanana|CookedLettuce-CookedTomato-Plate",
+  "loss": "0.0",
+  "natural_rank": "1",
+  "exec_rank": "1",
+  "start_gain": "0.0"
+ },
+ {
+  "t_in": 13.399999999999984,
+  "t_cook": 13.399999999999984,
+  "t_done": 28.59999999999993,
+  "deliveries": [
+   {
+    "dish": "ChoppedLettuce-ChoppedTomato-Plate",
+    "time": 24.8,
+    "ok": true,
+    "by": "agent-1"
+   },
+   {
+    "dish": "ChoppedLettuce-ChoppedTomato-Plate",
+    "time": 25.6,
+    "ok": true,
+    "by": "agent-2"
+   },
+   {
+    "dish": "CookedOnion-CookedTomato-Plate",
+    "time": 29.4,
+    "ok": true,
+    "by": "agent-1"
+   }
+  ],
+  "pot_locs": [
+   [
+    0,
+    7
+   ]
+  ],
+  "map": "exp_ring",
+  "recipes": [
+   "TomatoLettuceSalad",
+   "TomatoLettuceSalad",
+   "OnionTomatoSoup"
+  ],
+  "skip_budget": 1,
+  "pid": "924test2",
+  "ts": "2026-09-24T17:43:07",
+  "makespan": 29.4,
+  "instruction": "chop_onion",
+  "serve_times": "24.8|25.6|29.4",
+  "serve_dishes": "ChoppedLettuce-ChoppedTomato-Plate|ChoppedLettuce-ChoppedTomato-Plate|CookedOnion-CookedTomato-Plate",
+  "loss": "0.0",
+  "natural_rank": "1",
+  "exec_rank": "1",
+  "start_gain": "0.0"
+ },
+ {
+  "t_in": 26.999999999999936,
+  "t_cook": 26.999999999999936,
+  "t_done": 42.00000000000006,
+  "deliveries": [
+   {
+    "dish": "ChoppedLettuce-ChoppedTomato-Plate",
+    "time": 18.8,
+    "ok": true,
+    "by": "agent-2"
+   },
+   {
+    "dish": "ChoppedLettuce-ChoppedTomato-Plate",
+    "time": 32.4,
+    "ok": true,
+    "by": "agent-2"
+   },
+   {
+    "dish": "CookedOnion-CookedTomato-Plate",
+    "time": 42.8,
+    "ok": true,
+    "by": "agent-1"
+   }
+  ],
+  "pot_locs": [
+   [
+    0,
+    7
+   ]
+  ],
+  "map": "exp_ring",
+  "recipes": [
+   "TomatoLettuceSalad",
+   "TomatoLettuceSalad",
+   "OnionTomatoSoup"
+  ],
+  "skip_budget": 0,
+  "pid": "924test2",
+  "ts": "2026-09-24T17:44:53",
+  "makespan": 42.8,
+  "instruction": "chop_tomato",
+  "serve_times": "18.8|32.4|42.8",
+  "serve_dishes": "ChoppedLettuce-ChoppedTomato-Plate|ChoppedLettuce-ChoppedTomato-Plate|CookedOnion-CookedTomato-Plate",
+  "loss": "2.4",
+  "natural_rank": "2",
+  "exec_rank": "1",
+  "start_gain": "2.6"
+ },
+ {
+  "t_in": 10.199999999999996,
+  "t_cook": 10.199999999999996,
+  "t_done": 25.39999999999994,
+  "deliveries": [
+   {
+    "dish": "ChoppedOnion-Plate",
+    "time": 22.0,
+    "ok": false,
+    "by": "agent-1"
+   },
+   {
+    "dish": "CookedLettuce-CookedOnion-Plate",
+    "time": 27.6,
+    "ok": true,
+    "by": "agent-1"
+   },
+   {
+    "dish": "ChoppedOnion-ChoppedTomato-Plate",
+    "time": 33.4,
+    "ok": true,
+    "by": "agent-1"
+   },
+   {
+    "dish": "Cup-MixedBanana-MixedOrange",
+    "time": 39.6,
+    "ok": true,
+    "by": "agent-1"
+   }
+  ],
+  "pot_locs": [
+   [
+    0,
+    7
+   ]
+  ],
+  "map": "exp_partition",
+  "recipes": [
+   "OnionTomatoSalad",
+   "OnionLettuceSoup",
+   "BananaOrangeJuice"
+  ],
+  "skip_budget": 1,
+  "pid": "924test2",
+  "ts": "2026-09-24T17:46:14",
+  "makespan": 39.6,
+  "instruction": "chop_onion",
+  "serve_times": "27.6|33.4|39.6",
+  "serve_dishes": "CookedLettuce-CookedOnion-Plate|ChoppedOnion-ChoppedTomato-Plate|Cup-MixedBanana-MixedOrange",
+  "loss": "0.0",
+  "natural_rank": "1",
+  "exec_rank": "1",
+  "start_gain": "0.0"
+ },
+ {
+  "t_in": 14.199999999999982,
+  "t_cook": 14.199999999999982,
+  "t_done": 29.399999999999928,
+  "deliveries": [
+   {
+    "dish": "ChoppedOnion-ChoppedTomato-Plate",
+    "time": 22.4,
+    "ok": true,
+    "by": "agent-1"
+   },
+   {
+    "dish": "CookedLettuce-CookedTomato-Plate",
+    "time": 31.4,
+    "ok": true,
+    "by": "agent-1"
+   },
+   {
+    "dish": "Cup-MixedApple-MixedBanana",
+    "time": 35.6,
+    "ok": true,
+    "by": "agent-1"
+   }
+  ],
+  "pot_locs": [
+   [
+    0,
+    7
+   ]
+  ],
+  "map": "exp_partition",
+  "recipes": [
+   "OnionTomatoSalad",
+   "TomatoLettuceSoup",
+   "AppleBananaJuice"
+  ],
+  "skip_budget": 2,
+  "pid": "924test2",
+  "ts": "2026-09-24T17:47:11",
+  "makespan": 35.6,
+  "instruction": "chop_onion",
+  "serve_times": "22.4|31.4|35.6",
+  "serve_dishes": "ChoppedOnion-ChoppedTomato-Plate|CookedLettuce-CookedTomato-Plate|Cup-MixedApple-MixedBanana",
+  "loss": "0.0",
+  "natural_rank": "1",
+  "exec_rank": "1",
+  "start_gain": "-5.0"
+ },
+ {
+  "t_in": 12.599999999999987,
+  "t_cook": 12.599999999999987,
+  "t_done": 27.799999999999933,
+  "deliveries": [
+   {
+    "dish": "ChoppedLettuce-ChoppedTomato-Plate",
+    "time": 16.2,
+    "ok": true,
+    "by": "agent-1"
+   },
+   {
+    "dish": "ChoppedLettuce-ChoppedTomato-Plate",
+    "time": 26.2,
+    "ok": true,
+    "by": "agent-2"
+   },
+   {
+    "dish": "CookedLettuce-CookedOnion-Plate",
+    "time": 28.6,
+    "ok": true,
+    "by": "agent-1"
+   }
+  ],
+  "pot_locs": [
+   [
+    0,
+    7
+   ]
+  ],
+  "map": "exp_ring",
+  "recipes": [
+   "TomatoLettuceSalad",
+   "TomatoLettuceSalad",
+   "OnionLettuceSoup"
+  ],
+  "skip_budget": 0,
+  "pid": "924test3",
+  "ts": "2026-09-24T17:59:42",
+  "makespan": 28.6,
+  "instruction": "chop_onion",
+  "serve_times": "16.2|26.2|28.6",
+  "serve_dishes": "ChoppedLettuce-ChoppedTomato-Plate|ChoppedLettuce-ChoppedTomato-Plate|CookedLettuce-CookedOnion-Plate",
+  "loss": "0.0",
+  "natural_rank": "1",
+  "exec_rank": "1",
+  "start_gain": "0.0"
+ },
+ {
+  "t_in": 28.39999999999993,
+  "t_cook": 28.39999999999993,
+  "t_done": 43.40000000000008,
+  "deliveries": [
+   {
+    "dish": "ChoppedOnion-ChoppedTomato-Plate",
+    "time": 24.2,
+    "ok": true,
+    "by": "agent-2"
+   },
+   {
+    "dish": "ChoppedOnion-ChoppedTomato-Plate",
+    "time": 29.4,
+    "ok": true,
+    "by": "agent-1"
+   },
+   {
+    "dish": "CookedLettuce-CookedTomato-Plate",
+    "time": 45.0,
+    "ok": true,
+    "by": "agent-2"
+   }
+  ],
+  "pot_locs": [
+   [
+    0,
+    7
+   ]
+  ],
+  "map": "exp_ring",
+  "recipes": [
+   "OnionTomatoSalad",
+   "OnionTomatoSalad",
+   "TomatoLettuceSoup"
+  ],
+  "skip_budget": 2,
+  "pid": "924test3",
+  "ts": "2026-09-24T18:03:05",
+  "makespan": 45.0,
+  "instruction": "chop_onion",
+  "serve_times": "24.2|29.4|45.0",
+  "serve_dishes": "ChoppedOnion-ChoppedTomato-Plate|ChoppedOnion-ChoppedTomato-Plate|CookedLettuce-CookedTomato-Plate",
+  "loss": "0.0",
+  "natural_rank": "1",
+  "exec_rank": "1",
+  "start_gain": "0.0"
+ },
+ {
+  "t_in": 11.59999999999999,
+  "t_cook": 11.59999999999999,
+  "t_done": 26.799999999999937,
+  "deliveries": [
+   {
+    "dish": "ChoppedOnion-ChoppedTomato-Plate",
+    "time": 19.0,
+    "ok": true,
+    "by": "agent-1"
+   },
+   {
+    "dish": "CookedLettuce-CookedOnion-Plate",
+    "time": 29.6,
+    "ok": true,
+    "by": "agent-1"
+   },
+   {
+    "dish": "Cup-MixedApple-MixedOrange",
+    "time": 41.6,
+    "ok": true,
+    "by": "agent-1"
+   }
+  ],
+  "pot_locs": [
+   [
+    0,
+    7
+   ]
+  ],
+  "map": "exp_partition",
+  "recipes": [
+   "OnionTomatoSalad",
+   "OnionLettuceSoup",
+   "AppleOrangeJuice"
+  ],
+  "skip_budget": 0,
+  "pid": "924test3",
+  "ts": "2026-09-24T18:04:27",
+  "makespan": 41.6,
+  "instruction": "chop_onion",
+  "serve_times": "19.0|29.6|41.6",
+  "serve_dishes": "ChoppedOnion-ChoppedTomato-Plate|CookedLettuce-CookedOnion-Plate|Cup-MixedApple-MixedOrange",
+  "loss": "0.0",
+  "natural_rank": "1",
+  "exec_rank": "1",
+  "start_gain": "0.0"
+ },
+ {
+  "t_in": 34.39999999999995,
+  "t_cook": 34.39999999999995,
+  "t_done": 49.40000000000016,
+  "deliveries": [
+   {
+    "dish": "ChoppedOnion-ChoppedTomato-Plate",
+    "time": 37.2,
+    "ok": true,
+    "by": "agent-1"
+   },
+   {
+    "dish": "Cup-MixedApple-MixedBanana",
+    "time": 50.6,
+    "ok": true,
+    "by": "agent-1"
+   },
+   {
+    "dish": "CookedLettuce-CookedTomato-Plate",
+    "time": 52.8,
+    "ok": true,
+    "by": "agent-1"
+   }
+  ],
+  "pot_locs": [
+   [
+    0,
+    7
+   ]
+  ],
+  "map": "exp_partition",
+  "recipes": [
+   "OnionTomatoSalad",
+   "TomatoLettuceSoup",
+   "AppleBananaJuice"
+  ],
+  "skip_budget": 1,
+  "pid": "924test3",
+  "ts": "2026-09-24T18:06:18",
+  "makespan": 52.8,
+  "instruction": "chop_apple",
+  "serve_times": "37.2|50.6|52.8",
+  "serve_dishes": "ChoppedOnion-ChoppedTomato-Plate|Cup-MixedApple-MixedBanana|CookedLettuce-CookedTomato-Plate",
+  "loss": "0.0",
+  "natural_rank": "2",
+  "exec_rank": "2",
+  "start_gain": "5.0"
+ },
+ {
+  "t_in": 8.600000000000001,
+  "t_cook": 8.600000000000001,
+  "t_done": 23.799999999999947,
+  "deliveries": [
+   {
+    "dish": "ChoppedLettuce-ChoppedTomato-Plate",
+    "time": 15.6,
+    "ok": true,
+    "by": "agent-1"
+   },
+   {
+    "dish": "CookedOnion-CookedTomato-Plate",
+    "time": 26.4,
+    "ok": true,
+    "by": "agent-1"
+   },
+   {
+    "dish": "ChoppedLettuce-ChoppedTomato-Plate",
+    "time": 29.0,
+    "ok": true,
+    "by": "agent-2"
+   }
+  ],
+  "pot_locs": [
+   [
+    0,
+    7
+   ]
+  ],
+  "map": "exp_ring",
+  "recipes": [
+   "TomatoLettuceSalad",
+   "TomatoLettuceSalad",
+   "OnionTomatoSoup"
+  ],
+  "skip_budget": 1,
+  "pid": "924test3",
+  "ts": "2026-09-24T18:08:26",
+  "makespan": 29.0,
+  "instruction": "chop_onion",
+  "serve_times": "15.6|26.4|29.0",
+  "serve_dishes": "ChoppedLettuce-ChoppedTomato-Plate|CookedOnion-CookedTomato-Plate|ChoppedLettuce-ChoppedTomato-Plate",
+  "loss": "0.0",
+  "natural_rank": "1",
+  "exec_rank": "1",
+  "start_gain": "0.0"
+ },
+ {
+  "t_in": 10.999999999999993,
+  "t_cook": 10.999999999999993,
+  "t_done": 26.19999999999994,
+  "deliveries": [
+   {
+    "dish": "CookedLettuce-CookedOnion-Plate",
+    "time": 29.2,
+    "ok": true,
+    "by": "agent-1"
+   },
+   {
+    "dish": "ChoppedLettuce-ChoppedTomato-Plate",
+    "time": 36.6,
+    "ok": true,
+    "by": "agent-1"
+   },
+   {
+    "dish": "Cup-MixedApple-MixedBanana",
+    "time": 41.0,
+    "ok": true,
+    "by": "agent-1"
+   }
+  ],
+  "pot_locs": [
+   [
+    0,
+    7
+   ]
+  ],
+  "map": "exp_partition",
+  "recipes": [
+   "TomatoLettuceSalad",
+   "OnionLettuceSoup",
+   "AppleBananaJuice"
+  ],
+  "skip_budget": 2,
+  "pid": "924test3",
+  "ts": "2026-09-24T18:09:40",
+  "makespan": 41.0,
+  "instruction": "chop_onion",
+  "serve_times": "29.2|36.6|41.0",
+  "serve_dishes": "CookedLettuce-CookedOnion-Plate|ChoppedLettuce-ChoppedTomato-Plate|Cup-MixedApple-MixedBanana",
+  "loss": "0.0",
+  "natural_rank": "1",
+  "exec_rank": "1",
+  "start_gain": "0.0"
+ },
+ {
+  "t_in": 34.39999999999995,
+  "t_cook": 34.39999999999995,
+  "t_done": 49.40000000000016,
+  "deliveries": [
+   {
+    "dish": "ChoppedLettuce-ChoppedTomato-Plate",
+    "time": 29.0,
+    "ok": true,
+    "by": "agent-1"
+   },
+   {
+    "dish": "ChoppedLettuce-ChoppedTomato-Plate",
+    "time": 34.2,
+    "ok": true,
+    "by": "agent-1"
+   },
+   {
+    "dish": "CookedOnion-CookedTomato-Plate",
+    "time": 50.2,
+    "ok": true,
+    "by": "agent-1"
+   }
+  ],
+  "pot_locs": [
+   [
+    0,
+    7
+   ]
+  ],
+  "map": "exp_ring",
+  "recipes": [
+   "TomatoLettuceSalad",
+   "TomatoLettuceSalad",
+   "OnionTomatoSoup"
+  ],
+  "skip_budget": 2,
+  "pid": "924test4",
+  "ts": "2026-09-24T18:38:43",
+  "makespan": 50.2,
+  "instruction": "chop_lettuce",
+  "serve_times": "29.0|34.2|50.2",
+  "serve_dishes": "ChoppedLettuce-ChoppedTomato-Plate|ChoppedLettuce-ChoppedTomato-Plate|CookedOnion-CookedTomato-Plate",
+  "loss": "0.0",
+  "natural_rank": "6",
+  "exec_rank": "2",
+  "start_gain": "19.8"
+ },
+ {
+  "t_in": 27.599999999999934,
+  "t_cook": 27.599999999999934,
+  "t_done": 42.600000000000065,
+  "deliveries": [
+   {
+    "dish": "ChoppedLettuce-ChoppedTomato-Plate",
+    "time": 31.6,
+    "ok": true,
+    "by": "agent-1"
+   },
+   {
+    "dish": "Cup-MixedApple-MixedOrange",
+    "time": 36.4,
+    "ok": true,
+    "by": "agent-1"
+   },
+   {
+    "dish": "CookedOnion-CookedTomato-Plate",
+    "time": 43.4,
+    "ok": true,
+    "by": "agent-1"
+   }
+  ],
+  "pot_locs": [
+   [
+    0,
+    7
+   ]
+  ],
+  "map": "exp_partition",
+  "recipes": [
+   "TomatoLettuceSalad",
+   "OnionTomatoSoup",
+   "AppleOrangeJuice"
+  ],
+  "skip_budget": 0,
+  "pid": "924test4",
+  "ts": "2026-09-24T18:39:54",
+  "makespan": 43.4,
+  "instruction": "chop_apple",
+  "serve_times": "31.6|36.4|43.4",
+  "serve_dishes": "ChoppedLettuce-ChoppedTomato-Plate|Cup-MixedApple-MixedOrange|CookedOnion-CookedTomato-Plate",
+  "loss": "2.8",
+  "natural_rank": "3",
+  "exec_rank": "1",
+  "start_gain": "7.8"
+ },
+ {
+  "t_in": 31.99999999999992,
+  "t_cook": 31.99999999999992,
+  "t_done": 47.00000000000013,
+  "deliveries": [
+   {
+    "dish": "ChoppedOnion-ChoppedTomato-Plate",
+    "time": 10.6,
+    "ok": true,
+    "by": "agent-2"
+   },
+   {
+    "dish": "ChoppedOnion-ChoppedTomato-Plate",
+    "time": 21.2,
+    "ok": true,
+    "by": "agent-2"
+   },
+   {
+    "dish": "CookedLettuce-CookedOnion-Plate",
+    "time": 47.8,
+    "ok": true,
+    "by": "agent-1"
+   }
+  ],
+  "pot_locs": [
+   [
+    0,
+    7
+   ]
+  ],
+  "map": "exp_ring",
+  "recipes": [
+   "OnionTomatoSalad",
+   "OnionTomatoSalad",
+   "OnionLettuceSoup"
+  ],
+  "skip_budget": 0,
+  "pid": "924test4",
+  "ts": "2026-09-24T18:41:09",
+  "makespan": 47.8,
+  "instruction": "chop_tomato",
+  "serve_times": "10.6|21.2|47.8",
+  "serve_dishes": "ChoppedOnion-ChoppedTomato-Plate|ChoppedOnion-ChoppedTomato-Plate|CookedLettuce-CookedOnion-Plate",
+  "loss": "2.4",
+  "natural_rank": "5",
+  "exec_rank": "1",
+  "start_gain": "15.8"
+ },
+ {
+  "t_in": 26.19999999999994,
+  "t_cook": 26.19999999999994,
+  "t_done": 41.200000000000045,
+  "deliveries": [
+   {
+    "dish": "Cup-MixedApple-MixedBanana",
+    "time": 14.4,
+    "ok": true,
+    "by": "agent-1"
+   },
+   {
+    "dish": "ChoppedLettuce-ChoppedTomato-Plate",
+    "time": 29.4,
+    "ok": true,
+    "by": "agent-1"
+   },
+   {
+    "dish": "CookedLettuce-CookedOnion-Plate",
+    "time": 42.0,
+    "ok": true,
+    "by": "agent-1"
+   }
+  ],
+  "pot_locs": [
+   [
+    0,
+    7
+   ]
+  ],
+  "map": "exp_partition",
+  "recipes": [
+   "TomatoLettuceSalad",
+   "OnionLettuceSoup",
+   "AppleBananaJuice"
+  ],
+  "skip_budget": 2,
+  "pid": "924test4",
+  "ts": "2026-09-24T18:42:12",
+  "makespan": 42.0,
+  "instruction": "chop_apple",
+  "serve_times": "14.4|29.4|42.0",
+  "serve_dishes": "Cup-MixedApple-MixedBanana|ChoppedLettuce-ChoppedTomato-Plate|CookedLettuce-CookedOnion-Plate",
+  "loss": "0.0",
+  "natural_rank": "3",
+  "exec_rank": "2",
+  "start_gain": "0.0"
+ },
+ {
+  "t_in": 18.999999999999964,
+  "t_cook": 18.999999999999964,
+  "t_done": 34.199999999999946,
+  "deliveries": [
+   {
+    "dish": "Cup-MixedApple-MixedOrange",
+    "time": 14.6,
+    "ok": true,
+    "by": "agent-1"
+   },
+   {
+    "dish": "ChoppedTomato-Plate",
+    "time": 25.8,
+    "ok": false,
+    "by": "agent-1"
+   },
+   {
+    "dish": "CookedLettuce-CookedOnion-Plate",
+    "time": 35.6,
+    "ok": true,
+    "by": "agent-1"
+   },
+   {
+    "dish": "ChoppedLettuce-ChoppedTomato-Plate",
+    "time": 39.2,
+    "ok": true,
+    "by": "agent-1"
+   }
+  ],
+  "pot_locs": [
+   [
+    0,
+    7
+   ]
+  ],
+  "map": "exp_partition",
+  "recipes": [
+   "TomatoLettuceSalad",
+   "OnionLettuceSoup",
+   "AppleOrangeJuice"
+  ],
+  "skip_budget": 1,
+  "pid": "924test4",
+  "ts": "2026-09-24T18:43:16",
+  "makespan": 39.2,
+  "instruction": "chop_apple",
+  "serve_times": "14.6|35.6|39.2",
+  "serve_dishes": "Cup-MixedApple-MixedOrange|CookedLettuce-CookedOnion-Plate|ChoppedLettuce-ChoppedTomato-Plate",
+  "loss": "1.6",
+  "natural_rank": "3",
+  "exec_rank": "2",
+  "start_gain": "7.4"
+ },
+ {
+  "t_in": 18.799999999999965,
+  "t_cook": 18.799999999999965,
+  "t_done": 33.99999999999994,
+  "deliveries": [
+   {
+    "dish": "ChoppedLettuce-ChoppedTomato-Plate",
+    "time": 22.0,
+    "ok": true,
+    "by": "agent-1"
+   },
+   {
+    "dish": "ChoppedLettuce-ChoppedTomato-Plate",
+    "time": 23.4,
+    "ok": true,
+    "by": "agent-2"
+   },
+   {
+    "dish": "CookedOnion-CookedTomato-Plate",
+    "time": 34.8,
+    "ok": true,
+    "by": "agent-1"
+   }
+  ],
+  "pot_locs": [
+   [
+    0,
+    7
+   ]
+  ],
+  "map": "exp_ring",
+  "recipes": [
+   "TomatoLettuceSalad",
+   "TomatoLettuceSalad",
+   "OnionTomatoSoup"
+  ],
+  "skip_budget": 1,
+  "pid": "925tet1",
+  "ts": "2026-09-25T14:09:39",
+  "makespan": 34.8,
+  "instruction": "chop_lettuce",
+  "serve_times": "22.0|23.4|34.8",
+  "serve_dishes": "ChoppedLettuce-ChoppedTomato-Plate|ChoppedLettuce-ChoppedTomato-Plate|CookedOnion-CookedTomato-Plate",
+  "loss": "0.0",
+  "natural_rank": "6",
+  "exec_rank": "2",
+  "start_gain": "19.8"
+ },
+ {
+  "t_in": 16.199999999999974,
+  "t_cook": 16.199999999999974,
+  "t_done": 31.39999999999992,
+  "deliveries": [
+   {
+    "dish": "ChoppedOnion-ChoppedTomato-Plate",
+    "time": 25.2,
+    "ok": true,
+    "by": "agent-1"
+   },
+   {
+    "dish": "Cup-MixedApple-MixedOrange",
+    "time": 29.6,
+    "ok": true,
+    "by": "agent-1"
+   },
+   {
+    "dish": "CookedLettuce-CookedOnion-Plate",
+    "time": 32.2,
+    "ok": true,
+    "by": "agent-1"
+   }
+  ],
+  "pot_locs": [
+   [
+    0,
+    7
+   ]
+  ],
+  "map": "exp_partition",
+  "recipes": [
+   "OnionTomatoSalad",
+   "OnionLettuceSoup",
+   "AppleOrangeJuice"
+  ],
+  "skip_budget": 0,
+  "pid": "925tet1",
+  "ts": "2026-09-25T14:10:34",
+  "makespan": 32.2,
+  "instruction": "chop_apple",
+  "serve_times": "25.2|29.6|32.2",
+  "serve_dishes": "ChoppedOnion-ChoppedTomato-Plate|Cup-MixedApple-MixedOrange|CookedLettuce-CookedOnion-Plate",
+  "loss": "1.2",
+  "natural_rank": "3",
+  "exec_rank": "1",
+  "start_gain": "7.4"
+ },
+ {
+  "t_in": 24.399999999999945,
+  "t_cook": 24.399999999999945,
+  "t_done": 39.40000000000002,
+  "deliveries": [
+   {
+    "dish": "Cup-MixedApple-MixedOrange",
+    "time": 12.8,
+    "ok": true,
+    "by": "agent-1"
+   },
+   {
+    "dish": "ChoppedLettuce-ChoppedTomato-Plate",
+    "time": 29.4,
+    "ok": true,
+    "by": "agent-1"
+   },
+   {
+    "dish": "CookedOnion-CookedTomato-Plate",
+    "time": 40.2,
+    "ok": true,
+    "by": "agent-1"
+   }
+  ],
+  "pot_locs": [
+   [
+    0,
+    7
+   ]
+  ],
+  "map": "exp_partition",
+  "recipes": [
+   "TomatoLettuceSalad",
+   "OnionTomatoSoup",
+   "AppleOrangeJuice"
+  ],
+  "skip_budget": 2,
+  "pid": "925tet1",
+  "ts": "2026-09-25T14:11:35",
+  "makespan": 40.2,
+  "instruction": "chop_apple",
+  "serve_times": "12.8|29.4|40.2",
+  "serve_dishes": "Cup-MixedApple-MixedOrange|ChoppedLettuce-ChoppedTomato-Plate|CookedOnion-CookedTomato-Plate",
+  "loss": "0.0",
+  "natural_rank": "3",
+  "exec_rank": "2",
+  "start_gain": "0.0"
+ },
+ {
+  "t_in": 24.999999999999943,
+  "t_cook": 24.999999999999943,
+  "t_done": 40.00000000000003,
+  "deliveries": [
+   {
+    "dish": "ChoppedOnion-ChoppedTomato-Plate",
+    "time": 17.6,
+    "ok": true,
+    "by": "agent-2"
+   },
+   {
+    "dish": "ChoppedOnion-ChoppedTomato",
+    "time": 21.2,
+    "ok": false,
+    "by": "agent-2"
+   },
+   {
+    "dish": "ChoppedOnion-ChoppedTomato-Plate",
+    "time": 37.0,
+    "ok": true,
+    "by": "agent-2"
+   },
+   {
+    "dish": "CookedLettuce-CookedTomato-Plate",
+    "time": 40.8,
+    "ok": true,
+    "by": "agent-1"
+   }
+  ],
+  "pot_locs": [
+   [
+    0,
+    7
+   ]
+  ],
+  "map": "exp_ring",
+  "recipes": [
+   "OnionTomatoSalad",
+   "OnionTomatoSalad",
+   "TomatoLettuceSoup"
+  ],
+  "skip_budget": 2,
+  "pid": "925tet1",
+  "ts": "2026-09-25T14:13:50",
+  "makespan": 40.8,
+  "instruction": "chop_onion",
+  "serve_times": "17.6|37.0|40.8",
+  "serve_dishes": "ChoppedOnion-ChoppedTomato-Plate|ChoppedOnion-ChoppedTomato-Plate|CookedLettuce-CookedTomato-Plate",
+  "loss": "0.0",
+  "natural_rank": "1",
+  "exec_rank": "1",
+  "start_gain": "0.0"
+ },
+ {
+  "t_in": 37.19999999999999,
+  "t_cook": 37.19999999999999,
+  "t_done": 52.2000000000002,
+  "deliveries": [
+   {
+    "dish": "ChoppedLettuce-ChoppedTomato-Plate",
+    "time": 41.0,
+    "ok": true,
+    "by": "agent-1"
+   },
+   {
+    "dish": "Cup-MixedBanana-MixedOrange",
+    "time": 48.2,
+    "ok": true,
+    "by": "agent-1"
+   },
+   {
+    "dish": "CookedOnion-CookedTomato-Plate",
+    "time": 53.0,
+    "ok": true,
+    "by": "agent-1"
+   }
+  ],
+  "pot_locs": [
+   [
+    0,
+    7
+   ]
+  ],
+  "map": "exp_partition",
+  "recipes": [
+   "TomatoLettuceSalad",
+   "OnionTomatoSoup",
+   "BananaOrangeJuice"
+  ],
+  "skip_budget": 1,
+  "pid": "925tet1",
+  "ts": "2026-09-25T14:15:04",
+  "makespan": 53.0,
+  "instruction": "chop_onion",
+  "serve_times": "41.0|48.2|53.0",
+  "serve_dishes": "ChoppedLettuce-ChoppedTomato-Plate|Cup-MixedBanana-MixedOrange|CookedOnion-CookedTomato-Plate",
+  "loss": "0.0",
+  "natural_rank": "1",
+  "exec_rank": "1",
+  "start_gain": "0.0"
+ },
+ {
+  "t_in": 35.99999999999997,
+  "t_cook": 35.99999999999997,
+  "t_done": 51.000000000000185,
+  "deliveries": [
+   {
+    "dish": "ChoppedLettuce-ChoppedTomato-Plate",
+    "time": 17.2,
+    "ok": true,
+    "by": "agent-2"
+   },
+   {
+    "dish": "ChoppedLettuce-ChoppedTomato-Plate",
+    "time": 27.8,
+    "ok": true,
+    "by": "agent-2"
+   },
+   {
+    "dish": "CookedLettuce-CookedOnion-Plate",
+    "time": 52.4,
+    "ok": true,
+    "by": "agent-2"
+   }
+  ],
+  "pot_locs": [
+   [
+    0,
+    7
+   ]
+  ],
+  "map": "exp_ring",
+  "recipes": [
+   "TomatoLettuceSalad",
+   "TomatoLettuceSalad",
+   "OnionLettuceSoup"
+  ],
+  "skip_budget": 0,
+  "pid": "925tet1",
+  "ts": "2026-09-25T14:17:37",
+  "makespan": 52.4,
+  "instruction": "chop_tomato",
+  "serve_times": "17.2|27.8|52.4",
+  "serve_dishes": "ChoppedLettuce-ChoppedTomato-Plate|ChoppedLettuce-ChoppedTomato-Plate|CookedLettuce-CookedOnion-Plate",
+  "loss": "2.4",
+  "natural_rank": "4",
+  "exec_rank": "1",
+  "start_gain": "12.4"
+ }
+]
