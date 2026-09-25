@@ -215,6 +215,11 @@ class GamePlay(Game):
         self._ai_task_switches = 0
         self._last_ai_task_id = None
         self._instructed_at_switch = None
+        # 出す番が来たのに指示できる作業が1つも無かったとき、その番を
+        # 持ち越す。できるようになった瞬間に出す。
+        self._instruction_pending = False
+        self._last_candidate_check = 0.0
+        self._pending_seen = (-1, -1)
         # 指示の選ばせ方を差し替える口。Web 版はブラウザ側に出したいので、
         # ここに「候補を渡すと選ばれた1つを返す」関数を入れる。
         # 何も入っていなければ、これまでどおり pygame の画面を出す。
@@ -725,17 +730,35 @@ class GamePlay(Game):
             return
         n = self._count_ai_task_switches()
         first = self._instructed_at_switch is None
-        if not first and n - self._instructed_at_switch < self.instruct_every:
-            return
-        # 出せなかった(候補が無かった)ときは枠を消費せず、作業が1つ進むたびに
-        # もう一度試す。消費してしまうと、候補が戻ってきても n 個ぶん待つことに
-        # なり、そのまま最後まで一度も出ないことがある。
-        shown = self._request_instruction(trigger='every_n_tasks',
-                                          allow_text_fallback=False)
-        if shown or first:
-            self._instructed_at_switch = n
+        if not self._instruction_pending:
+            if not first and n - self._instructed_at_switch < self.instruct_every:
+                return
         else:
-            self._instructed_at_switch = n - self.instruct_every + 1
+            # 持ち越し中。盤面が動いたときだけ試す。候補を作るには AI の
+            # 内部を読む必要があり、計画中のスレッドと重なると壊れるので、
+            # 毎フレーム確かめには行かない。
+            orders = len(getattr(getattr(self.env, 'order_scheduler', None),
+                                 'current_orders', ()) or ())
+            moved = (n != self._pending_seen[0] or orders != self._pending_seen[1])
+            if not moved and time.time() - self._last_candidate_check < 2.0:
+                return
+            self._pending_seen = (n, orders)
+
+        self._last_candidate_check = time.time()
+        was_pending = self._instruction_pending
+        self._instructed_at_switch = n
+        if self._request_instruction(trigger='every_n_tasks',
+                                     allow_text_fallback=False):
+            self._instruction_pending = False
+        else:
+            # いま指示できる作業が1つも無い。番を持ち越して、できるように
+            # なった瞬間に出す。ここで普通に n 個ぶん待たせると、候補が
+            # 戻ってきても出ないまま終わることがある(実測: 仕切りの地図で
+            # フルーツ中心の注文が並んだ回)。
+            if not was_pending:
+                print('[Instruction] every_n_tasks: いま指示できる作業が '
+                      'ありません。できるようになったら出します', flush=True)
+            self._instruction_pending = True
 
     def _poll_cook_instruction_trigger(self):
         """enable_cook: 調理タスクに今すぐ着手できる状態になった瞬間、指示画面を出す。
