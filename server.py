@@ -253,6 +253,46 @@ SESSION_LOG_PATH = ROOT / 'results' / 'web_sessions.csv'
 _assign_lock = threading.Lock()
 
 
+# 実験のパターン。条件の組み合わせ(地図2種 × 指示の効き方3種 = 6通り)は
+# どちらも同じで、違うのは1セッションの進み方。
+#   1: これまでの形。注文3品を出し切るまで。指示は開始時に1回だけ。
+#   2: エンドレス。60秒のあいだ常に3件の注文が出て、片づくたびに補充する。
+#      指示は AI が3工程終えるごと。注文はサラダとスープだけ(ジュースなし)。
+EXPERIMENT_PATTERNS = {
+    1: {
+        'label': 'パターン1',
+        'desc': '注文3品を出し切るまで。指示は開始時に1回。',
+        'endless': False,
+        'presets': dict(EXPERIMENT_MAP_PRESETS),
+        'instruction': INSTRUCTION_TIMING_ONCE_AT_START,
+        'instruct_every': None,
+        'seconds': None,
+        'orders_active': None,
+    },
+    2: {
+        'label': 'パターン2',
+        'desc': '60秒。注文は片づくたびに補充。指示は3工程ごと。サラダとスープのみ。',
+        'endless': True,
+        # どちらの地図も野菜だけ。ジュースは出さない。
+        'presets': {m: 'experiment1' for m in EXPERIMENT_MAP_PRESETS},
+        'instruction': INSTRUCTION_TIMING_EVERY_N_TASKS,
+        'instruct_every': 3,
+        'seconds': 60,
+        'orders_active': 3,
+    },
+}
+DEFAULT_PATTERN = 1
+
+
+def pattern_of(value):
+    """画面から来たパターン番号を、使える形にそろえる。"""
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return DEFAULT_PATTERN
+    return n if n in EXPERIMENT_PATTERNS else DEFAULT_PATTERN
+
+
 def all_conditions():
     """実験で回す条件。地図2種 × 指示の効き方3種 = 6通り。"""
     return [{'map': m, 'skip_budget': b}
@@ -323,7 +363,17 @@ def _save_assignments(data):
     ASSIGN_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding='utf-8')
 
 
-def assignment_for(participant):
+def assignment_key(participant, pattern):
+    """割り当てを覚えるときの名前。パターンごとに別々に進められる。
+
+    パターン1 はこれまでどおり参加者IDそのままにして、既に記録のある人が
+    やり直しにならないようにする。
+    """
+    pattern = pattern_of(pattern)
+    return participant if pattern == DEFAULT_PATTERN else f'{participant}#p{pattern}'
+
+
+def assignment_for(participant, pattern=DEFAULT_PATTERN):
     """その参加者の条件の並び(9通り)と、次が何セッション目かを返す。
 
     並びは最初に作ったときの1回だけ決め、ファイルに残す。途中でサーバーを
@@ -331,7 +381,8 @@ def assignment_for(participant):
     """
     with _assign_lock, CrossProcessLock(ASSIGN_PATH):
         data = _load_assignments()
-        rec = data.get(participant)
+        key = assignment_key(participant, pattern)
+        rec = data.get(key)
         # 条件の中身で見比べる。数だけ見ていると、条件の値を変えたのに
         # 数が同じ(6通り)場合に古い割り当てが残り、もう使わない
         # skip_budget で遊ばせてしまう。
@@ -346,17 +397,18 @@ def assignment_for(participant):
         if not rec or not _same(rec.get('order') or []):
             order = all_conditions()
             random.shuffle(order)
-            rec = {'order': order, 'done': 0, 'created': datetime.now().isoformat(timespec='seconds')}
-            data[participant] = rec
+            rec = {'order': order, 'done': 0, 'pattern': pattern_of(pattern),
+                   'created': datetime.now().isoformat(timespec='seconds')}
+            data[key] = rec
             _save_assignments(data)
         return rec
 
 
-def note_session_done(participant):
+def note_session_done(participant, pattern=DEFAULT_PATTERN):
     """1セッション終わったので、次の条件へ進める。"""
     with _assign_lock, CrossProcessLock(ASSIGN_PATH):
         data = _load_assignments()
-        rec = data.get(participant)
+        rec = data.get(assignment_key(participant, pattern))
         if not rec:
             return
         rec['done'] = min(len(rec['order']), int(rec.get('done', 0)) + 1)
@@ -746,23 +798,29 @@ class WebGamePlay:
 
         participant = str(choice.get('participant') or '').strip()
         if participant:
-            rec = assignment_for(participant)
+            pattern = pattern_of(choice.get('pattern'))
+            spec = EXPERIMENT_PATTERNS[pattern]
+            rec = assignment_for(participant, pattern)
             done = int(rec.get('done', 0))
             order = rec['order']
             cond = order[min(done, len(order) - 1)]
-            preset = EXPERIMENT_MAP_PRESETS[cond['map']]
+            preset = spec['presets'][cond['map']]
             sets = order_sets_for(preset)
             cases = experiment_case_indices(preset) or list(range(len(sets)))
             case = random.choice(cases)
             return {'map': cond['map'], 'preset': preset, 'case': case,
                     'recipes': list(sets[case]), 'picked_by': 'experiment',
                     'participant': participant, 'session': done + 1,
+                    'pattern': pattern,
+                    'endless': spec['endless'], 'seconds': spec['seconds'],
+                    'orders_active': spec['orders_active'],
+                    'instruct_every': spec['instruct_every'],
                     'sessions_total': len(order), 'skip_budget': cond['skip_budget'],
                     # 実験では指示を開始直後に1回だけ受け取る(build() も同じ)。
                     # ここに入れておかないと画面側が「この回は指示がある」と
                     # 分からず、指示を待たずに 3・2・1 を始めてしまい、
                     # 指示を選んでいる間に時間が進んでしまう。
-                    'instruction': INSTRUCTION_TIMING_ONCE_AT_START}
+                    'instruction': spec['instruction']}
         maps = [m for m, _, _ in MAP_CHOICES]
         presets = [r for r, _, _ in RECIPE_CHOICES]
         map_name = choice.get('map') if choice.get('map') in maps else maps[0]
@@ -835,7 +893,7 @@ class WebGamePlay:
                    game_t=round(float(getattr(env, 'current_time', 0.0) or 0.0), 1))
         self.timeline.append(row)
 
-    SESSION_FIELDS = ['timestamp', 'participant_id', 'session', 'map', 'skip_budget',
+    SESSION_FIELDS = ['timestamp', 'participant_id', 'pattern', 'session', 'map', 'skip_budget',
                       'case', 'orders', 'instruction', 'instruction_verb',
                       'instruction_obj', 'quality',
                       'instruction_accepted_s', 'wait_seconds',
@@ -871,7 +929,9 @@ class WebGamePlay:
         append_csv(SESSION_LOG_PATH, self.SESSION_FIELDS, {
             **self.instruction_record(),
             'timestamp': datetime.now().isoformat(timespec='seconds'),
-            'participant_id': sel['participant'], 'session': sel.get('session'),
+            'participant_id': sel['participant'],
+            'pattern': sel.get('pattern', DEFAULT_PATTERN),
+            'session': sel.get('session'),
             'map': sel.get('map'), 'skip_budget': sel.get('skip_budget'),
             'case': sel.get('case'), 'orders': '|'.join(sel.get('recipes', [])),
             'served': res.get('served'), 'failed': res.get('failed'),
@@ -894,7 +954,8 @@ class WebGamePlay:
         if not reason:
             # 正式に受理した回だけ数える。バグ報告の出た回と途中で抜けた回は
             # 同じ条件でやり直しになり、やり直した回が正式な1回になる。
-            note_session_done(sel['participant'])
+            note_session_done(sel['participant'],
+                              sel.get('pattern', DEFAULT_PATTERN))
 
     def _ai_errors_so_far(self):
         """この回で AI の判断が落ちた回数と、その中身。"""
@@ -1267,6 +1328,14 @@ class WebGamePlay:
         apply_debug_config(dbg)
         map_overrides = None
         endless_pool = None
+        # 実験のパターンがエンドレスなら、デバッグ設定と同じ形に直して
+        # 下の経路へ流す(地図の上書きと _veg への付け替えを共通にする)。
+        if sel and sel.get('endless') and not dbg:
+            dbg = {'endless': True,
+                   'seconds': sel.get('seconds') or 60,
+                   'orders_active': sel.get('orders_active') or 3,
+                   'cook_seconds': _DEFAULT_COOK_SECONDS,
+                   'chop_steps': _DEFAULT_CHOP_STEPS}
         if dbg and dbg.get('endless'):
             endless_pool = endless_pool_for((sel or {}).get('preset'))
             map_overrides = {
@@ -1291,10 +1360,10 @@ class WebGamePlay:
         elif sel and not uses_fruit(orders):
             # 野菜だけの注文では、フルーツ・ミキサー・コップのない版の地図を使う
             map_name = f'{map_name}_veg'
-        # 実験のセッションでは、指示は開始直後に1回だけ(見送り不可)。
-        # 自由に遊ぶときは、ステージ選択で「指示あり/なし」を選べる。
+        # 実験のセッションでは、そのパターンが決めたタイミングを使う
+        # (見送り不可)。自由に遊ぶときは、ステージ選択で選べる。
         if sel and sel.get('participant'):
-            timing = INSTRUCTION_TIMING_ONCE_AT_START
+            timing = sel.get('instruction') or INSTRUCTION_TIMING_ONCE_AT_START
         elif sel and sel.get('instruction') in INSTRUCTION_TIMINGS:
             timing = sel['instruction']
         else:
@@ -1844,6 +1913,8 @@ async def options():
     return JSONResponse({
         'maps': [{'id': m, 'label': label, 'desc': desc} for m, label, desc in MAP_CHOICES],
         'recipes': recipes,
+        'patterns': [{'id': n, 'label': p['label'], 'desc': p['desc']}
+                     for n, p in sorted(EXPERIMENT_PATTERNS.items())],
     })
 
 
@@ -2018,17 +2089,22 @@ async def tutorial():
 
 
 @app.get('/api/assignment')
-async def assignment(participant: str = ''):
-    """参加者に割り当てた条件の並びと、次のセッション番号。"""
+async def assignment(participant: str = '', pattern: int = DEFAULT_PATTERN):
+    """参加者に割り当てた条件の並びと、次のセッション番号。
+
+    割り当てはパターンごとに別で持つので、どちらの進み具合も混ざらない。
+    """
     pid = participant.strip()
     if not pid:
         return JSONResponse({'ok': False, 'error': '参加者IDがありません'}, status_code=400)
-    rec = assignment_for(pid)
+    pat = pattern_of(pattern)
+    rec = assignment_for(pid, pat)
     done = int(rec.get('done', 0))
     total = len(rec['order'])
     nxt = rec['order'][min(done, total - 1)]
     label = dict((m, l) for m, l, _ in MAP_CHOICES).get(nxt['map'], nxt['map'])
-    return JSONResponse({'ok': True, 'participant_id': pid, 'done': done,
+    return JSONResponse({'ok': True, 'participant_id': pid, 'pattern': pat,
+                         'done': done,
                          'total': total, 'session': min(done + 1, total),
                          'finished': done >= total, 'next_map_label': label})
 
@@ -2175,6 +2251,7 @@ async def ws(sock: WebSocket):
                     'instruction': msg.get('instruction'),
                     'skip_budget': msg.get('skip_budget'),
                     'instruct_every': msg.get('instruct_every'),
+                    'pattern': msg.get('pattern'),
                     'debug': msg.get('debug'),
                     'participant': msg.get('participant')})
             elif kind == 'ack':

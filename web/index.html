@@ -1245,7 +1245,8 @@
   }
   function loadAssignment() {
     if (!participantId) { assignment = null; renderPick(); return; }
-    fetch(`/api/assignment?participant=${encodeURIComponent(participantId)}`)
+    fetch(`/api/assignment?participant=${encodeURIComponent(participantId)}`
+          + `&pattern=${Number(pick.pattern) || 1}`)
       .then(r => r.json())
       .then((a) => { if (a.ok && a.participant_id === participantId) assignment = a; renderPick(); })
       .catch(() => {});
@@ -1256,7 +1257,7 @@
   const DEBUG_DEFAULT = { on: false, endless: false, seconds: 60,
                           orders_active: 3, cook_seconds: 15, chop_steps: 8 };
   let pick = { map: null, preset: null, case: '', instruction: 'once_at_start',
-               skip_budget: 0, instruct_every: 3,
+               skip_budget: 0, instruct_every: 3, pattern: 1,
                debug: Object.assign({}, DEBUG_DEFAULT) };
   try { Object.assign(pick, JSON.parse(localStorage.getItem(PICK_STORE) || '{}')); } catch (e) {}
   const optionsReady = fetch('/api/options').then(r => r.json()).then(o => { options = o; })
@@ -1302,6 +1303,7 @@
       `<div class="big">${custom ? '条件を指定して練習'
         : (experiment ? 'セッションを始めます' : 'ステージを選んでください')}</div>` +
       (custom ? '<div class="sub">好きな条件で遊べます。記録は残りません。</div>' : idBox) +
+      (custom ? '' : patternBlock()) +
       (experiment ? '' :
         `<div class="pick"><div class="lab">地図</div><div class="opts">${btns(options.maps, 'map')}</div>` +
         `<div class="hint">${esc(map.desc)}</div></div>` +
@@ -1351,8 +1353,10 @@
     }
 
     el.overlayText.querySelectorAll('.opts button').forEach((b) => b.addEventListener('click', () => {
-      pick[b.dataset.key] = b.dataset.key === 'skip_budget'
+      pick[b.dataset.key] = (b.dataset.key === 'skip_budget'
+                             || b.dataset.key === 'pattern')
         ? Number(b.dataset.val) : b.dataset.val;
+      if (b.dataset.key === 'pattern') { assignment = null; loadAssignment(); }
       if (b.dataset.key === 'preset') pick.case = '';
       savePick();
       renderPick();
@@ -1380,6 +1384,7 @@
              instruction: pick.instruction,
              skip_budget: Number(pick.skip_budget) || 0,
              instruct_every: Number(pick.instruct_every) || 3,
+             pattern: Number(pick.pattern) || 1,
              debug: d.on ? {
                endless: !!d.endless,
                seconds: Number(d.seconds) || 60,
@@ -1390,6 +1395,17 @@
              participant: custom ? null : (participantId || null) });
       showOverlay('<div class="big">準備しています</div><div class="sub">数秒かかります</div>');
     });
+  }
+  function patternBlock() {
+    const list = (options && options.patterns) || [];
+    if (!list.length) return '';
+    const cur = Number(pick.pattern) || 1;
+    return '<div class="pick"><div class="lab">実験のパターン</div><div class="opts">' +
+      list.map((p) =>
+        `<button type="button" data-key="pattern" data-val="${p.id}" ` +
+        `class="${cur === p.id ? 'on' : ''}">${esc(p.label)}</button>`).join('') +
+      `</div><div class="hint">${esc((list.find((p) => p.id === cur) || {}).desc || '')}` +
+      '</div></div>';
   }
   function debugBlock() {
     const d = pick.debug || (pick.debug = Object.assign({}, DEBUG_DEFAULT));
@@ -1740,7 +1756,8 @@
           showOverlay('<div class="big">次のセッションを準備しています...</div>');
           // 絵が揃ってから送る(揃う前に始めると最初の盤面が描けない)。
           optionsReady.then(() => whenSpritesLoaded(() => {
-            send({ type: 'start', participant: participantId });
+            send({ type: 'start', participant: participantId,
+                   pattern: Number(pick.pattern) || 1 });
           }));
           return;
         }
