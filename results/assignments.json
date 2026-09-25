@@ -38,7 +38,7 @@
     "skip_budget": 2
    }
   ],
-  "done": 2,
+  "done": 3,
   "created": "2026-09-20T18:33:59"
  },
  "logtest": {
@@ -124,5 +124,419 @@
   ],
   "done": 1,
   "created": "2026-09-22T16:20:18"
+ },
+ "test2": {
+  "order": [
+   {
+    "map": "exp_partition",
+    "skip_budget": 2
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 0
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 4
+   },
+   {
+    "map": "exp_ring",
+    "skip_budget": 4
+   },
+   {
+    "map": "exp_ring",
+    "skip_budget": 0
+   },
+   {
+    "map": "exp_ring",
+    "skip_budget": 2
+   },
+   {
+    "map": "exp_bottleneck",
+    "skip_budget": 2
+   },
+   {
+    "map": "exp_bottleneck",
+    "skip_budget": 4
+   },
+   {
+    "map": "exp_bottleneck",
+    "skip_budget": 0
+   }
+  ],
+  "done": 1,
+  "created": "2026-09-22T18:15:29"
+ },
+ "test3": {
+  "order": [
+   {
+    "map": "exp_ring",
+    "skip_budget": 4
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 2
+   },
+   {
+    "map": "exp_ring",
+    "skip_budget": 0
+   },
+   {
+    "map": "exp_bottleneck",
+    "skip_budget": 0
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 0
+   },
+   {
+    "map": "exp_bottleneck",
+    "skip_budget": 4
+   },
+   {
+    "map": "exp_bottleneck",
+    "skip_budget": 2
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 4
+   },
+   {
+    "map": "exp_ring",
+    "skip_budget": 2
+   }
+  ],
+  "done": 0,
+  "created": "2026-09-22T18:23:38"
+ },
+ "test4": {
+  "order": [
+   {
+    "map": "exp_ring",
+    "skip_budget": 2
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 2
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 4
+   },
+   {
+    "map": "exp_ring",
+    "skip_budget": 0
+   },
+   {
+    "map": "exp_ring",
+    "skip_budget": 4
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 0
+   }
+  ],
+  "done": 3,
+  "created": "2026-09-22T18:40:29"
+ },
+ "test5": {
+  "order": [
+   {
+    "map": "exp_partition",
+    "skip_budget": 4
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 2
+   },
+   {
+    "map": "exp_ring",
+    "skip_budget": 4
+   },
+   {
+    "map": "exp_ring",
+    "skip_budget": 2
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 0
+   },
+   {
+    "map": "exp_ring",
+    "skip_budget": 0
+   }
+  ],
+  "done": 1,
+  "created": "2026-09-22T19:01:53"
+ },
+ "test6": {
+  "order": [
+   {
+    "map": "exp_partition",
+    "skip_budget": 2
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 4
+   },
+   {
+    "map": "exp_ring",
+    "skip_budget": 0
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 0
+   },
+   {
+    "map": "exp_ring",
+    "skip_budget": 4
+   },
+   {
+    "map": "exp_ring",
+    "skip_budget": 2
+   }
+  ],
+  "done": 0,
+  "created": "2026-09-22T19:07:44"
+ },
+ "923test1": {
+  "order": [
+   {
+    "map": "exp_partition",
+    "skip_budget": 2
+   },
+   {
+    "map": "exp_ring",
+    "skip_budget": 1
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 1
+   },
+   {
+    "map": "exp_ring",
+    "skip_budget": 2
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 0
+   },
+   {
+    "map": "exp_ring",
+    "skip_budget": 0
+   }
+  ],
+  "done": 1,
+  "created": "2026-09-23T21:13:16"
+ },
+ "923test2": {
+  "order": [
+   {
+    "map": "exp_ring",
+    "skip_budget": 1
+   },
+   {
+    "map": "exp_ring",
+    "skip_budget": 2
+   },
+   {
+    "map": "exp_ring",
+    "skip_budget": 0
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 2
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 0
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 1
+   }
+  ],
+  "done": 6,
+  "created": "2026-09-23T21:28:21"
+ },
+ "923test3": {
+  "order": [
+   {
+    "map": "exp_ring",
+    "skip_budget": 2
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 2
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 0
+   },
+   {
+    "map": "exp_ring",
+    "skip_budget": 0
+   },
+   {
+    "map": "exp_ring",
+    "skip_budget": 1
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 1
+   }
+  ],
+  "done": 0,
+  "created": "2026-09-23T21:59:24"
+ },
+ "924test1": {
+  "order": [
+   {
+    "map": "exp_partition",
+    "skip_budget": 1
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 0
+   },
+   {
+    "map": "exp_ring",
+    "skip_budget": 2
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 2
+   },
+   {
+    "map": "exp_ring",
+    "skip_budget": 0
+   },
+   {
+    "map": "exp_ring",
+    "skip_budget": 1
+   }
+  ],
+  "done": 1,
+  "created": "2026-09-24T17:31:31"
+ },
+ "924test2": {
+  "order": [
+   {
+    "map": "exp_ring",
+    "skip_budget": 2
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 0
+   },
+   {
+    "map": "exp_ring",
+    "skip_budget": 1
+   },
+   {
+    "map": "exp_ring",
+    "skip_budget": 0
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 1
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 2
+   }
+  ],
+  "done": 6,
+  "created": "2026-09-24T17:40:40"
+ },
+ "924test3": {
+  "order": [
+   {
+    "map": "exp_ring",
+    "skip_budget": 0
+   },
+   {
+    "map": "exp_ring",
+    "skip_budget": 2
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 0
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 1
+   },
+   {
+    "map": "exp_ring",
+    "skip_budget": 1
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 2
+   }
+  ],
+  "done": 6,
+  "created": "2026-09-24T17:59:05"
+ },
+ "924test4": {
+  "order": [
+   {
+    "map": "exp_ring",
+    "skip_budget": 2
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 0
+   },
+   {
+    "map": "exp_ring",
+    "skip_budget": 0
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 2
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 1
+   },
+   {
+    "map": "exp_ring",
+    "skip_budget": 1
+   }
+  ],
+  "done": 5,
+  "created": "2026-09-24T18:37:27"
+ },
+ "925tet1": {
+  "order": [
+   {
+    "map": "exp_ring",
+    "skip_budget": 1
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 0
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 2
+   },
+   {
+    "map": "exp_ring",
+    "skip_budget": 2
+   },
+   {
+    "map": "exp_partition",
+    "skip_budget": 1
+   },
+   {
+    "map": "exp_ring",
+    "skip_budget": 0
+   }
+  ],
+  "done": 6,
+  "created": "2026-09-25T14:08:55"
  }
 }
