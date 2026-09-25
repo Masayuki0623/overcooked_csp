@@ -1846,20 +1846,29 @@ class CSPAgent:
         # 「煮て」と指示できると、AI は物理的に着手できず、参加者から見れば
         # 無視されたのと同じに見える。だがその待ちは依存関係によるもので、
         # 指示の効き方(skip_budget)とは無関係な別の原因が混ざってしまう。
+        # 工程の前後関係だけで見ると、鍋に入れ終わった時点で「出す」が候補に
+        # 出てしまう。だが煮上がるまでは出せない(実測: 煮込み中のスープに
+        # 「提供して」が出ていた)。指示の枠を無駄にしないよう、いまこの瞬間に
+        # 手を付けられるものだけを候補にする。
         ready = set()
         for order in current_orders:
             for task in order.get('tasks', []):
                 tid = task.get('id')
                 if not tid:
                     continue
-                if self._task_is_available_in_virtual_state(task, remaining_tids):
+                if (self._task_is_available_in_virtual_state(task, remaining_tids)
+                        and self._task_startable_now(env, task)):
                     ready.add((tid[0], tid[1]))
 
         candidates = []
         for (verb, obj), order_uids in grouped.items():
             if doable is not None and (verb, obj) not in doable:
                 continue
-            if ready and (verb, obj) not in ready:
+            # 着手できるものが1つも無いときは、候補なしで返す。以前は
+            # 「ready が空なら絞り込まない」ことにしていたが、それだと
+            # 切る作業が尽きた場面で、煮込み中のスープに「提供して」が
+            # 出てしまう。呼び出し側は候補が無ければ指示の番を持ち越す。
+            if (verb, obj) not in ready:
                 continue
             display = f"{verb}_{obj.replace(' ', '').replace('-', '_')}"
             payload = {
@@ -4096,6 +4105,55 @@ class CSPAgent:
                 t['start_pos'] = counter
                 t['end_pos'] = delivery
                 t['fixed_res'] = ('delivery', delivery)
+
+    def _world_object_names(self, env):
+        """盤面にある物の名前を全部集める。持っている物も含める。"""
+        return [fn for o in (getattr(env, 'all_obj_a', None) or [])
+                if (fn := getattr(o, 'full_name', None))]
+
+    def _station_is_free(self, env, station_name):
+        """鍋/ミキサーが空いているか。中身が載っていれば使えない。"""
+        pos_gs = getattr(env, 'pos_gs', None) or {}
+        pos_obj = getattr(env, 'pos_obj', None) or {}
+        for loc, gs in pos_gs.items():
+            if type(gs).__name__ != station_name:
+                continue
+            if pos_obj.get(loc) is not None:
+                return False
+            if getattr(gs, 'holding', None) is not None:
+                return False
+        return True
+
+    def _task_startable_now(self, env, task):
+        """いまこの瞬間に手を付けられる工程か(指示の候補に出すかの判断)。
+
+        _task_is_available_in_virtual_state は工程の前後関係しか見ないので、
+        「鍋に入れ終わった」と「煮上がった」を区別しない。指示の選択肢は
+        その場で実行できるものに限りたいので、盤面の実物を見て判断する。
+        """
+        verb, obj, _uid = task['id']
+        if verb not in ('serve', 'serve_juice', 'serve_salad', 'cook', 'mix'):
+            return True
+        names = self._world_object_names(env)
+        ings = [i.capitalize() for i in dish_ingredients(obj)]
+
+        def has(prefix, ing):
+            return any(f'{prefix}{ing}' in n for n in names)
+
+        if verb == 'serve':
+            # 煮上がっていること。Cooking(煮込み中)も Charred(焦げ)も不可。
+            return any(all(f'Cooked{ing}' in n for ing in ings) for n in names)
+        if verb == 'serve_juice':
+            return any(all(f'Mixed{ing}' in n for ing in ings) for n in names)
+        if verb == 'serve_salad':
+            return all(has('Chopped', ing) for ing in ings)
+        if verb == 'cook':
+            return (all(has('Chopped', ing) for ing in ings)
+                    and self._station_is_free(env, 'Pot'))
+        if verb == 'mix':
+            return (all(has('Chopped', ing) for ing in ings)
+                    and self._station_is_free(env, 'Blender'))
+        return True
 
     def _task_is_available_in_virtual_state(self, task, remaining_task_ids):
         """前提となる工程が済んでいて、いま着手できるタスクか。

@@ -113,16 +113,19 @@ def main():
         step()
 
     # 煮込み中のスープを「出して」と、猶予なしで指示する。
+    # 指示の選択画面には出さないようにしたので(いま実行できないため)、
+    # ここでは工程の一覧から直接そのタスクを組み立てる。
+    # 確かめたいのは、そういう指示を受けたときに実行側が固まらないこと。
     probe = make_agent(True, 0, None)
     with contextlib.redirect_stdout(io.StringIO()):
-        probe(state_for(env, 0))
-        cands = []
-        for c in probe.get_instruction_candidates(state_for(env, 0)):
-            p = c[1] if isinstance(c, (list, tuple)) and len(c) >= 2 else c
-            if isinstance(p, dict) and str(p.get('verb')) == 'serve':
-                cands.append((str(p.get('verb')), str(p.get('obj'))))
+        st = state_for(env, 0)
+        probe(st)
+        orders = probe._build_order_tasks(st)
+    cands = [(str(t['id'][0]), str(t['id'][1]))
+             for o in orders for t in (o.get('tasks') or [])
+             if str(t['id'][0]) == 'serve']
     if not cands:
-        print('前提が崩れています: 煮込み中のスープを出す指示が候補に出ません')
+        print('前提が崩れています: スープを出す工程が見つかりません')
         return 1
     verb, obj = cands[0]
     pending = {'id': time.time(), 'task': {'verb': verb, 'obj': obj},
@@ -165,10 +168,15 @@ def main():
     if cooked_seen_at is None:
         print('前提が崩れています: 検証時間内にスープが煮上がりませんでした')
         return 1
-    if blocked_frames:
-        print(f'NG: 煮上がったあとも入口(1,7)が {blocked_frames} フレーム塞がれていた')
+    if 'Charred' in pot:
+        print('NG: 取り出せないまま焦げた。入口を塞がれて近づけていない')
         return 1
-    print('OK: 煮上がったあと、待つ側は鍋の入口をどいている')
+    if 'Cook' in pot:
+        print(f'NG: 煮上がって {DEADLINE - cooked_seen_at:.0f} 秒たっても '
+              f'鍋から出せていない (入口が {blocked_frames} フレーム塞がれていた)')
+        return 1
+    print('OK: 煮上がったスープを鍋から取り出せている '
+          f'(入口を通れずにいたのは {blocked_frames} フレームだけ)')
     return 0
 
 

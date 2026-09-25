@@ -169,12 +169,16 @@ def order_sets_for(preset):
 # 縛らず、手元の記録でも skip=2 の6回・skip=4 の4回はすべて L=0 だった
 # (＝指示なしと同じ動きしかしない条件になっていた)。
 SKIP_BUDGETS = (0, 1, 2)
-# デバッグ画面で使う、エンドレス方式の補充元。9種類からランダムで出す。
-ENDLESS_POOL = (
-    'TomatoLettuceSalad', 'OnionTomatoSalad', 'OnionLettuceSalad',
-    'TomatoLettuceSoup', 'OnionTomatoSoup', 'OnionLettuceSoup',
-    'AppleOrangeJuice', 'AppleBananaJuice', 'BananaOrangeJuice',
-)
+def endless_pool_for(preset):
+    """エンドレスの補充元。選んだレシピに出てくる料理だけを使う。
+
+    「野菜のみ」を選んだのにジュースが出てくるのを防ぐ。以前は9種類を
+    固定で使っていたため、レシピの選択が無視されていた。
+    """
+    names = set()
+    for one_set in order_sets_for(preset):
+        names.update(one_set)
+    return tuple(sorted(names))
 # デバッグで動かせる数値の既定値。debug が付いていない回では必ずここへ戻す。
 import gym_cooking.utils.config as _game_config  # noqa: E402
 _DEFAULT_COOK_SECONDS = _game_config.COOKING_TIME_SECONDS
@@ -1262,16 +1266,20 @@ class WebGamePlay:
         dbg = (sel or {}).get('debug') or None
         apply_debug_config(dbg)
         map_overrides = None
+        endless_pool = None
         if dbg and dbg.get('endless'):
-            # エンドレスでは注文が入れ替わり続けるので、フルーツを使わない
-            # 版の地図(_veg)へ付け替えてはいけない。器具が足りなくなる。
+            endless_pool = endless_pool_for((sel or {}).get('preset'))
             map_overrides = {
                 'endless_orders': True,
-                'order_pool': tuple(ENDLESS_POOL),
+                'order_pool': endless_pool,
                 'max_num_orders': dbg.get('orders_active') or 3,
                 'max_num_timesteps': dbg.get('seconds') or 60,
             }
             orders = None
+            if not uses_fruit(endless_pool):
+                # 補充元にジュースが無いなら、フルーツ・ミキサー・コップを
+                # 外した版の地図を使う(固定注文のときと同じ扱い)。
+                map_name = f'{map_name}_veg'
         elif dbg and dbg.get('seconds'):
             map_overrides = {'max_num_timesteps': dbg['seconds']}
         if map_overrides and map_overrides.get('endless_orders'):
@@ -1309,7 +1317,8 @@ class WebGamePlay:
             print(f"[server] デバッグ設定: エンドレス "
                   f"(同時{getattr(sch, 'active_orders', '?')}件 / "
                   f"{dbg.get('seconds')}秒 / 煮込み{dbg.get('cook_seconds')}秒 / "
-                  f"切る{dbg.get('chop_steps')}回) 最初の注文="
+                  f"切る{dbg.get('chop_steps')}回) 地図={map_name} "
+                  f"補充元={len(endless_pool or ())}種類 最初の注文="
                   f"{getattr(sch, 'order_history', [])}", flush=True)
         elif dbg:
             print(f"[server] デバッグ設定: 煮込み{dbg.get('cook_seconds')}秒 / "
