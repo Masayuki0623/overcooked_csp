@@ -453,11 +453,19 @@ class Game:
         key = min(colors, key=lambda k: abs(k - ratio))
         x, y = self.scaled_location((idx, self.world.height))
         w, h = self.tile_size
-        bar_h = max(3, int(h * 0.12))
-        pygame.draw.rect(self.screen, (60, 60, 60),
-                         (x, y + h - bar_h, w, bar_h))
-        pygame.draw.rect(self.screen, colors[key],
-                         (x, y + h - bar_h, int(w * ratio), bar_h))
+        # 隣の注文のバーと繋がって1本に見えないよう、左右に余白を取る。
+        bar_h = max(3, int(h * 0.14))
+        pad = max(2, int(w * 0.12))
+        bar_w = w - pad * 2
+        bar_y = y + h - bar_h - 1
+        back = (x + pad, bar_y, bar_w, bar_h)
+        fore = (x + pad, bar_y, max(1, int(bar_w * ratio)), bar_h)
+        pygame.draw.rect(self.screen, (60, 60, 60), back)
+        pygame.draw.rect(self.screen, colors[key], fore)
+        # ブラウザ側は画像ではなく描画命令の一覧を受け取って描き直すので、
+        # ここへ積まないと画面に出ない(pygame の画面にだけ描いても届かない)。
+        self.__plot_elements.append(('Rect', {'color': (60, 60, 60), 'box': back}))
+        self.__plot_elements.append(('Rect', {'color': colors[key], 'box': fore}))
 
     def draw_soup_hint(self):
         if self.world.arglist.user_recipy:
