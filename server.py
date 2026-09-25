@@ -168,6 +168,71 @@ def order_sets_for(preset):
 # 縛らず、手元の記録でも skip=2 の6回・skip=4 の4回はすべて L=0 だった
 # (＝指示なしと同じ動きしかしない条件になっていた)。
 SKIP_BUDGETS = (0, 1, 2)
+# デバッグ画面で使う、エンドレス方式の補充元。9種類からランダムで出す。
+ENDLESS_POOL = (
+    'TomatoLettuceSalad', 'OnionTomatoSalad', 'OnionLettuceSalad',
+    'TomatoLettuceSoup', 'OnionTomatoSoup', 'OnionLettuceSoup',
+    'AppleOrangeJuice', 'AppleBananaJuice', 'BananaOrangeJuice',
+)
+# デバッグで動かせる数値の既定値。debug が付いていない回では必ずここへ戻す。
+import gym_cooking.utils.config as _game_config  # noqa: E402
+_DEFAULT_COOK_SECONDS = _game_config.COOKING_TIME_SECONDS
+_DEFAULT_CHOP_STEPS = _game_config.CHOPPING_NUM_STEPS
+# 器具の時間と刻む回数はモジュールの定数なので、差し替えるとサーバー全体に
+# 効く。複数人が同時に遊ぶと混ざるため、デバッグ画面でしか触らせない。
+_CONFIG_MIRRORS = (
+    'gym_cooking.utils.core', 'gym_cooking.recipe_planner.utils',
+    'gym_cooking.envs.overcooked_environment', 'gym_cooking.misc.game.game',
+    'gym_cooking.utils.interact', 'agent.myagent.CSPAgent',
+    'agent.myagent.TaskAgent',
+)
+
+
+def apply_debug_config(debug):
+    """煮込み時間と刻む回数を差し替える。debug が無ければ既定へ戻す。"""
+    cook = _DEFAULT_COOK_SECONDS
+    chop = _DEFAULT_CHOP_STEPS
+    if debug:
+        try:
+            cook = max(1, min(120, int(debug.get('cook_seconds') or cook)))
+        except (TypeError, ValueError):
+            pass
+        try:
+            chop = max(1, min(400, int(debug.get('chop_steps') or chop)))
+        except (TypeError, ValueError):
+            pass
+    _game_config.COOKING_TIME_SECONDS = cook
+    _game_config.CHOPPING_NUM_STEPS = chop
+    _game_config.BLENDING_NUM_STEPS = chop
+    for name in _CONFIG_MIRRORS:
+        mod = sys.modules.get(name)
+        if mod is None:
+            continue
+        if hasattr(mod, 'COOKING_TIME_SECONDS'):
+            mod.COOKING_TIME_SECONDS = cook
+        for key in ('CHOPPING_NUM_STEPS', 'BLENDING_NUM_STEPS'):
+            if hasattr(mod, key):
+                setattr(mod, key, chop)
+    return {'cook_seconds': cook, 'chop_steps': chop}
+
+
+def sanitize_debug(raw):
+    """デバッグ画面から来た値を、そのまま使える形にそろえる。"""
+    if not isinstance(raw, dict):
+        return None
+    out = {}
+    def num(key, lo, hi, default=None):
+        try:
+            v = int(raw.get(key))
+        except (TypeError, ValueError):
+            return default
+        return max(lo, min(hi, v))
+    out['cook_seconds'] = num('cook_seconds', 1, 120, _DEFAULT_COOK_SECONDS)
+    out['chop_steps'] = num('chop_steps', 1, 400, _DEFAULT_CHOP_STEPS)
+    out['endless'] = bool(raw.get('endless'))
+    out['seconds'] = num('seconds', 20, 600, 60)
+    out['orders_active'] = num('orders_active', 1, 5, 3)
+    return out
 # 注文の構成は地図ごとに決める。
 #   仕切り : サラダ + スープ + ジュース(experiment2)
 #   リング : サラダ2品 + スープ(experiment1)。フルーツを使わないので、
@@ -712,9 +777,15 @@ class WebGamePlay:
         skip_budget = choice.get('skip_budget')
         if skip_budget not in SKIP_BUDGETS:
             skip_budget = SKIP_BUDGETS[0]
-        return {'map': map_name, 'preset': preset, 'case': case,
-                'recipes': list(sets[case]), 'picked_by': picked_by,
-                'instruction': instruction, 'skip_budget': skip_budget}
+        out = {'map': map_name, 'preset': preset, 'case': case,
+               'recipes': list(sets[case]), 'picked_by': picked_by,
+               'instruction': instruction, 'skip_budget': skip_budget}
+        # デバッグ画面からの上書き。参加者IDのある回や、チュートリアル・
+        # 練習には効かせない(上の分岐で先に返している)。
+        debug = sanitize_debug(choice.get('debug'))
+        if debug:
+            out['debug'] = debug
+        return out
 
     def note_client_rtt(self, rtt_ms):
         """参加者の端末で測った往復時間を残す。/api/perf で見る。
@@ -1180,7 +1251,25 @@ class WebGamePlay:
         sel = self.selection
         map_name = sel['map'] if sel else a.map
         orders = sel['recipes'] if sel else a.orders
-        if sel and sel.get('mode') == 'tutorial' and sel.get('solo'):
+        # デバッグ画面の数値を反映する。指定が無ければ既定へ戻す。
+        dbg = (sel or {}).get('debug') or None
+        apply_debug_config(dbg)
+        map_overrides = None
+        if dbg and dbg.get('endless'):
+            # エンドレスでは注文が入れ替わり続けるので、フルーツを使わない
+            # 版の地図(_veg)へ付け替えてはいけない。器具が足りなくなる。
+            map_overrides = {
+                'endless_orders': True,
+                'order_pool': tuple(ENDLESS_POOL),
+                'max_num_orders': dbg.get('orders_active') or 3,
+                'max_num_timesteps': dbg.get('seconds') or 60,
+            }
+            orders = None
+        elif dbg and dbg.get('seconds'):
+            map_overrides = {'max_num_timesteps': dbg['seconds']}
+        if map_overrides and map_overrides.get('endless_orders'):
+            pass
+        elif sel and sel.get('mode') == 'tutorial' and sel.get('solo'):
             # チュートリアルの1人用の地図は、それ自体が注文まで持っている。
             # 野菜だけの版へ差し替える必要も無い。
             pass
@@ -1200,7 +1289,11 @@ class WebGamePlay:
             a.no_reschedule, a.debug,
             orders, a.order_seed,
             timing,
+            map_overrides=map_overrides,
         )
+        if sel and map_overrides and map_overrides.get('endless_orders'):
+            sel['recipes'] = [type(r).__name__
+                              for r in (getattr(self.env, 'recipes', None) or [])]
         if sel and not sel.get('recipes'):
             # チュートリアルの1人用の地図は、注文を地図そのものが持っている。
             # 画面に出すために、実際に出た注文をここで控える。
@@ -2051,6 +2144,7 @@ async def ws(sock: WebSocket):
                     'case': msg.get('case'),
                     'instruction': msg.get('instruction'),
                     'skip_budget': msg.get('skip_budget'),
+                    'debug': msg.get('debug'),
                     'participant': msg.get('participant')})
             elif kind == 'ack':
                 try:

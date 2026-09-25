@@ -161,9 +161,12 @@ def resolve_orders(orders, order_seed=None):
     return {'order_file': orders}
 
 
-def init_env_replay(map_name, agent0_name, agent1_name, task_name=None, no_reschedule=False, debug_mode=False, orders=None, order_seed=None, instruction_request_timing=INSTRUCTION_TIMING_FREE):
+def init_env_replay(map_name, agent0_name, agent1_name, task_name=None, no_reschedule=False, debug_mode=False, orders=None, order_seed=None, instruction_request_timing=INSTRUCTION_TIMING_FREE, map_overrides=None):
     map_kwargs = dict(MAP_SETTINGS[map_name])
     map_kwargs.update(resolve_orders(orders, order_seed))
+    # デバッグ用に地図の設定を上書きする(エンドレス・セッション長など)。
+    if map_overrides:
+        map_kwargs.update({k: v for k, v in map_overrides.items() if v is not None})
     map_set = MapSetting(**map_kwargs)
     replay = Replay()
 

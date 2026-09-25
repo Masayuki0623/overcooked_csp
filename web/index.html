@@ -348,6 +348,16 @@
   #settings .seg button.on { background: #3b4350; border-color: #6b7686; }
   #settings .row { display: flex; gap: 10px; }
   #settings .row button { flex: 1; }
+
+    /* デバッグ設定。普段は畳んでおく */
+    details.dbg { margin: 10px 0; text-align: left; border: 1px solid #0003;
+                  border-radius: 8px; padding: 6px 10px; }
+    details.dbg > summary { cursor: pointer; font-size: 13px; opacity: .85; }
+    .dbg-row { display: flex; align-items: center; gap: 8px; margin: 6px 0;
+               font-size: 13px; }
+    .dbg-row > span { min-width: 11em; }
+    .dbg-row > input[type=number] { width: 6em; }
+    .dbg-row > em { opacity: .7; font-size: 11px; font-style: normal; }
 </style>
 </head>
 <body>
@@ -1223,8 +1233,12 @@
       .catch(() => {});
   }
   let options = null;
+  // デバッグ用のつまみ。on のときだけサーバーへ送る。実験・練習・
+  // チュートリアルには効かない(サーバー側で先に分岐している)。
+  const DEBUG_DEFAULT = { on: false, endless: false, seconds: 60,
+                          orders_active: 3, cook_seconds: 15, chop_steps: 8 };
   let pick = { map: null, preset: null, case: '', instruction: 'once_at_start',
-               skip_budget: 0 };
+               skip_budget: 0, debug: Object.assign({}, DEBUG_DEFAULT) };
   try { Object.assign(pick, JSON.parse(localStorage.getItem(PICK_STORE) || '{}')); } catch (e) {}
   const optionsReady = fetch('/api/options').then(r => r.json()).then(o => { options = o; })
     .catch(() => {});
@@ -1287,6 +1301,7 @@
             `class="${Number(pick.skip_budget) === b ? 'on' : ''}">${b}</button>`).join('') +
           `</div><div class="hint">${esc(SKIP_BUDGET_DESC[String(pick.skip_budget)] || '')}` +
           '</div></div>' : '')) +
+      debugBlock() +
       '<div class="go"><button class="primary" id="start" disabled>スタート</button> ' +
       '<button id="pick-back">最初に戻る</button>' +
       '<div class="sub" id="dl-note" style="margin-top:8px"></div></div>' +
@@ -1317,16 +1332,66 @@
         savePick();
       });
     }
+    wireDebug();
     updateStartButton();
     document.getElementById('start').addEventListener('click', () => {
       if (!spritesAllLoaded) return;
       saveParticipant(document.getElementById('pid').value);
+      const d = pick.debug || {};
       send({ type: 'start', map: pick.map, preset: pick.preset,
              case: pick.case === '' ? null : Number(pick.case),
              instruction: pick.instruction,
              skip_budget: Number(pick.skip_budget) || 0,
+             debug: d.on ? {
+               endless: !!d.endless,
+               seconds: Number(d.seconds) || 60,
+               orders_active: Number(d.orders_active) || 3,
+               cook_seconds: Number(d.cook_seconds) || 15,
+               chop_steps: Number(d.chop_steps) || 8,
+             } : null,
              participant: participantId || null });
       showOverlay('<div class="big">準備しています</div><div class="sub">数秒かかります</div>');
+    });
+  }
+  function debugBlock() {
+    const d = pick.debug || (pick.debug = Object.assign({}, DEBUG_DEFAULT));
+    const num = (key, label, min, max, hint) =>
+      '<label class="dbg-row"><span>' + esc(label) + '</span>' +
+      `<input type="number" data-dbg="${key}" value="${Number(d[key])}" ` +
+      `min="${min}" max="${max}" step="1">` +
+      (hint ? `<em>${esc(hint)}</em>` : '') + '</label>';
+    return '<details class="dbg"' + (d.on ? ' open' : '') + '>' +
+      '<summary>デバッグ設定' + (d.on ? '(有効)' : '') + '</summary>' +
+      '<label class="dbg-row"><span>この設定を使う</span>' +
+      `<input type="checkbox" data-dbg="on"${d.on ? ' checked' : ''}></label>` +
+      '<label class="dbg-row"><span>エンドレス注文</span>' +
+      `<input type="checkbox" data-dbg="endless"${d.endless ? ' checked' : ''}>` +
+      '<em>片づくたびに9種類から補充。注文の組み合わせの選択は無視されます</em></label>' +
+      num('seconds', 'セッション長(秒)', 20, 600, '') +
+      num('orders_active', '同時に出す注文数', 1, 5, '') +
+      num('cook_seconds', '煮込み時間(秒)', 1, 120, '既定 15') +
+      num('chop_steps', '切る回数', 1, 400, '既定 8。5Hz では半分の回数ぶん押す') +
+      '<div class="hint">サーバー全体に効くので、複数人が同時に遊ぶと混ざります。' +
+      '一人で試すときだけ使ってください。</div>' +
+      '<div class="go" style="margin-top:6px"><button type="button" id="dbg-reset">既定に戻す</button></div>' +
+      '</details>';
+  }
+  function wireDebug() {
+    const d = pick.debug;
+    el.overlayText.querySelectorAll('[data-dbg]').forEach((inp) => {
+      inp.addEventListener('change', () => {
+        const key = inp.dataset.dbg;
+        d[key] = inp.type === 'checkbox' ? inp.checked : Number(inp.value);
+        if (key === 'endless' && inp.checked) d.on = true;
+        savePick();
+        renderPick();
+      });
+    });
+    const rst = document.getElementById('dbg-reset');
+    if (rst) rst.addEventListener('click', () => {
+      pick.debug = Object.assign({}, DEBUG_DEFAULT);
+      savePick();
+      renderPick();
     });
   }
   function savePick() {
