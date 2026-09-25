@@ -35,10 +35,16 @@ MAP_SETTINGS = dict(
     exp_partition=dict(level="exp_partition", max_num_orders=3,),
     exp_bottleneck=dict(level="exp_bottleneck", max_num_orders=3,),
     exp_ring=dict(level="exp_ring", max_num_orders=3,),
+    #   exp_dualpot    : 鍋を2つ、中央の島に置いた版。どちらの鍋にも
+    #                    両側から触れるので、待つ側が入口を塞がない。
+    #                    煮込みの開始をずらすと「残り時間の違う鍋」が
+    #                    同時に存在し、指示の重さに段ができる。
+    exp_dualpot=dict(level="exp_dualpot", max_num_orders=3,),
     # 上の3つから、フルーツ・ミキサー・コップを取り除いた版(野菜だけの注文用)
     exp_partition_veg=dict(level="exp_partition_veg", max_num_orders=3,),
     exp_bottleneck_veg=dict(level="exp_bottleneck_veg", max_num_orders=3,),
     exp_ring_veg=dict(level="exp_ring_veg", max_num_orders=3,),
+    exp_dualpot_veg=dict(level="exp_dualpot_veg", max_num_orders=3,),
     # チュートリアル用。1人で遊ぶ小さい台所で、その回に使う材料と道具だけを
     # 置いてある。時間制限は付けない(max_num_timesteps=0 で無制限)。
     #   tutorial_salad : 切って皿に乗せて出す
