@@ -6125,6 +6125,12 @@ class CSPAgent:
         need_clear = stuck_pots and soups_left > free_pots
         clear_pot_added = False
 
+        # 注文に制限時間があるか(エンドレスでのみ有効)。時間切れを使わない
+        # 設定では残り時間が減らないので、締切なしとして扱う。
+        _sched = getattr(env, 'order', None)
+        _expiry_on = (_sched is not None
+                      and not getattr(_sched, 'disable_order_expiry', True))
+
         for order_idx in self._claim_sequence(order_uids, claim_priority):
             order_tuple = current_orders[order_idx]
             goal = order_tuple[0]
@@ -6507,8 +6513,12 @@ class CSPAgent:
             # 注文の材料一覧を各タスクに持たせる。chop の obj は食材名なので
             # そこからは注文全体の材料が分からず、「注文外の食材を混ぜない」
             # 判定が正しく働かない。
+            _rest = order_tuple[1] if len(order_tuple) > 1 else None
+            _deadline_s = (float(_rest) if (_expiry_on and _rest is not None)
+                           else None)
             for _t in tasks:
                 _t['order_ingredients'] = set(ings_lower)
+                _t['deadline_s'] = _deadline_s
             built_by_idx[order_idx] = {'order': order_uid, 'display_order': display_order, 'name': dish_name, 'ingredients': ings_lower, 'tasks': tasks}
 
         orders = [built_by_idx[idx] for idx in sorted(built_by_idx)]
@@ -7139,6 +7149,27 @@ class CSPAgent:
             if key in pot_ready:
                 model.Add(ends[i] >= pot_ready[key] + 3)
 
+        # 注文の締切。間に合わなかったぶんを罰にする。
+        # ハード制約にすると、1件でも間に合わない注文が出た瞬間に解が
+        # 無くなってしまう。罰にしておけば「間に合うものは間に合わせ、
+        # だめなものはできるだけ早く」という計画になる。
+        # これは同時に、一括で終える(makespan)のではなく一品ずつ早く出す
+        # 形に寄せる効果も持つ。エンドレスでは早く出すほど次の注文が
+        # 早く来るので、そちらのほうが実際の目的に合う。
+        order_late_terms = []
+        for _uid, _vars in vars_by_order.items():
+            finals = [v for v in _vars
+                      if v['task']['verb'] in self.SERVE_VERBS]
+            if not finals:
+                continue
+            _d = finals[0]['task'].get('deadline_s')
+            if _d is None:
+                continue
+            _dl = int(max(0.0, float(_d)) * self.fps)
+            _late = model.NewIntVar(0, horizon, f'order_late_{_uid}')
+            model.Add(_late >= finals[0]['end'] - _dl)
+            order_late_terms.append(_late)
+
         # 鍋の占有制約 (Pot Usage Constraint)
         pot_usage_intervals = {}
         for order_idx, tasks_list in vars_by_order.items():
@@ -7279,6 +7310,8 @@ class CSPAgent:
         # 所要時間より上の優先度で避ける。
         if burn_terms:
             end_sum = end_sum + sum(burn_terms) * (weight_makespan * 10)
+        if order_late_terms:
+            end_sum = end_sum + sum(order_late_terms) * (weight_makespan * 10)
         if switch_penalty_terms:
             # switch_scale は switch_penalty が取り得る最大値より大きくし、
             # (makespan, end_sum) の優先順位を一切変えずに完全な同点のときだけ

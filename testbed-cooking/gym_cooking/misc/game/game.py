@@ -412,7 +412,8 @@ class Game:
         
         if current_order_scheduler is not None:
             for i, (order, restTime, timeLimit, bonus) in enumerate(current_order_scheduler.current_orders):
-                self.draw_current_order(i, copy.deepcopy(order), restTime)
+                self.draw_current_order(i, copy.deepcopy(order), restTime,
+                                        time_limit=timeLimit)
 
         # draw success and failed ones
         self.put_text(self.small_font, "Score", (40, 80, 180),
@@ -420,7 +421,7 @@ class Game:
         self.put_text(self.font, str(current_order_scheduler.reward), (40, 80, 180),
                       ((0.5 + 0.3) * self.tile_size[0], (current_world.height + 1.4) * self.tile_size[1]))
 
-    def draw_current_order(self, idx, obj, t):
+    def draw_current_order(self, idx, obj, t, time_limit=None):
         # order
         obj_loc = (idx, self.world.height)
         if any([isinstance(c, Plate) for c in obj.contents]):
@@ -440,10 +441,23 @@ class Game:
             0.75: (124, 178, 66),
             1.0: (0, 138, 122),
         }
-        # 注文の残り時間のゲージは出さない。いまの実験では注文が時間切れに
-        # なることが無く(制限時間まで持たない)、減っていく帯があると
-        # 急かされているように見えるだけで、読み取れる情報が無い。
-        pass
+        # 残り時間の帯。注文に制限時間があるとき(エンドレス)だけ出す。
+        # 時間切れが無い設定では、減っていく帯は急かして見えるだけで
+        # 読み取れる情報が無いので出さない。
+        sched = getattr(self.env, 'order_scheduler', None)
+        if sched is None or getattr(sched, 'disable_order_expiry', True):
+            return
+        if not time_limit:
+            return
+        ratio = max(0.0, min(1.0, float(t) / float(time_limit)))
+        key = min(colors, key=lambda k: abs(k - ratio))
+        x, y = self.scaled_location((idx, self.world.height))
+        w, h = self.tile_size
+        bar_h = max(3, int(h * 0.12))
+        pygame.draw.rect(self.screen, (60, 60, 60),
+                         (x, y + h - bar_h, w, bar_h))
+        pygame.draw.rect(self.screen, colors[key],
+                         (x, y + h - bar_h, int(w * ratio), bar_h))
 
     def draw_soup_hint(self):
         if self.world.arglist.user_recipy:

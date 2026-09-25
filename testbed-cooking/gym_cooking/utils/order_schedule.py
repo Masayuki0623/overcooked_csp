@@ -30,7 +30,9 @@ def resolve_order_path(order_file):
 class OrderScheduler:
     def __init__(self, arglist, recipes):
         self.arglist = arglist
-        self.disable_order_expiry = True
+        # 注文の制限時間。エンドレスでは有効にする。固定の注文列では
+        # 「全部出せば終わり」なので、時間切れを入れても意味がない。
+        self.disable_order_expiry = not bool(getattr(arglist, 'endless_orders', False))
         self.recipe_name_list = self._load_recipe_name_list(arglist)
         self.recipes = self._resolve_recipes(recipes)
         self.rand_recipe_list = list(range(len(self.recipes)))
