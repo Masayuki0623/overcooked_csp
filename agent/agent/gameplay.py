@@ -212,8 +212,8 @@ class GamePlay(Game):
         # CSPAgent の completed_task_ids は cook しか記録しない(chop と serve は
         # 「置くと決めた瞬間」であって実行確認ではない)ため、そちらは使えない。
         self.instruct_every = max(1, int(instruct_every or 1))
-        self._ai_task_switches = 0
-        self._last_ai_task_id = None
+        self._ai_tasks_done = 0
+        self._hist_cursor = 0
         self._instructed_at_switch = None
         # 出す番が来たのに指示できる作業が1つも無かったとき、その番を
         # 持ち越す。できるようになった瞬間に出す。
@@ -705,20 +705,37 @@ class GamePlay(Game):
         self._once_instruction_done = True
         self._request_instruction(trigger='once_at_start', allow_text_fallback=False)
 
-    def _count_ai_task_switches(self):
-        """AI の担当作業が切り替わった回数。作業を1つ終えるごとに1増える。"""
-        ai = getattr(self, 'ai', None)
-        if ai is None:
-            return self._ai_task_switches
-        sched = (getattr(ai, 'schedule_per_agent', None) or {}).get(
-            getattr(ai, 'own_agent_idx', 0)) or []
-        idx = (getattr(ai, 'current_task_idx', None) or {}).get(
-            getattr(ai, 'own_agent_idx', 0), 0)
-        cur = sched[idx]['id'] if idx < len(sched) else None
-        if cur is not None and cur != self._last_ai_task_id:
-            self._last_ai_task_id = cur
-            self._ai_task_switches += 1
-        return self._ai_task_switches
+    # AI が1つの工程を終えたとみなす操作。Assemble / Pickup / Put / Move は
+    # 工程そのものではなく途中の手順なので数えない。
+    AI_TASK_EVENTS = ('Chop', 'Cook', 'Mix', 'Deliver')
+
+    def _count_ai_finished_tasks(self):
+        """AI が実際に終えた工程の数。
+
+        以前は「AI の担当作業が切り替わった回数」で数えていたが、計画を
+        組み直すと担当が入れ替わるだけで数が進んでしまう。組み直しは人間が
+        動いたときにも起きるので、人間の行動で指示の番が回ってきていた。
+
+        盤面に残る操作の記録(誰が・何を)から、AI のぶんだけを数える。
+        """
+        hist = getattr(self.env, 'interact_history', None) or []
+        idx = self.ai_agent_idx if self.ai_agent_idx is not None else 0
+        try:
+            name = self.env.sim_agents[idx].name
+        except Exception:
+            return self._ai_tasks_done
+        total = len(hist)
+        while self._hist_cursor < total:
+            try:
+                e = hist[self._hist_cursor]
+            except IndexError:
+                break
+            self._hist_cursor += 1
+            if getattr(e, 'playerA', None) != name:
+                continue
+            if str(getattr(e, 'event', '')).split('_')[0] in self.AI_TASK_EVENTS:
+                self._ai_tasks_done += 1
+        return self._ai_tasks_done
 
     def _poll_every_n_tasks_trigger(self):
         """every_n_tasks: 開始直後に1回、以後は n 個の作業ごとに指示画面を出す。"""
@@ -728,7 +745,7 @@ class GamePlay(Game):
             return
         if self._latest_env_state is None:
             return
-        n = self._count_ai_task_switches()
+        n = self._count_ai_finished_tasks()
         first = self._instructed_at_switch is None
         if not self._instruction_pending:
             if not first and n - self._instructed_at_switch < self.instruct_every:
