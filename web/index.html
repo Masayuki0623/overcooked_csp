@@ -146,6 +146,19 @@
     padding: 8px 12px; display: flex; align-items: center; gap: 8px; min-height: 52px;
   }
   #instruct .cards button:active { background: #3b4350; transform: translateY(2px); }
+  #instruct .cards button.on {
+    background: #2b5f4a; border-color: #4fd39a; border-bottom-width: 3px;
+  }
+  #instruct .go { margin-top: 10px; text-align: center; }
+  #instruct .go button {
+    font: inherit; font-size: 15px; font-weight: 700; color: var(--text);
+    background: #2f6f57; border: 1px solid #4fd39a; border-bottom-width: 3px;
+    border-radius: 10px; padding: 10px 28px; min-width: 140px;
+  }
+  #instruct .go button:disabled {
+    background: var(--btn-bg); border-color: var(--btn-line); color: var(--muted);
+  }
+  #instruct .go button:not(:disabled):active { transform: translateY(2px); }
   #instruct .cards img { width: 30px; height: 30px; image-rendering: pixelated; }
   #instruct .cards .act { color: var(--muted); font-size: 12px; }
 
@@ -380,9 +393,12 @@
 </div>
 
 <div id="instruct">
-  <div class="lead">AIに最初の指示を出してください</div>
+  <div class="lead" id="instruct-lead">AIに最初の指示を出してください</div>
   <div class="who" id="instruct-who"></div>
   <div class="cards" id="instruct-cards"></div>
+  <div class="go" id="instruct-go">
+    <button type="button" id="instruct-ok" disabled>決定</button>
+  </div>
 </div>
 
 <div id="pad">
@@ -2012,6 +2028,12 @@
       `<span><img src="${esc(gfxUrl((p.sprite || 'agent-blue') + '-front'))}" ` +
       `onerror="this.src='${esc(gfxUrl(p.sprite || 'agent-blue'))}'">` +
       `${esc(p.name)}</span>`).join('');
+    const lead = document.getElementById('instruct-lead');
+    if (lead) {
+      lead.textContent = started
+        ? '選んでから「決定」を押してください'
+        : 'AIに最初の指示を出してください';
+    }
     document.getElementById('instruct-who').innerHTML = who;
     const cards = (msg.items || []).map((it, i) =>
       `<button type="button" data-i="${i}">` +
@@ -2025,13 +2047,24 @@
     pad.classList.add('hidden');
     const box = document.getElementById('instruct-cards');
     box.innerHTML = cards;
+    // 押した瞬間には送らない。移動ボタンを操作しているときに指が触れて
+    // そのまま送ってしまうため、いったん選ぶだけにして「決定」で送る。
+    const ok = document.getElementById('instruct-ok');
+    let chosen = null;
+    ok.disabled = true;
     box.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
-      sendNow({ type: 'instruct', seq: msg.seq, index: Number(b.dataset.i) });
+      chosen = Number(b.dataset.i);
+      box.querySelectorAll('button').forEach((o) => o.classList.toggle('on', o === b));
+      ok.disabled = false;
+    }));
+    ok.onclick = () => {
+      if (chosen === null) return;
+      sendNow({ type: 'instruct', seq: msg.seq, index: chosen });
       hideInstruct();
       instructShown = false;
       instructDone = true;
       if (!started) beginCountdown();   // 決めてから 3・2・1
-    }));
+    };
     instructBox.classList.add('show');
   }
   function hideInstruct() {
