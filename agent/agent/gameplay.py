@@ -1155,84 +1155,108 @@ class GamePlay(Game):
         # agent_id -> 直前に送信し、まだ実際に環境へ適用されたと確認できていない action。
         # None(未送信)になって初めて次のコマンドを送る。
         awaiting_confirm = {}
+        if not hasattr(self, '_ai_loop_errors'):
+            self._ai_loop_errors = set()
         while True:
-            # AIをわざと遅くしたい設定のときだけ間引く。
-            # この sleep は「判断 → 送信」の間ではなくループ先頭に置くこと。
-            # 間に置くと、決めた行動が最大 1/fps_ai 秒ぶん遅れて環境に届き、
-            # その間に環境が数ステップ進んでしまう。さらに awaiting_confirm は
-            # 「送った行動が適用されたと確認できるまで次を送らない」ため、
-            # 遅延ぶんがそのまま次の行動までの待ち時間に加算され、
-            # AI が数フレームに1回しか動けなくなる。
-            # 先頭で待ってから最新状態を取り込み、判断した行動は即座に送る。
-            if throttle_ai:
-                sleep_time = max(time_per_step - (time.time() - time_last), 0)
-                if sleep_time > 0:
-                    time.sleep(sleep_time)
-                time_last = time.time()
+            # ここから下で例外が出ると、この輪ごと終わって AI は二度と手を
+            # 出さなくなる。ゲームは動いたままなので、外からは「AI だけが
+            # 固まった」ように見え、記録にも何も残らない(実測: 切ったレタスを
+            # 持ったまま15秒止まり、ai_errors は空だった)。
+            # 1周ぶんを捨てて次へ進む。同じ失敗は1度だけ出し、リプレイにも残す。
+            try:
+                # AIをわざと遅くしたい設定のときだけ間引く。
+                # この sleep は「判断 → 送信」の間ではなくループ先頭に置くこと。
+                # 間に置くと、決めた行動が最大 1/fps_ai 秒ぶん遅れて環境に届き、
+                # その間に環境が数ステップ進んでしまう。さらに awaiting_confirm は
+                # 「送った行動が適用されたと確認できるまで次を送らない」ため、
+                # 遅延ぶんがそのまま次の行動までの待ち時間に加算され、
+                # AI が数フレームに1回しか動けなくなる。
+                # 先頭で待ってから最新状態を取り込み、判断した行動は即座に送る。
+                if throttle_ai:
+                    sleep_time = max(time_per_step - (time.time() - time_last), 0)
+                    if sleep_time > 0:
+                        time.sleep(sleep_time)
+                    time_last = time.time()
 
-            event = self._q_ai.get()
-            while True:
-                event_type, args = event
-                if event_type == 'Env':
-                    env = args['EnvState']
-                    env_update = True
-                    applied_actions = args.get('applied_actions') or {}
-                    for agent_id in list(awaiting_confirm.keys()):
-                        target_idx = self._target_idx_for_agent_id(agent_id)
-                        agents = getattr(env, 'agents', None)
-                        if not agents or target_idx >= len(agents):
-                            continue
-                        agent_name = agents[target_idx].name
-                        if applied_actions.get(agent_name) == awaiting_confirm[agent_id]:
-                            # このステップで実際に適用されたことを確認できた -> 次のコマンドを送ってよい
-                            awaiting_confirm.pop(agent_id, None)
-                elif event_type == 'Chat':
-                    chat = args['chat']
-                elif event_type == "Action":
-                    human_act = True
-                elif event_type == "Quit":
-                    return
-                if not self._q_ai.empty():
-                    event = self._q_ai.get()
-                else:
-                    break
-
-            if chat != '':
-                self.ai.high_level_infer(env, chat)
-                chat = ''
-
-            if env_update:
-                self._refresh_instruction_states(env)
-                if self.debug_mode:
-                    hold_seen = getattr(env, 'hold', None)
-                    hold_seen_name = getattr(hold_seen, 'full_name', None) if hold_seen is not None else None
-                    print(f"[AITRACE] decide_begin wall={time.time():.4f} pos_seen={env.self_pos} hold_seen={hold_seen_name}")
-                # 判断時間の計測は --debug のときだけ行う(pace_env_to_ai=debug_mode)。
-                # 通常プレイでは計測も進行の引き伸ばしも一切行わない。
-                decide_started = time.time() if self.pace_env_to_ai else None
-                move, chat_ret = self._ai_decide(env)
-                self._note_ai_idle(move, chat_ret)
-                if decide_started is not None:
-                    # 環境側が「AIより速く進まない」ようにするための実測値。
-                    # 再スケジュール時だけ跳ねる(CSP探索)ので、指数移動平均で均す。
-                    decide_elapsed = time.time() - decide_started
-                    if self._ai_decide_seconds <= 0:
-                        self._ai_decide_seconds = decide_elapsed
+                event = self._q_ai.get()
+                while True:
+                    event_type, args = event
+                    if event_type == 'Env':
+                        env = args['EnvState']
+                        env_update = True
+                        applied_actions = args.get('applied_actions') or {}
+                        for agent_id in list(awaiting_confirm.keys()):
+                            target_idx = self._target_idx_for_agent_id(agent_id)
+                            agents = getattr(env, 'agents', None)
+                            if not agents or target_idx >= len(agents):
+                                continue
+                            agent_name = agents[target_idx].name
+                            if applied_actions.get(agent_name) == awaiting_confirm[agent_id]:
+                                # このステップで実際に適用されたことを確認できた -> 次のコマンドを送ってよい
+                                awaiting_confirm.pop(agent_id, None)
+                    elif event_type == 'Chat':
+                        chat = args['chat']
+                    elif event_type == "Action":
+                        human_act = True
+                    elif event_type == "Quit":
+                        return
+                    if not self._q_ai.empty():
+                        event = self._q_ai.get()
                     else:
-                        self._ai_decide_seconds = self._ai_decide_seconds * 0.8 + decide_elapsed * 0.2
-                if self.debug_mode:
-                    print(f"[AITRACE] decide_end   wall={time.time():.4f} pos_seen={env.self_pos} move={move}")
+                        break
 
-                if chat_ret:
-                    self._q_env.put(('ChatOut', {"chat": chat_ret}))
+                if chat != '':
+                    self.ai.high_level_infer(env, chat)
+                    chat = ''
 
-                if isinstance(move, dict):
-                    for agent_id, m in move.items():
-                        self._dispatch_agent_action(agent_id, m, env, awaiting_confirm)
-                else:
-                    target_idx = self.ai_agent_idx if self.ai_agent_idx is not None else 0
-                    self._dispatch_agent_action(f"ai_{target_idx}", move, env, awaiting_confirm)
-                human_act = False
+                if env_update:
+                    self._refresh_instruction_states(env)
+                    if self.debug_mode:
+                        hold_seen = getattr(env, 'hold', None)
+                        hold_seen_name = getattr(hold_seen, 'full_name', None) if hold_seen is not None else None
+                        print(f"[AITRACE] decide_begin wall={time.time():.4f} pos_seen={env.self_pos} hold_seen={hold_seen_name}")
+                    # 判断時間の計測は --debug のときだけ行う(pace_env_to_ai=debug_mode)。
+                    # 通常プレイでは計測も進行の引き伸ばしも一切行わない。
+                    decide_started = time.time() if self.pace_env_to_ai else None
+                    move, chat_ret = self._ai_decide(env)
+                    self._note_ai_idle(move, chat_ret)
+                    if decide_started is not None:
+                        # 環境側が「AIより速く進まない」ようにするための実測値。
+                        # 再スケジュール時だけ跳ねる(CSP探索)ので、指数移動平均で均す。
+                        decide_elapsed = time.time() - decide_started
+                        if self._ai_decide_seconds <= 0:
+                            self._ai_decide_seconds = decide_elapsed
+                        else:
+                            self._ai_decide_seconds = self._ai_decide_seconds * 0.8 + decide_elapsed * 0.2
+                    if self.debug_mode:
+                        print(f"[AITRACE] decide_end   wall={time.time():.4f} pos_seen={env.self_pos} move={move}")
+
+                    if chat_ret:
+                        self._q_env.put(('ChatOut', {"chat": chat_ret}))
+
+                    if isinstance(move, dict):
+                        for agent_id, m in move.items():
+                            self._dispatch_agent_action(agent_id, m, env, awaiting_confirm)
+                    else:
+                        target_idx = self.ai_agent_idx if self.ai_agent_idx is not None else 0
+                        self._dispatch_agent_action(f"ai_{target_idx}", move, env, awaiting_confirm)
+                    human_act = False
+                    env_update = False
+            except Exception:
+                detail = traceback.format_exc()
+                if detail not in self._ai_loop_errors:
+                    self._ai_loop_errors.add(detail)
+                    print("[AI] 判断の輪で例外が出ました(この1周を捨てて続けます)",
+                          flush=True)
+                    print(detail, flush=True)
+                    try:
+                        self.replay.log('ai_error', {
+                            'where': 'run_ai_loop',
+                            'error': detail.strip().splitlines()[-1],
+                            'traceback': detail,
+                            'time': getattr(env, 'time', None)})
+                    except Exception:
+                        pass
                 env_update = False
 
     # def _run_listen(self):
