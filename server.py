@@ -256,7 +256,7 @@ _assign_lock = threading.Lock()
 # 実験のパターン。条件の組み合わせ(地図2種 × 指示の効き方3種 = 6通り)は
 # どちらも同じで、違うのは1セッションの進み方。
 #   1: これまでの形。注文3品を出し切るまで。指示は開始時に1回だけ。
-#   2: エンドレス。60秒のあいだ常に3件の注文が出て、片づくたびに補充する。
+#   2: エンドレス。120秒のあいだ常に3件の注文が出て、片づくたびに補充する。
 #      指示は AI が3工程終えるごと。注文はサラダとスープだけ(ジュースなし)。
 EXPERIMENT_PATTERNS = {
     1: {
@@ -271,13 +271,13 @@ EXPERIMENT_PATTERNS = {
     },
     2: {
         'label': 'パターン2',
-        'desc': '60秒。注文は片づくたびに補充。指示は3工程ごと。サラダとスープのみ。',
+        'desc': '120秒。注文は片づくたびに補充。指示は3工程ごと。サラダとスープのみ。',
         'endless': True,
         # どちらの地図も野菜だけ。ジュースは出さない。
         'presets': {m: 'experiment1' for m in EXPERIMENT_MAP_PRESETS},
         'instruction': INSTRUCTION_TIMING_EVERY_N_TASKS,
         'instruct_every': 3,
-        'seconds': 60,
+        'seconds': 120,
         'orders_active': 3,
     },
 }
