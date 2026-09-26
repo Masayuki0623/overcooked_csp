@@ -868,6 +868,41 @@ class GamePlay(Game):
         # 条件が成立した瞬間に選ばせるモードなので、選択肢のない入力欄は意味がない。
         self._request_instruction(trigger='enable_cook', allow_text_fallback=False)
 
+    def _queue_human_input(self, action, paused):
+        """人の操作を1つ受け取る。指示を選んでいる間のぶんは捨てる。
+
+        指示を選んでいる間、ゲームは止めてある(Pause)。そのぶんを溜めて
+        おくと、選び終えた瞬間に数マスまとめて動いてしまう。さらに Web 版は
+        押した瞬間に端末側で先読みして描くので、こちらが動かしていない間も
+        キャラだけが進んで見え、決めた瞬間に元の位置へ引き戻される
+        (報告: 「指示入力中に移動した分だけ戻る」)。
+
+        止まっている間の操作は受け取らない。ただし「処理した数」には
+        数えておく。端末側はこの数を見て先読みを合わせ直しているので、
+        数え落とすとズレたままになる。
+        """
+        if paused:
+            if action == HUMAN_INTERACT_RELEASE:
+                # 「離した」の合図だけは効かせる。落とすと押しっぱなしの印が
+                # 残り、指示のあと手が出せなくなる。
+                self.interact_held = False
+                self.interact_used = False
+            else:
+                self.human_inputs_done += 1
+            return
+        backlog = self._human_backlog
+        with self._backlog_lock:
+            if len(backlog) == backlog.maxlen:
+                # 溜まりすぎて捨てる分も「処理した」と数える。
+                # Web 版は、この数を見て端末側の先読みと実際の
+                # 位置を合わせている(数え落とすとズレたままになる)。
+                if backlog[0] == HUMAN_INTERACT_RELEASE:
+                    self.interact_held = False
+                    self.interact_used = False
+                else:
+                    self.human_inputs_done += 1
+            backlog.append(action)
+
     def _run_env(self):
         seconds_per_step = 1 / self.fps
         idx_human = self.idx_human
@@ -880,7 +915,7 @@ class GamePlay(Game):
         # 1回ぶん消えていた。ネット越し(Web 版)では入力がまとまって届く
         # ことがあり、「ボタンを押しても動かない」ように見える原因だった。
         # 押しすぎて後から遅れて動き続けないよう、溜めるのは少しだけにする。
-        human_backlog = self._human_backlog
+        # 受け取るところは _queue_human_input。
         # 人の入力をいくつ処理したか。Web 版が先読みの補正に使う。
         self.human_inputs_done = 0
         ai_sent = {}          # 読み替える前に AI が送ってきた行動
@@ -907,20 +942,7 @@ class GamePlay(Game):
                 event_type, args = event
                 if event_type == 'Action':
                     if args['agent'] == "human" and idx_human is not None:
-                        with self._backlog_lock:
-                            if len(human_backlog) == human_backlog.maxlen:
-                                # 溜まりすぎて捨てる分も「処理した」と数える。
-                                # Web 版は、この数を見て端末側の先読みと実際の
-                                # 位置を合わせている(数え落とすとズレたままになる)。
-                                if human_backlog[0] == HUMAN_INTERACT_RELEASE:
-                                    # 捨てるのが「離した」の合図なら、ここで
-                                    # 効かせておく。落とすと押しっぱなしの印が
-                                    # 残ったままになり、次から手が出せなくなる。
-                                    self.interact_held = False
-                                    self.interact_used = False
-                                else:
-                                    self.human_inputs_done += 1
-                            human_backlog.append(args['action'])
+                        self._queue_human_input(args['action'], paused)
                     elif args['agent'] == "ai" and self.ai_agent_idx is not None:
                         action_dict[self.sim_agents[self.ai_agent_idx].name] = args['action']
                     elif args['agent'] == "ai_0":

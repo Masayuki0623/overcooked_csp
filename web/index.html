@@ -1000,6 +1000,11 @@
     }
   }
   function pushKey(code) {
+    // 指示を選んでいる間、ゲームは止まっている。ここで移動や「使う」を
+    // 送ると、端末側だけが先読みで動いて見え、決定した瞬間にサーバーの
+    // 位置へ引き戻される(「指示中に動いた分だけ戻る」)。動かさないのが
+    // 正しい見え方なので、指示中は受け付けない。
+    if (inputBlocked() && (DIRS[code] || code === INTERACT_CODE)) return;
     // 移動と「手を出す」は、1手ぶんの間隔で送る(サーバーの受け口も同じ
     // 速さでしか処理しないので、そろえておくとズレない)。それ以外の
     // キー(指示パネル等)はそのまま送る。
@@ -1055,7 +1060,16 @@
   // 見なされてしまう)。
   const pendingUp = new Set();
   let holdTimer = null;
+  // 指示を選んでいる間、ゲームは止まっている。ここで動かすと端末側だけが
+  // 先読みで進み、決めた瞬間にサーバーの位置へ引き戻される。「決定」を
+  // 押してからも、それがサーバーへ届いてゲームが動き出すまでの間は
+  // 同じことが起きるので、1手ぶんだけ余分に止めておく。
+  let moveBlockUntil = 0;
+  function inputBlocked() {
+    return instructShown || performance.now() < moveBlockUntil;
+  }
   function holdStart(code) {
+    if (inputBlocked()) return;   // 指示を選んでいる間は動かない
     if (held.has(code)) return;
     held.add(code);
     pushKey(code);
@@ -2029,6 +2043,9 @@
   let instructDone = false;     // この回の指示をもう選んだか
   let instructShown = false;    // いま指示を出しているか
   function showInstruct(msg) {
+    // 押しっぱなしのキーは、止める前にきちんと離しておく。残したままだと
+    // 「離した」の合図が届かず、指示のあと手を出せなくなる。
+    [...held].forEach(holdEnd);
     instructShown = true;
     if (!started) {
       // まだ始まっていない = 開始前の指示。数えている途中でも必ず止める。
@@ -2077,14 +2094,15 @@
     ok.onclick = () => {
       if (chosen === null) return;
       sendNow({ type: 'instruct', seq: msg.seq, index: chosen });
+      moveBlockUntil = performance.now() + stepMs;
       hideInstruct();
-      instructShown = false;
       instructDone = true;
       if (!started) beginCountdown();   // 決めてから 3・2・1
     };
     instructBox.classList.add('show');
   }
   function hideInstruct() {
+    instructShown = false;
     instructBox.classList.remove('show');
     pad.classList.remove('hidden');
   }
