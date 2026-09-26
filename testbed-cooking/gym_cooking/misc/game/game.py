@@ -495,11 +495,22 @@ class Game:
         pass
 
     def draw_current_time(self):
-        # Use step counter (self.env.t) instead of current_time
-        current_step = self.env.t if hasattr(self.env, 't') else 0
-        time_render = f"Step: {current_step}/1024"
-        self.put_text(self.small_font, time_render, (220, 70, 1),
-                      ((self.world.width - 2.0) * self.tile_size[0], (self.world.height + 1.6) * self.tile_size[1]))
+        """右下に残り時間を出す。時間制限が無い回は経過時間を出す。"""
+        now = float(getattr(self.env, 'current_time', 0.0) or 0.0)
+        limit = float(getattr(getattr(self.env, 'arglist', None),
+                              'max_num_timesteps', 0) or 0)
+        if limit > 0:
+            left = max(0.0, limit - now)
+            text = '残り %d 秒' % int(left + 0.999)
+            # 終わりが近いほど赤くする。10秒を切ったら赤。
+            color = (220, 70, 1) if left <= 10 else (
+                (249, 168, 37) if left <= 30 else (90, 110, 140))
+        else:
+            text = '%d 秒' % int(now)
+            color = (90, 110, 140)
+        self.put_text(self.small_font, text, color,
+                      ((self.world.width - 2.4) * self.tile_size[0],
+                       (self.world.height + 1.6) * self.tile_size[1]))
 
     def draw_paused(self):
         self.put_text(self.large_font, "PAUSED", (255, 0, 0),

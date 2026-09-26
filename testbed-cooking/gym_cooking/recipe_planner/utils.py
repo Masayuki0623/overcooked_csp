@@ -105,8 +105,14 @@ class Mixed(Predicate):
 
 class Cooked(Predicate):
     def __init__(self, obj, start_time=None):
-        Predicate.__init__(self, 'Cooked', (obj,), start_time=start_time, time_limit=COOKED_BEFORE_FIRE_TIME_SECONDS)
-        self._rest_steps = COOKED_BEFORE_FIRE_TIME_SECONDS
+        # 火事を使わない設定では、煮上がった状態を終端にする。
+        # Mixed / Charred と同じく、実質無限の残りステップにしておけば
+        # 次の状態(Charred)へ進まない。
+        limit = (COOKED_BEFORE_FIRE_TIME_SECONDS
+                 if ENABLE_OVERCOOK_FIRE else 1e9)
+        Predicate.__init__(self, 'Cooked', (obj,), start_time=start_time,
+                           time_limit=limit)
+        self._rest_steps = limit
     
     def update_by_current_time(self, **kwargs):
         Predicate.update_by_current_time(self, kwargs['current_time'])

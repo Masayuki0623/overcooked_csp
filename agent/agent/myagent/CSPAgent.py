@@ -15,7 +15,9 @@ INTERACT_FRAMES = 2
 from .csp.model import CSPModel
 from .csp.solver import solve as solve_csp
 from .TaskAgent import TaskAgent
-from gym_cooking.utils.config import COOKING_TIME_SECONDS, COOKED_BEFORE_FIRE_TIME_SECONDS
+from gym_cooking.utils.config import (COOKING_TIME_SECONDS,
+                                      COOKED_BEFORE_FIRE_TIME_SECONDS,
+                                      ENABLE_OVERCOOK_FIRE)
 
 
 @dataclass
@@ -7112,7 +7114,9 @@ class CSPAgent:
                     pass
 
         burn_terms = []
-        for i in range(num_tasks):
+        # 火事を使わない設定では、煮上がったものはそのまま待っていてくれる。
+        # 「焦げる前に取り出す」急ぎの理由が無いので、この罰は入れない。
+        for i in (range(num_tasks) if ENABLE_OVERCOOK_FIRE else ()):
             t = tasks[i]
             if t['verb'] not in ('serve', 'handover') or dish_kind_of(t['obj']) != KIND_SOUP:
                 continue
