@@ -1476,7 +1476,8 @@ class WebGamePlay:
         game._request_instruction = request_instruction
 
         self._font_px = {id(game.small_font): 12, id(game.font): 16,
-                         id(game.large_font): 40}
+                         id(game.large_font): 40,
+                         id(game.time_font): game.TIME_PX}
         original_put_text = game.put_text
 
         def put_text(font, text, color, loc):

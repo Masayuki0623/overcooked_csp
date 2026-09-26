@@ -238,14 +238,16 @@ class Game:
         self.__plot_elements.append(
             ('Rect', {'color': color, 'box': (a, b, c, d)}))
 
-    def put_text(self, font, text, color, loc, px=12):
-        # px はブラウザ側で使う大きさ。ブラウザは画像ではなく描画命令の
-        # 一覧を受け取って描き直すので、ここで伝えないと大きさが変わらない
-        # (ローカルの pygame だけ大きくなり、Web 版は 12px のままになる)。
+    def put_text(self, font, text, color, loc):
+        # ブラウザは画像ではなく描画命令の一覧を受け取って描き直すので、
+        # 文字の大きさも伝える必要がある。それは server.py が put_text を
+        # 包んで、font ごとに決めた大きさを書き足している(_font_px)。
+        # ここで引数を増やすと、その包みと形が合わなくなって描画が全部
+        # 止まる(実測: 画面が真っ暗になった)。形は変えないこと。
         t = font.render(text, True, color)
         self.screen.blit(t, loc)
         self.__plot_elements.append(
-            ('Text', {'text': text, 'color': color, 'location': loc, 'px': px}))
+            ('Text', {'text': text, 'color': color, 'location': loc}))
 
     # 向きごとの絵。無ければ元の1枚を使う。
     FACING_SUFFIX = {(0, 1): 'front', (0, -1): 'back',
@@ -528,7 +530,7 @@ class Game:
         x = max(0, self.world.width * self.tile_size[0] - width
                    - int(0.3 * self.tile_size[0]))
         y = (self.world.height + 1.1) * self.tile_size[1]
-        self.put_text(self.time_font, text, color, (int(x), int(y)), px=self.TIME_PX)
+        self.put_text(self.time_font, text, color, (int(x), int(y)))
 
     def draw_paused(self):
         self.put_text(self.large_font, "PAUSED", (255, 0, 0),
