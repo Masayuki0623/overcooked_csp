@@ -181,6 +181,11 @@ class CSPAgent:
         # 上限を固定のままにすると、進んでいる作業を途中で諦めてしまう。
         self.progress_stall_seconds = ((COOKING_TIME_SECONDS + 10.0)
                                        * game_config.BASE_INPUT_HZ / max(self.fps, 1))
+        # 実行側が「必要なものが盤面に無い」と言っているときの見張り時間。
+        # この場合、待っても自分では何も変わらない(誰かが用意しない限り
+        # 永久に進まない)。工程にかかる時間とは関係がないので、入力の
+        # 速さで伸ばさず、短く切り上げて別の作業へ回す。
+        self.missing_target_stall_seconds = 6.0
         # 進められなかった作業を避ける長さ。秒で決める(手数で持つと、
         # 入力の速さ n を下げたときに倍の長さになり、煮上がったスープを
         # 60秒も取りに行かないことがあった)。
@@ -1500,6 +1505,15 @@ class CSPAgent:
                 if blocked[tid] <= 0:
                     del blocked[tid]
 
+    @staticmethod
+    def _reason_means_missing(reason):
+        """実行側が「必要なものが盤面に無い」と言っているか。
+
+        皿・鍋の中身・受け渡し台などが無い、という報告。待っても自分では
+        どうにもならないので、長く粘らずに別の作業へ回したい。
+        """
+        return 'が見つかりません' in str(reason or '')
+
     def _watch_progress(self, agent_idx, action, reason):
         """同じタスクで動けない状態が続いていないかを見張る。
 
@@ -1547,15 +1561,18 @@ class CSPAgent:
             # 行かなくなる(実測: 鍋の前で立ったまま動かない)。
             watch[1] = env_now
             return
-        if env_now - watch[1] >= self.progress_stall_seconds:
+        limit = self.progress_stall_seconds
+        if self._reason_means_missing(reason):
+            limit = min(limit, self.missing_target_stall_seconds)
+        if env_now - watch[1] >= limit:
             watch[0], watch[1] = None, env_now
             self.blocked_tasks[agent_idx][tid] = self.blocked_cooldown_frames
             self.progress_stall_events += 1
             # まれにしか起きないが、起きると数十秒動かなくなる。原因を
             # あとから追えるよう、ここは常に記録に残す。
-            print(f'[AI] {tid} を {self.progress_stall_seconds} 秒進められず、'
-                  f'{self.blocked_cooldown_frames / max(self.fps, 1):.0f} 秒だけ諦めます',
-                  flush=True)
+            print(f'[AI] {tid} を {limit:.0f} 秒進められず、'
+                  f'{self.blocked_cooldown_frames / max(self.fps, 1):.0f} 秒だけ諦めます'
+                  f' (理由: {reason})', flush=True)
             self._emit_counter_debug(
                 f"[進捗監視] AI{agent_idx} は {tid} を "
                 f"{self.progress_stall_seconds} 秒進められなかったので一旦諦める "
@@ -2469,17 +2486,46 @@ class CSPAgent:
             hist.clear()
         return task
 
+    # 鍋の中身の名前に付く状態。材料名だけを取り出すために外す。
+    _POT_STATE_WORDS = ('Cooking', 'Cooked', 'Charred', 'Chopped', 'Fresh')
+
+    @classmethod
+    def _pot_contents(cls, full_name):
+        """鍋の中身の名前から、入っている材料の名前を取り出す。
+
+        例: 'CookingLettuce-CookingTomato' -> {'lettuce', 'tomato'}
+        """
+        out = set()
+        for part in str(full_name or '').split('-'):
+            part = part.strip()
+            for word in cls._POT_STATE_WORDS:
+                part = part.replace(word, '')
+            if part:
+                out.add(part.lower())
+        return out
+
     def _waiting_for_pot(self, tid):
-        """その作業が「鍋が煮上がるのを待っている」ものかどうか。"""
+        """その作業が「自分の料理が煮上がるのを待っている」ものかどうか。
+
+        以前は、どれか1つでも煮えている鍋があれば「待つのが正しい」と
+        判断していた。そのため、別の注文の鍋が煮えている間は、材料がまだ
+        どの鍋にも入っていない配膳作業まで「待ち」と見なされ、見張りの
+        時計が毎回リセットされていた。皿を持ったまま、何も起きないまま
+        試合が終わる(報告: 終盤に AI が動かなくなる)。
+        自分の料理が入っている鍋だけを見る。
+        """
         if not tid or tid[0] not in ('serve', 'handover'):
             return False
         env = getattr(self, '_last_env', None)
         if env is None or dish_kind_of(tid[1]) != KIND_SOUP:
             return False
+        want = {x.lower() for x in dish_ingredients(tid[1])}
         try:
             for pot_pos in env.get_pos_by_obj_gs(gs='Pot') or []:
                 name = str(getattr(env.pos_obj.get(pot_pos), 'full_name', '') or '')
-                if 'Cooking' in name:
+                if 'Cooking' not in name:
+                    continue
+                if not want or self._pot_contents(name) == want:
                     return True
         except Exception:
             return False

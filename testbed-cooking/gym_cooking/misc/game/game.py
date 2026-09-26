@@ -55,6 +55,10 @@ class Game:
         self.small_font = pygame.font.SysFont('Times', 12)
         self.font = pygame.font.SysFont('Times', 16)
         self.large_font = pygame.font.SysFont('Times', 40)
+        # 残り時間だけは離れても読めるように大きく出す。
+        self.TIME_PX = 30
+        self.time_font = pygame.font.SysFont('Times', self.TIME_PX)
+        self.TIME_WIDTH_MARGIN = 1.25
 
         self.__plot_elements = []
 
@@ -234,11 +238,14 @@ class Game:
         self.__plot_elements.append(
             ('Rect', {'color': color, 'box': (a, b, c, d)}))
 
-    def put_text(self, font, text, color, loc):
+    def put_text(self, font, text, color, loc, px=12):
+        # px はブラウザ側で使う大きさ。ブラウザは画像ではなく描画命令の
+        # 一覧を受け取って描き直すので、ここで伝えないと大きさが変わらない
+        # (ローカルの pygame だけ大きくなり、Web 版は 12px のままになる)。
         t = font.render(text, True, color)
         self.screen.blit(t, loc)
         self.__plot_elements.append(
-            ('Text', {'text': text, 'color': color, 'location': loc}))
+            ('Text', {'text': text, 'color': color, 'location': loc, 'px': px}))
 
     # 向きごとの絵。無ければ元の1枚を使う。
     FACING_SUFFIX = {(0, 1): 'front', (0, -1): 'back',
@@ -512,9 +519,16 @@ class Game:
         else:
             text = '%d 秒' % int(now)
             color = (90, 110, 140)
-        self.put_text(self.small_font, text, color,
-                      ((self.world.width - 2.4) * self.tile_size[0],
-                       (self.world.height + 1.6) * self.tile_size[1]))
+        # 右端にそろえる。文字数で幅が変わる(「残り 9 秒」と「残り 90 秒」)
+        # ので、測ってから位置を決める。
+        # ブラウザは同じ文字を自前の Times で描き直すため、ここで測った幅と
+        # 完全には一致しない(実測で 1.2 倍ほど広い)。狭く見積もると右端が
+        # 切れるので、広めに見積もって位置を決める。
+        width = int(self.time_font.size(text)[0] * self.TIME_WIDTH_MARGIN)
+        x = max(0, self.world.width * self.tile_size[0] - width
+                   - int(0.3 * self.tile_size[0]))
+        y = (self.world.height + 1.1) * self.tile_size[1]
+        self.put_text(self.time_font, text, color, (int(x), int(y)), px=self.TIME_PX)
 
     def draw_paused(self):
         self.put_text(self.large_font, "PAUSED", (255, 0, 0),
