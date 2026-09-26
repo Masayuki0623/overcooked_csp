@@ -688,6 +688,59 @@ class CSPAgent:
         except Exception as e:
             print(f'[指示] 制約の処理で失敗: {type(e).__name__} {e}', flush=True)
 
+    def _instruction_target_in_progress(self, action):
+        """その指示の作業を、いま実際に進めている最中かどうか。"""
+        # 1回目の判断ではまだ計画が無い。
+        for agent_idx, sched in (getattr(self, 'schedule_per_agent', None) or {}).items():
+            idx = getattr(self, 'current_task_idx', None)
+            idx = idx.get(agent_idx, 0) if isinstance(idx, dict) else (idx or 0)
+            if 0 <= idx < len(sched):
+                tid = sched[idx].get('id')
+                if tid and (str(tid[0]), str(tid[1])) == action:
+                    return True
+        return False
+
+    def _drop_unstartable_instructions(self, env):
+        """まだ取りかかっていない指示が、実行できなくなっていたら捨てる。
+
+        指示の選択肢は「いまこの瞬間に手を付けられる工程」だけに絞って
+        出している。ところが選んだあとに盤面が変わって実行できなくなる
+        ことがある(人が材料を先に使った、注文が入れ替わった、料理を先に
+        出された など)。そのまま抱えていると、AI は着手できない作業を
+        計画の先頭に置いたまま動けなくなる。できなくなった時点で捨てる。
+
+        取りかかったあとの作業は見ない。また、鍋やミキサーが塞がって
+        いるだけの状態も「できなくなった」とは見ない(材料を1つ入れた
+        時点で塞がるので、進めている最中の作業まで捨ててしまう)。
+        """
+        for pending in list(getattr(self, '_pending_instructions', []) or []):
+            if pending.get('status') in {'done', 'canceled', 'started'}:
+                continue
+            if (pending.get('execution_logged')
+                    or pending.get('started_env_time') is not None):
+                continue
+            action = self._extract_instruction_action(pending)
+            if not action:
+                continue
+            if self._instruction_target_in_progress(action):
+                continue
+            try:
+                task = {'id': (action[0], action[1], 0)}
+                if self._task_startable_now(env, task,
+                                            require_station_free=False):
+                    continue
+            except Exception:
+                continue
+            pending['status'] = 'canceled'
+            pending['canceled_reason'] = 'no_longer_startable'
+            now = getattr(env, 'time', None)
+            if now is None:
+                now = getattr(env, 'current_time', 0.0) or 0.0
+            pending['canceled_env_time'] = round(float(now), 1)
+            print(f'[指示] 実行できなくなったので棄却します: '
+                  f'action={action} 時刻={pending["canceled_env_time"]}秒',
+                  flush=True)
+
     def _note_instruction_started(self, env, agent_idx, tid):
         """指示された作業に実際に取りかかった時刻を残す(測定用)。
 
@@ -2704,6 +2757,7 @@ class CSPAgent:
         """
         self._last_env = env
         self.decay_blocked_tasks()
+        self._drop_unstartable_instructions(env)
         # 常にタスクリストを構築して変化をチェック
         current_orders = self._build_order_tasks(env)
         current_task_ids = set()
@@ -4172,12 +4226,18 @@ class CSPAgent:
                 return False
         return True
 
-    def _task_startable_now(self, env, task):
+    def _task_startable_now(self, env, task, require_station_free=True):
         """いまこの瞬間に手を付けられる工程か(指示の候補に出すかの判断)。
 
         _task_is_available_in_virtual_state は工程の前後関係しか見ないので、
         「鍋に入れ終わった」と「煮上がった」を区別しない。指示の選択肢は
         その場で実行できるものに限りたいので、盤面の実物を見て判断する。
+
+        require_station_free: 鍋/ミキサーが空いていることを求めるか。
+            選択肢を出すときは求める(塞がっていたら今は始められない)。
+            「もう実行できなくなったか」を見るときは求めない。材料を
+            1つ鍋へ入れた時点で鍋は塞がるので、求めたままだと、いま
+            進めている最中の作業まで「できなくなった」と見てしまう。
         """
         verb, obj, _uid = task['id']
         if verb not in ('serve', 'serve_juice', 'serve_salad', 'cook', 'mix'):
@@ -4197,10 +4257,12 @@ class CSPAgent:
             return all(has('Chopped', ing) for ing in ings)
         if verb == 'cook':
             return (all(has('Chopped', ing) for ing in ings)
-                    and self._station_is_free(env, 'Pot'))
+                    and (not require_station_free
+                         or self._station_is_free(env, 'Pot')))
         if verb == 'mix':
             return (all(has('Chopped', ing) for ing in ings)
-                    and self._station_is_free(env, 'Blender'))
+                    and (not require_station_free
+                         or self._station_is_free(env, 'Blender')))
         return True
 
     def _task_is_available_in_virtual_state(self, task, remaining_task_ids):
