@@ -4230,6 +4230,74 @@ class CSPAgent:
         return [fn for o in (getattr(env, 'all_obj_a', None) or [])
                 if (fn := getattr(o, 'full_name', None))]
 
+    # 山に混ざっていても、材料を数える邪魔にならない物。
+    _PILE_CONTAINERS = ('Plate', 'Cup')
+
+    @classmethod
+    def _assemblable(cls, names, ings, prefix='Chopped'):
+        """必要な材料が、実際に1皿へまとめられる形でそろっているか。
+
+        材料を1つずつ「盤面のどこかにあるか」で数えるだけでは足りない。
+        この環境では、台に置いた材料どうしが1つの山になる。同じ材料が
+        2つ入る山は作れないので、重なりのある山は合流できない。
+
+        例(報告 20260926_162748): 全部載せサラダ(レタス・玉ねぎ・トマト)
+        に対して、盤面には ChoppedLettuce-ChoppedOnion と
+        ChoppedOnion-ChoppedTomato の2つの山しかなかった。材料は3つとも
+        「ある」が、玉ねぎが重なるのでこの2つは合流できず、作れない。
+        それでも指示の候補に出ていた。
+
+        一度できた山は分解できない。丸ごと使うか、使わないかのどちらか
+        でしか扱えない。だから「山を割って足りない分だけ取り出す」ことは
+        できず、材料の数を合計するだけの判断では足りない。
+
+        逆に、重ならない山どうしは合流できる。トマト単体と
+        ChoppedLettuce-ChoppedOnion なら、重ならないので全部載せサラダに
+        なる。
+
+        山どうしが重ならないように選んで、必要な材料をちょうど覆えるか
+        で判断する。
+        """
+        needed = frozenset(ings)
+        if not needed:
+            return False
+        piles = []
+        for name in names:
+            got = set()
+            usable = True
+            for part in str(name or '').split('-'):
+                part = part.strip()
+                if not part or part in cls._PILE_CONTAINERS:
+                    continue
+                if part.startswith(prefix) and part[len(prefix):] in needed:
+                    got.add(part[len(prefix):])
+                else:
+                    # その料理に要らない物が混ざった山は使えない
+                    usable = False
+                    break
+            if usable and got:
+                # 山は分解できないので、ここでは「丸ごと1つ」として持つ。
+                piles.append(frozenset(got))
+        # 覆えない山は先に落とす。残りが多すぎるときは、大きい山から順に
+        # 見て打ち切る(組み合わせ探索が膨らまないように)。
+        piles = sorted({p for p in piles}, key=len, reverse=True)[:12]
+
+        def cover(remaining, idx):
+            if not remaining:
+                return True
+            if idx >= len(piles):
+                return False
+            if cover(remaining, idx + 1):       # この山は使わない
+                return True
+            pile = piles[idx]
+            # 丸ごと収まるときだけ使える。はみ出す山を「割って一部だけ」
+            # 使うことはできない。
+            if pile <= remaining:               # 重ならないので合流できる
+                return cover(remaining - pile, idx + 1)
+            return False
+
+        return cover(needed, 0)
+
     def _station_is_free(self, env, station_name):
         """鍋/ミキサーが空いているか。中身が載っていれば使えない。"""
         pos_gs = getattr(env, 'pos_gs', None) or {}
@@ -4271,13 +4339,13 @@ class CSPAgent:
         if verb == 'serve_juice':
             return any(all(f'Mixed{ing}' in n for ing in ings) for n in names)
         if verb == 'serve_salad':
-            return all(has('Chopped', ing) for ing in ings)
+            return self._assemblable(names, ings)
         if verb == 'cook':
-            return (all(has('Chopped', ing) for ing in ings)
+            return (self._assemblable(names, ings)
                     and (not require_station_free
                          or self._station_is_free(env, 'Pot')))
         if verb == 'mix':
-            return (all(has('Chopped', ing) for ing in ings)
+            return (self._assemblable(names, ings)
                     and (not require_station_free
                          or self._station_is_free(env, 'Blender')))
         return True
