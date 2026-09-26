@@ -80,7 +80,10 @@ def main():
     ai.active_constraints = []
 
     served_at = None
-    for _step in range(1, 151):
+    # 60秒ぶん。見たいのは「止まらずに足りない材料を足して出せるか」で、
+    # 何秒で出せるかではない。人間の実座標を距離に使うようにしてから、
+    # この場面では切る順番が変わって 30.2秒 -> 38.2秒 になった。
+    for _step in range(1, 301):
         move, _reason = ai(state_of(env))
         own = move.get('ai_0') if isinstance(move, dict) else move
         acts = {a.name: (0, 0) for a in env.sim_agents}
@@ -101,7 +104,7 @@ def main():
     check('注文に無い皿を出さない', not bad,
           '出してしまった: ' + ', '.join(d['dish'] for d in bad) if bad else '')
     check('足りない材料を足してサラダを出せる', served_at is not None,
-          f'{served_at:.1f}秒' if served_at else '30秒回しても提供できず')
+          f'{served_at:.1f}秒' if served_at else '60秒回しても提供できず')
 
     print()
     print(f"[{'SUCCESS' if all(results) else 'FAIL'}] "
