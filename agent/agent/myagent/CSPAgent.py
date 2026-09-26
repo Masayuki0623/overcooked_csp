@@ -4299,17 +4299,27 @@ class CSPAgent:
         return cover(needed, 0)
 
     def _station_is_free(self, env, station_name):
-        """鍋/ミキサーが空いているか。中身が載っていれば使えない。"""
+        """鍋/ミキサーが1つでも空いているか。
+
+        以前は「全部空いているか」を見ていた。鍋が1つしかないうちは同じ
+        ことだったが、2つ置いた地図では、片方が煮えているだけで
+        「いま調理は始められない」と判断してしまう。
+        1つでも空いていれば始められる。
+        """
         pos_gs = getattr(env, 'pos_gs', None) or {}
         pos_obj = getattr(env, 'pos_obj', None) or {}
+        found = False
         for loc, gs in pos_gs.items():
             if type(gs).__name__ != station_name:
                 continue
+            found = True
             if pos_obj.get(loc) is not None:
-                return False
+                continue
             if getattr(gs, 'holding', None) is not None:
-                return False
-        return True
+                continue
+            return True
+        # その器具が地図に無いなら、条件として課さない(これまでどおり)
+        return not found
 
     def _task_startable_now(self, env, task, require_station_free=True):
         """いまこの瞬間に手を付けられる工程か(指示の候補に出すかの判断)。

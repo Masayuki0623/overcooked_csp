@@ -238,6 +238,8 @@ def sanitize_debug(raw):
     out['endless'] = bool(raw.get('endless'))
     out['seconds'] = num('seconds', 20, 600, 60)
     out['orders_active'] = num('orders_active', 1, 5, 3)
+    # 鍋の数。2 を選ぶと、既存の鍋のすぐ下にもう1つある版の地図になる。
+    out['pots'] = num('pots', 1, 2, 1)
     return out
 # 注文の構成は地図ごとに決める。
 #   仕切り : サラダ + スープ + ジュース(experiment2)
@@ -267,6 +269,7 @@ SKIP_BUDGET_INF = 'inf'
 PATTERN_SKIP_BUDGETS = {
     1: tuple(SKIP_BUDGETS),
     2: tuple(SKIP_BUDGETS) + (SKIP_BUDGET_INF,),
+    3: tuple(SKIP_BUDGETS) + (SKIP_BUDGET_INF,),
 }
 
 
@@ -282,6 +285,7 @@ def agent_skip_budget(value):
 
 EXPERIMENT_PATTERNS = {
     1: {
+        'pots': 1,
         'label': 'パターン1',
         'desc': '注文3品を出し切るまで。指示は開始時に1回。',
         'endless': False,
@@ -292,11 +296,26 @@ EXPERIMENT_PATTERNS = {
         'orders_active': None,
     },
     2: {
+        'pots': 1,
         'label': 'パターン2',
         'desc': '90秒。注文は片づくたびに補充。指示は3工程ごと。'
                 '仕切りはジュースも出る。',
         'endless': True,
         # リングは野菜だけ。仕切りはジュースも出す。
+        'presets': {'exp_ring': 'experiment1', 'exp_partition': 'experiment2'},
+        'instruction': INSTRUCTION_TIMING_EVERY_N_TASKS,
+        'instruct_every': 3,
+        'seconds': 90,
+        'orders_active': 3,
+    },
+    3: {
+        # パターン2と同じ進み方で、鍋だけ2つにした版。既存の鍋のすぐ下に
+        # もう1つ置いてある(器具も材料も配置はそのまま)。同時に2つまで
+        # 煮られるので、鍋の取り合いがボトルネックにならない。
+        'pots': 2,
+        'label': 'パターン3',
+        'desc': 'パターン2と同じで、鍋が2つ。同時に2品まで煮られる。',
+        'endless': True,
         'presets': {'exp_ring': 'experiment1', 'exp_partition': 'experiment2'},
         'instruction': INSTRUCTION_TIMING_EVERY_N_TASKS,
         'instruct_every': 3,
@@ -851,6 +870,7 @@ class WebGamePlay:
                     'participant': participant, 'session': done + 1,
                     'pattern': pattern,
                     'endless': spec['endless'], 'seconds': spec['seconds'],
+                    'pots': spec.get('pots', 1),
                     'orders_active': spec['orders_active'],
                     'instruct_every': spec['instruct_every'],
                     'sessions_total': len(order), 'skip_budget': cond['skip_budget'],
@@ -892,6 +912,7 @@ class WebGamePlay:
         debug = sanitize_debug(choice.get('debug'))
         if debug:
             out['debug'] = debug
+            out['pots'] = debug.get('pots', 1)
         return out
 
     def note_client_rtt(self, rtt_ms):
@@ -1360,6 +1381,12 @@ class WebGamePlay:
 
         sel = self.selection
         map_name = sel['map'] if sel else a.map
+        # 鍋を2つにする回は、もう1つ置いてある版の地図を使う。
+        # 記録に残る map は差し替える前の名前のままにしておく(条件を
+        # 揃えて比べるとき、地図の形は同じものとして扱いたい)。
+        if (sel or {}).get('pots') == 2 and not str(map_name).endswith('_2pot'):
+            map_name = f'{map_name}_2pot'
+            print(f'[server] 鍋を2つにした地図を使います: {map_name}', flush=True)
         orders = sel['recipes'] if sel else a.orders
         # デバッグ画面の数値を反映する。指定が無ければ既定へ戻す。
         dbg = (sel or {}).get('debug') or None

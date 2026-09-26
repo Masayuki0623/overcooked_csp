@@ -62,6 +62,12 @@ MAP_SETTINGS = dict(
     #                    同時に存在し、指示の重さに段ができる。
     exp_dualpot=dict(level="exp_dualpot", max_num_orders=3,),
     # 上の3つから、フルーツ・ミキサー・コップを取り除いた版(野菜だけの注文用)
+    # 鍋を2つにした版(パターン3)。既存の鍋のすぐ下に、もう1つ置いてある。
+    # 器具も材料も配置はそのままで、違いは鍋の数だけ。
+    exp_partition_2pot=dict(level="exp_partition_2pot", max_num_orders=3,),
+    exp_ring_2pot=dict(level="exp_ring_2pot", max_num_orders=3,),
+    exp_partition_2pot_veg=dict(level="exp_partition_2pot_veg", max_num_orders=3,),
+    exp_ring_2pot_veg=dict(level="exp_ring_2pot_veg", max_num_orders=3,),
     exp_partition_veg=dict(level="exp_partition_veg", max_num_orders=3,),
     exp_bottleneck_veg=dict(level="exp_bottleneck_veg", max_num_orders=3,),
     exp_ring_veg=dict(level="exp_ring_veg", max_num_orders=3,),

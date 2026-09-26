@@ -1280,11 +1280,16 @@
   // デバッグ用のつまみ。on のときだけサーバーへ送る。実験・練習・
   // チュートリアルには効かない(サーバー側で先に分岐している)。
   const DEBUG_DEFAULT = { on: false, endless: false, seconds: 60,
-                          orders_active: 3, cook_seconds: 15, chop_steps: 8 };
+                          orders_active: 3, cook_seconds: 15, chop_steps: 8,
+                          pots: 1 };
   let pick = { map: null, preset: null, case: '', instruction: 'once_at_start',
                skip_budget: 0, instruct_every: 3, pattern: 1,
                debug: Object.assign({}, DEBUG_DEFAULT) };
   try { Object.assign(pick, JSON.parse(localStorage.getItem(PICK_STORE) || '{}')); } catch (e) {}
+  // 前に保存した設定には、あとから足した項目が入っていない。既定で埋めて
+  // おかないと、その欄が空のまま出る(実測: 鍋の数を足したとき、以前から
+  // 使っている端末では空欄になった)。
+  pick.debug = Object.assign({}, DEBUG_DEFAULT, pick.debug || {});
   const optionsReady = fetch('/api/options').then(r => r.json()).then(o => { options = o; })
     .catch(() => {});
 
@@ -1416,6 +1421,7 @@
                orders_active: Number(d.orders_active) || 3,
                cook_seconds: Number(d.cook_seconds) || 15,
                chop_steps: Number(d.chop_steps) || 8,
+               pots: Number(d.pots) === 2 ? 2 : 1,
              } : null,
              participant: custom ? null : (participantId || null) });
       showOverlay('<div class="big">準備しています</div><div class="sub">数秒かかります</div>');
@@ -1450,6 +1456,8 @@
       num('orders_active', '同時に出す注文数', 1, 5, '') +
       num('cook_seconds', '煮込み時間(秒)', 1, 120, '既定 15') +
       num('chop_steps', '切る回数', 1, 400, '既定 8。5Hz では半分の回数ぶん押す') +
+      num('pots', '鍋の数', 1, 2,
+          '2 にすると、いまの鍋のすぐ下にもう1つ増えます。同時に2品まで煮られます') +
       '<div class="hint">サーバー全体に効くので、複数人が同時に遊ぶと混ざります。' +
       '一人で試すときだけ使ってください。</div>' +
       '<div class="go" style="margin-top:6px"><button type="button" id="dbg-reset">既定に戻す</button></div>' +
