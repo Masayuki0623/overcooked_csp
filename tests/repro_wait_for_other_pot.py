@@ -103,6 +103,17 @@ check('「見つかりません」は短い見張り時間にする',
 check('普通の報告は短くしない',
       CSPAgent._reason_means_missing('調理完了待ち') is False)
 
+# 7. 「鍋が空くまで待機中」も短い時間で諦める
+#    (20260926_153422 の回。最後の7秒、刻んだ玉ねぎを持ったまま
+#     鍋が空くのを待ち続けて試合が終わった。空けるのは相手の仕事なので、
+#     待っても自分では何も変えられない)
+check('「空くまで待機中」も短い見張り時間にする',
+      CSPAgent._reason_means_missing('鍋が空くまで待機中') is True)
+check('ミキサー待ちも同じ扱いにする',
+      CSPAgent._reason_means_missing('ミキサーが空くまで待機中') is True)
+check('煮込み待ちは短くしない',
+      CSPAgent._reason_means_missing('調理完了 (Done)') is False)
+
 ok = sum(1 for r in results if r)
 print()
 if ok == len(results):

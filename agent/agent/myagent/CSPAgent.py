@@ -267,7 +267,16 @@ class CSPAgent:
         # 取り合いが起きているときは、取る側を入れ替えた案も解いて
         # makespan の短い方を採る。
         # 1回の探索の上限(決定性時間)。None なら最適解まで詰める。
-        self.solve_deterministic_limit = None
+        #
+        # 上限なしだと、たまに1回の探索が数秒かかり、その間 AI はまったく
+        # 動かない(実測: バグ報告 20260926_152900 で 1回の判断に 5.8 秒、
+        # 探索1回あたり 1.9 秒。人からは「AI が固まった」に見える)。
+        # 秒ではなく「決定性時間」で切る。秒で切ると PC の速さや他の負荷で
+        # 打ち切る場所が変わり、同じ条件の試行が同じ結果にならない。
+        # 0.1 は実測で決めた値。重い場面の最悪値が 5.8 秒 -> 1.0 秒になり、
+        # 普段の場面(実測 0.2 秒以下)には何の影響も出なかった。
+        # 打ち切られても、その時点で見つかっている最良の計画が返る。
+        self.solve_deterministic_limit = 0.1
         self._claim_priority = None      # 確保する順に並べた注文 uid
         self._stock_contest = {}         # 食材 -> {'claimed': [uid], 'chopped': [uid]}
         self._claim_winner = {}          # 取り合いが決着した食材 -> 取る注文 uid
@@ -1558,14 +1567,19 @@ class CSPAgent:
                 if blocked[tid] <= 0:
                     del blocked[tid]
 
-    @staticmethod
-    def _reason_means_missing(reason):
-        """実行側が「必要なものが盤面に無い」と言っているか。
+    # 実行側が「自分では状況を変えられない」と言っているときの言い回し。
+    #   が見つかりません : 皿・鍋の中身・受け渡し台などが盤面に無い
+    #   空くまで待機中   : 鍋やミキサーが塞がっていて、空けるのは相手の仕事
+    # どちらも待っていても自分では何も変えられない。その作業を一旦諦めて
+    # 別の割り当てへ回った方が、結果として早く片づく(諦めた作業は 30 秒で
+    # 候補に戻る)。
+    _STUCK_REASON_MARKS = ('が見つかりません', '空くまで待機中')
 
-        皿・鍋の中身・受け渡し台などが無い、という報告。待っても自分では
-        どうにもならないので、長く粘らずに別の作業へ回したい。
-        """
-        return 'が見つかりません' in str(reason or '')
+    @classmethod
+    def _reason_means_missing(cls, reason):
+        """実行側が「自分では状況を変えられない」と言っているか。"""
+        text = str(reason or '')
+        return any(mark in text for mark in cls._STUCK_REASON_MARKS)
 
     def _watch_progress(self, agent_idx, action, reason):
         """同じタスクで動けない状態が続いていないかを見張る。
@@ -7629,6 +7643,9 @@ class CSPAgent:
                 self.replay = saved_replay
             probe.replay = None
             probe.debug_counter_trace = False
+            # L の計測は f と f'(d) の両方が最適解でないと意味がない。
+            # 別スレッドで解いていてゲームを止めないので、上限は外す。
+            probe.solve_deterministic_limit = None
 
             env_probe = _dcopy(env)
             # 対象の指示だけが載った状態にする(A3: 指示は同時に1つだけ)。

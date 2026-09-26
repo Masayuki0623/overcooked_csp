@@ -117,6 +117,10 @@ INSTRUCTION_TIMINGS = (
 # 人の入力を溜めておける数。1 tick(0.1秒)に1つずつ使う。
 # 3 なら、連打しても最大 0.2 秒ぶんしか遅れて動き続けない。
 HUMAN_INPUT_BACKLOG = 3
+# 指示の画面を出すのに必要な、選べる作業の数。1つしか無いときは「選ぶ」
+# ことにならないので出さない(押すしかない画面になり、指示の良し悪しも
+# 測れない)。次に増えたときへ回す。
+MIN_INSTRUCTION_CHOICES = 2
 
 # 「使うボタンを離した」を、行動と同じ列に並べるための合図。
 #
@@ -384,6 +388,7 @@ class GamePlay(Game):
     AI_IDLE_REPORT_S = 3.0
     # 送ったコマンドの確認をどれだけ待つか。過ぎたら諦めて送り直す。
     AWAIT_CONFIRM_TIMEOUT_S = 1.0
+    MIN_INSTRUCTION_CHOICES = MIN_INSTRUCTION_CHOICES
 
     def _note_ai_idle(self, move, reason):
         """AI が動かない時間が続いたら、その理由を一度だけ記録に出す。
@@ -573,6 +578,11 @@ class GamePlay(Game):
         self._q_env.put(('Pause', {}))
         try:
             candidates = self._get_unexecuted_task_candidates()
+            # 候補が1つしかないときは「選ぶ」ことにならない。選択肢が
+            # 1枚だけの画面を出しても、参加者は押すしかなく、指示の
+            # 良し悪しも測れない。次の機会に回す。
+            if len(candidates) < self.MIN_INSTRUCTION_CHOICES:
+                candidates = []
             if candidates:
                 s = self._show_instruction_panel(candidates)
             elif allow_text_fallback:
@@ -584,8 +594,8 @@ class GamePlay(Game):
                 # 切ったあと指示できるものが無くなった)。
                 # 画面を出さなかったことを呼び出し側へ伝え、次の機会に
                 # 出し直させる。
-                print(f"[Instruction] {trigger}: いま指示できる作業がありません",
-                      flush=True)
+                print(f"[Instruction] {trigger}: いま指示できる作業が "
+                      f"{self.MIN_INSTRUCTION_CHOICES} 個そろいません", flush=True)
                 s = None
 
             if s is not None:

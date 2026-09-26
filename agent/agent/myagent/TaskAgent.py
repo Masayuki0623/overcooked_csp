@@ -110,6 +110,59 @@ class TaskAgent:
             return []
         return out
 
+    def _mergeable_counter_near(self, env, holding, near_pos):
+        """いま持っている物を重ねられて、注文として成立する台。
+
+        指定の台に置けないとき、空いている台へ逃がすだけだと、置いた次の
+        瞬間に同じ物を拾い直す往復になる(拾う側から見れば、そこにある
+        材料は「取りに行くべき材料」なので)。実測: 切った玉ねぎを
+        0.2秒ごとに置いては拾うのを 16 回繰り返した。
+
+        置くこと自体が目的ではなく、合流させるのが目的なので、
+        「重ねれば注文になる山」を先に探す。見つかればそこへ置けば合流が
+        済み、往復にならない。
+        """
+        if holding is None:
+            return None
+        holding_name = getattr(holding, 'full_name', '') or ''
+        holding_ings = self._counter_ingredient_names(holding_name)
+        allowed_sets = []
+        if self.order_ingredients:
+            allowed_sets.append(set(self.order_ingredients))
+        allowed_sets.extend(self._current_order_ingredient_sets(env))
+        best, best_d = None, None
+        for pos in self.reachable_positions(env, env.get_pos_by_obj_gs(gs='Counter')):
+            obj = env.pos_obj.get(pos)
+            if obj is None or not self.can_use_position(env, pos):
+                continue
+            if not mergeable(holding, obj):
+                continue
+            merged = holding_ings | self._counter_ingredient_names(
+                getattr(obj, 'full_name', '') or '')
+            # どの注文にもならない山を作ると、その材料ごと死ぬ。
+            if merged and allowed_sets and not any(merged <= a for a in allowed_sets):
+                continue
+            d = (abs(pos[0] - near_pos[0]) + abs(pos[1] - near_pos[1])
+                 if near_pos else 0)
+            if best_d is None or d < best_d:
+                best, best_d = pos, d
+        return best
+
+    @classmethod
+    def _counter_ingredient_names(cls, name):
+        """名前から材料名の集合を取り出す('ChoppedOnion' -> {'onion'})。"""
+        out = set()
+        for token in str(name or '').replace('-', ' ').replace('_', ' ').replace('/', ' ').split():
+            normalized = token.strip().lower()
+            for prefix in ('fresh', 'chopped', 'cooked', 'cooking', 'raw', 'cut',
+                           'mixing', 'mixed', 'charred'):
+                if normalized.startswith(prefix):
+                    normalized = normalized[len(prefix):]
+                    break
+            if normalized in cls.ALL_INGREDIENT_NAMES:
+                out.add(normalized)
+        return out
+
     def _resolve_assigned_counter_target(self, env, holding, assigned_counter, blocked_reason):
         if not assigned_counter:
             return None, None
@@ -155,8 +208,11 @@ class TaskAgent:
         allowed_sets.extend(self._current_order_ingredient_sets(env))
         if merged and allowed_sets and not any(merged <= a for a in allowed_sets):
             # 指定の台には他の注文の山が居座っている。拒否して待つだけでは
-            # 永久に進まないので、空いている別の台へ回す。
-            alt = self._free_counter_near(env, assigned_counter)
+            # 永久に進まないので、別の台へ回す。空いている台より先に
+            # 「重ねれば注文になる山」を探す(空き台へ逃がすと、置いた次の
+            # 瞬間に拾い直す往復になる)。
+            alt = (self._mergeable_counter_near(env, holding, assigned_counter)
+                   or self._free_counter_near(env, assigned_counter))
             if alt is not None:
                 return alt, None
             content_name = self._get_counter_content_name(env, assigned_counter)
@@ -168,8 +224,10 @@ class TaskAgent:
         if mergeable(holding, counter_obj):
             return assigned_counter, None
 
-        # 重ねられないなら、空いている別の台へ回す。待っても状況は変わらない。
-        alt = self._free_counter_near(env, assigned_counter)
+        # 重ねられないなら、別の台へ回す。待っても状況は変わらない。
+        # ここでも、空いている台より先に「重ねれば注文になる山」を探す。
+        alt = (self._mergeable_counter_near(env, holding, assigned_counter)
+               or self._free_counter_near(env, assigned_counter))
         if alt is not None:
             return alt, None
 

@@ -66,6 +66,7 @@ for extra in (ROOT / 'agent', ROOT / 'testbed-cooking'):
 
 from agent import play_main  # noqa: E402
 from agent.gameplay import (  # noqa: E402
+    MIN_INSTRUCTION_CHOICES,
     INSTRUCTION_TIMINGS,
     INSTRUCTION_TIMING_EVERY_N_TASKS,
     INSTRUCTION_TIMING_FREE,
@@ -292,10 +293,11 @@ EXPERIMENT_PATTERNS = {
     },
     2: {
         'label': 'パターン2',
-        'desc': '90秒。注文は片づくたびに補充。指示は3工程ごと。サラダとスープのみ。',
+        'desc': '90秒。注文は片づくたびに補充。指示は3工程ごと。'
+                '仕切りはジュースも出る。',
         'endless': True,
-        # どちらの地図も野菜だけ。ジュースは出さない。
-        'presets': {m: 'experiment1' for m in EXPERIMENT_MAP_PRESETS},
+        # リングは野菜だけ。仕切りはジュースも出す。
+        'presets': {'exp_ring': 'experiment1', 'exp_partition': 'experiment2'},
         'instruction': INSTRUCTION_TIMING_EVERY_N_TASKS,
         'instruct_every': 3,
         'seconds': 90,
@@ -1466,10 +1468,12 @@ class WebGamePlay:
         original_request = game._request_instruction
 
         def request_instruction(trigger='space', allow_text_fallback=True):
-            # 指示できるのは「AI がいま着手できる作業」だけ。1つも無いときに
-            # 何も起きないと、ボタンが壊れているように見えるので知らせる。
-            if not game._get_unexecuted_task_candidates():
-                self.notify('いま AI に指示できる作業はありません')
+            # 指示できるのは「AI がいま着手できる作業」だけ。選べる作業が
+            # そろっていないときに何も起きないと、ボタンが壊れているように
+            # 見えるので知らせる。1つしか無いときも出さない(選択肢が1枚
+            # だけの画面は「選ぶ」ことにならない)。
+            if len(game._get_unexecuted_task_candidates()) < MIN_INSTRUCTION_CHOICES:
+                self.notify('いま AI に指示できる作業がそろっていません')
                 return None
             return original_request(trigger=trigger, allow_text_fallback=False)
 
