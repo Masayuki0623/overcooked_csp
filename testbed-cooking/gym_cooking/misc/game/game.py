@@ -3,7 +3,8 @@ from pathlib import Path
 import pygame.draw
 
 import gym_cooking
-from gym_cooking.utils.config import blending_steps, chopping_steps
+from gym_cooking.utils.config import (blending_steps, chopping_steps,
+                                      ENABLE_OVERCOOK_FIRE)
 from gym_cooking.utils.core import *
 from gym_cooking.misc.game.utils import *
 import numpy as np
@@ -358,15 +359,18 @@ class Game:
         if 'Cooked' in obj.full_name:
             self.draw_by_scale_loc(
                 obj.full_name, (obj.location[0], obj.location[1] - 0.05), 0.6)
-            # obj is cooked, show the bar before the cooked object is fired
-            loc = self.scaled_location(obj.location)
-            self.draw_bar(loc[0] + (0.6 - 0.4) * self.tile_size[0], loc[1] + (0.5 + 0.35) * self.tile_size[1],
-                          0.7 *
-                          self.tile_size[0] * obj.contents[0].state._rest_steps /
-                          COOKED_BEFORE_FIRE_TIME_SECONDS,
-                          0.1 * self.tile_size[1], (220, 70, 1))
-            self.draw_by_scale_loc(
-                'fire', (obj.location[0] - 0.45, obj.location[1] + 0.4), 0.4)
+            # 焦げるまでの残りを示すゲージ。火事を使わない設定では焦げないので
+            # 出さない(残りが実質無限になり、意味のない帯が残るだけになる)。
+            if ENABLE_OVERCOOK_FIRE:
+                loc = self.scaled_location(obj.location)
+                self.draw_bar(loc[0] + (0.6 - 0.4) * self.tile_size[0],
+                              loc[1] + (0.5 + 0.35) * self.tile_size[1],
+                              0.7 * self.tile_size[0]
+                              * obj.contents[0].state._rest_steps
+                              / COOKED_BEFORE_FIRE_TIME_SECONDS,
+                              0.1 * self.tile_size[1], (220, 70, 1))
+                self.draw_by_scale_loc(
+                    'fire', (obj.location[0] - 0.45, obj.location[1] + 0.4), 0.4)
         elif 'Fire' in obj.full_name:
             fire = obj.unmerge('Fire')
             self.draw_by_scale_loc(
