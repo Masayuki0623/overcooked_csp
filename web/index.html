@@ -2124,7 +2124,18 @@
   // WASD でも同じように動けるようにする。ここで矢印キーに読み替えるので、
   // ここから先(送信・先読み・長押し)は矢印キーと同じ扱いになる。
   const WASD = { KeyW: 'ArrowUp', KeyA: 'ArrowLeft', KeyS: 'ArrowDown', KeyD: 'ArrowRight' };
+  // 文字を打っている最中はゲームの操作として扱わない。参加者ID の欄で
+  // W/A/S/D やスペースを打つと、移動の操作とみなして preventDefault して
+  // いたため、その文字が入力できなかった。
+  function typingInField(e) {
+    const el = e.target;
+    if (!el || el === document.body) return false;
+    const tag = (el.tagName || '').toLowerCase();
+    return tag === 'input' || tag === 'textarea' || tag === 'select'
+      || el.isContentEditable === true;
+  }
   window.addEventListener('keydown', (e) => {
+    if (typingInField(e)) return;
     const code = WASD[e.code] || e.code;
     if (!KEYS.has(code)) return;
     e.preventDefault();   // 矢印/Space でのページスクロールを止める
@@ -2134,7 +2145,10 @@
     if (DIRS[code] || code === 'Space') { if (playing) holdStart(code); return; }
     send({ type: 'key', code });
   });
-  window.addEventListener('keyup', (e) => { holdEnd(WASD[e.code] || e.code); });
+  window.addEventListener('keyup', (e) => {
+    if (typingInField(e)) return;
+    holdEnd(WASD[e.code] || e.code);
+  });
   window.addEventListener('blur', () => { [...held].forEach(holdEnd); });
 
   // マウス座標はサーバー側 Surface の座標へ戻して送る。
