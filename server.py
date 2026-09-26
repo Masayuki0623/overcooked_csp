@@ -258,6 +258,27 @@ _assign_lock = threading.Lock()
 #   1: これまでの形。注文3品を出し切るまで。指示は開始時に1回だけ。
 #   2: エンドレス。120秒のあいだ常に3件の注文が出て、片づくたびに補充する。
 #      指示は AI が3工程終えるごと。注文はサラダとスープだけ(ジュースなし)。
+# 指示の効き方。パターン2には 'inf' を足してある。
+#   0,1,2 : 指示より先に他の作業をいくつまで挟んでよいか
+#   'inf' : 制約を一切かけない。指示は受け取って記録するが、AI は
+#           指示が無かったときとまったく同じ計画で動く(対照条件)。
+SKIP_BUDGET_INF = 'inf'
+PATTERN_SKIP_BUDGETS = {
+    1: tuple(SKIP_BUDGETS),
+    2: tuple(SKIP_BUDGETS) + (SKIP_BUDGET_INF,),
+}
+
+
+def agent_skip_budget(value):
+    """条件の値を、AI に入れる形へ。'inf' は「制約なし」なので None。"""
+    if value is None or value == SKIP_BUDGET_INF:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 EXPERIMENT_PATTERNS = {
     1: {
         'label': 'パターン1',
@@ -293,10 +314,15 @@ def pattern_of(value):
     return n if n in EXPERIMENT_PATTERNS else DEFAULT_PATTERN
 
 
-def all_conditions():
-    """実験で回す条件。地図2種 × 指示の効き方3種 = 6通り。"""
+def all_conditions(pattern=None):
+    """実験で回す条件。
+
+    パターン1: 地図2種 × 効き方3種 = 6通り
+    パターン2: 地図2種 × 効き方4種(0,1,2,inf) = 8通り
+    """
+    budgets = PATTERN_SKIP_BUDGETS.get(pattern_of(pattern), tuple(SKIP_BUDGETS))
     return [{'map': m, 'skip_budget': b}
-            for m in EXPERIMENT_MAP_PRESETS for b in SKIP_BUDGETS]
+            for m in EXPERIMENT_MAP_PRESETS for b in budgets]
 
 
 class CrossProcessLock:
@@ -387,15 +413,16 @@ def assignment_for(participant, pattern=DEFAULT_PATTERN):
         # 数が同じ(6通り)場合に古い割り当てが残り、もう使わない
         # skip_budget で遊ばせてしまう。
         def _same(order):
-            want = sorted((c['map'], c['skip_budget']) for c in all_conditions())
+            want = sorted((c['map'], str(c['skip_budget']))
+                          for c in all_conditions(pattern))
             try:
-                got = sorted((c['map'], c['skip_budget']) for c in order)
+                got = sorted((c['map'], str(c['skip_budget'])) for c in order)
             except (KeyError, TypeError):
                 return False
             return got == want
 
         if not rec or not _same(rec.get('order') or []):
-            order = all_conditions()
+            order = all_conditions(pattern)
             random.shuffle(order)
             rec = {'order': order, 'done': 0, 'pattern': pattern_of(pattern),
                    'created': datetime.now().isoformat(timespec='seconds')}
@@ -1407,7 +1434,7 @@ class WebGamePlay:
             # (deadline_seconds)は使わない(シミュレーション側と同じ条件)。
             ai = getattr(self.game, 'ai', None)
             if ai is not None:
-                ai.skip_budget = int(sel['skip_budget'])
+                ai.skip_budget = agent_skip_budget(sel['skip_budget'])
                 ai.deadline_seconds = None
         return self.game
 
