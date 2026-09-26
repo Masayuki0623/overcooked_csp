@@ -46,6 +46,7 @@ import re
 import sys
 import threading
 import time
+import traceback
 from datetime import datetime
 from pathlib import Path
 
@@ -1587,31 +1588,36 @@ class WebGamePlay:
             try:
                 success = self.game.on_execute()
             finally:
+                # 結果を先に作ってから「終わった」にすること。
+                # 逆にすると、状態だけ先に変わった隙に「終わりました」を
+                # 送ってしまい、その知らせに結果が載らない。端末は結果の
+                # 無い知らせを読み飛ばすので、その直後に接続が切れると
+                # 「遊び終えたのに接続が切れました」と出る(報告あり)。
+                # リプレイの保存は1秒ほどかかるので、この隙は実際に開く。
+                order = getattr(self.env, 'order_scheduler', None)
+                self.result = {
+                    'success': bool(success),
+                    'served': getattr(order, 'successful_orders', 0),
+                    'failed': getattr(order, 'failed_orders', 0),
+                    'reward': getattr(order, 'reward', 0),
+                    'aborted': bool(self._aborted),
+                    'makespan_s': round(float(getattr(self.env, 'current_time', 0.0) or 0.0), 1),
+                }
+                self.finished_meta[self.game_id] = {
+                    'experiment': self.experiment_info(),
+                    'selection': self.selection_info(),
+                }
+                self.results[self.game_id] = self.result
                 self.state = 'finished'
                 self._save_replay()
                 self._save_timeline('aborted' if self._aborted else 'finished')
 
-            order = self.env.order_scheduler
-            self.result = {
-                'success': bool(success),
-                'served': getattr(order, 'successful_orders', 0),
-                'failed': getattr(order, 'failed_orders', 0),
-                'reward': getattr(order, 'reward', 0),
-                'aborted': bool(self._aborted),
-                'makespan_s': round(float(getattr(self.env, 'current_time', 0.0) or 0.0), 1),
-            }
             print(f'[server] #{self.game_id} ゲーム終了: {self.result}')
-            # 終わった回の条件も残す。この後 selection は次の回のために
-            # 消されるので、あとから参照できるのはここに控えた分だけ。
-            self.finished_meta[self.game_id] = {
-                'experiment': self.experiment_info(),
-                'selection': self.selection_info(),
-            }
             self._log_session()
 
-            # 結果を残してから番号を進める(遊んだ人の接続は、番号が
-            # 変わったのを見て結果を受け取り、画面を結果表示に切り替える)。
-            self.results[self.game_id] = self.result
+            # 結果は上(終わった直後)で残してある。番号を進めると、
+            # 遊んだ人の接続はそれを見て結果を受け取り、画面を結果表示に
+            # 切り替える。
             with self._player_lock:
                 self.player = None
             self.client_connected.clear()
@@ -2312,62 +2318,74 @@ async def ws(sock: WebSocket):
                 continue
 
             kind = msg.get('type')
-            if kind == 'key':
-                session.post_key(msg.get('code'), up=bool(msg.get('up')))
-            elif kind == 'mousemove':
-                session.post_mouse_move(msg.get('x', 0), msg.get('y', 0))
-            elif kind == 'mousedown':
-                session.post_mouse_down(msg.get('x', 0), msg.get('y', 0))
-            elif kind == 'start':
-                # 前の回が終わって枠が空いているなら取り直す。アンケートの
-                # 間も接続を保つようにしたので、同じ接続で次の回を始める
-                # ことがある。
-                if session.player is not token:
-                    session.try_acquire(token)
-                session.start(token, {
-                    'mode': msg.get('mode'), 'step': msg.get('step'),
-                    'map': msg.get('map'), 'preset': msg.get('preset'),
-                    'case': msg.get('case'),
-                    'instruction': msg.get('instruction'),
-                    'skip_budget': msg.get('skip_budget'),
-                    'instruct_every': msg.get('instruct_every'),
-                    'pattern': msg.get('pattern'),
-                    'debug': msg.get('debug'),
-                    'participant': msg.get('participant')})
-            elif kind == 'ack':
+            try:
+                await handle_input(kind, msg)
+            except Exception as e:
+                # 1つの入力でしくじっても、接続ごと落とさない。
+                # ゲームを片づけた直後は pygame が止まっているので、
+                # その瞬間に届いたキーで例外が出る。そこで接続が切れると、
+                # 遊び終えたのに「接続が切れました」と出てしまう。
+                print(f'[server] 入力 {kind} を捨てました: {type(e).__name__} {e}',
+                      flush=True)
+
+    async def handle_input(kind, msg):
+        """入力を1つ処理する。"""
+        if kind == 'key':
+            session.post_key(msg.get('code'), up=bool(msg.get('up')))
+        elif kind == 'mousemove':
+            session.post_mouse_move(msg.get('x', 0), msg.get('y', 0))
+        elif kind == 'mousedown':
+            session.post_mouse_down(msg.get('x', 0), msg.get('y', 0))
+        elif kind == 'start':
+            # 前の回が終わって枠が空いているなら取り直す。アンケートの
+            # 間も接続を保つようにしたので、同じ接続で次の回を始める
+            # ことがある。
+            if session.player is not token:
+                session.try_acquire(token)
+            session.start(token, {
+                'mode': msg.get('mode'), 'step': msg.get('step'),
+                'map': msg.get('map'), 'preset': msg.get('preset'),
+                'case': msg.get('case'),
+                'instruction': msg.get('instruction'),
+                'skip_budget': msg.get('skip_budget'),
+                'instruct_every': msg.get('instruct_every'),
+                'pattern': msg.get('pattern'),
+                'debug': msg.get('debug'),
+                'participant': msg.get('participant')})
+        elif kind == 'ack':
+            try:
+                frame_no[1] = max(frame_no[1], int(msg.get('n', 0)))
+            except (TypeError, ValueError):
+                pass
+        elif kind == 'instruct':
+            session.answer_instruction(msg.get('seq'), msg.get('index'))
+        elif kind == 'go':
+            session.go(token)
+        elif kind == 'pause':
+            # バグ報告を書いている間は時間を止める
+            session.set_paused(token, msg.get('on'))
+        elif kind == 'hello':
+            mode[0] = 'png' if msg.get('mode') == 'png' else 'draw'
+            if isinstance(msg.get('net'), dict):
+                # 端末から見た回線の種類(Wi-Fi / モバイル回線など。分かる端末だけ)
+                session.connection_info = dict(session.connection_info or {}, net=msg['net'])
+        elif kind == 'ping':
+            # RTT 計測用。クライアントの送信時刻をそのまま返す。
+            if msg.get('rtt') is not None:
+                session.note_client_rtt(msg.get('rtt'))
                 try:
-                    frame_no[1] = max(frame_no[1], int(msg.get('n', 0)))
+                    last_rtt[0] = float(msg['rtt'])
                 except (TypeError, ValueError):
                     pass
-            elif kind == 'instruct':
-                session.answer_instruction(msg.get('seq'), msg.get('index'))
-            elif kind == 'go':
-                session.go(token)
-            elif kind == 'pause':
-                # バグ報告を書いている間は時間を止める
-                session.set_paused(token, msg.get('on'))
-            elif kind == 'hello':
-                mode[0] = 'png' if msg.get('mode') == 'png' else 'draw'
-                if isinstance(msg.get('net'), dict):
-                    # 端末から見た回線の種類(Wi-Fi / モバイル回線など。分かる端末だけ)
-                    session.connection_info = dict(session.connection_info or {}, net=msg['net'])
-            elif kind == 'ping':
-                # RTT 計測用。クライアントの送信時刻をそのまま返す。
-                if msg.get('rtt') is not None:
-                    session.note_client_rtt(msg.get('rtt'))
-                    try:
-                        last_rtt[0] = float(msg['rtt'])
-                    except (TypeError, ValueError):
-                        pass
-                session.note_client_stat('client_paint_ms', msg.get('paint_ms'))
-                session.note_client_stat('client_recv_fps', msg.get('recv_fps'))
-                session.note_timeline({
-                    'rtt': msg.get('rtt'), 'paint_ms': msg.get('paint_ms'),
-                    'recv_fps': msg.get('recv_fps'),
-                    'defs': msg.get('defs'), 'seq': msg.get('seq'),
-                    'unacked': frame_no[0] - frame_no[1], 'sent': frame_no[0],
-                })
-                await sock.send_text(json.dumps({'type': 'pong', 't': msg.get('t')}))
+            session.note_client_stat('client_paint_ms', msg.get('paint_ms'))
+            session.note_client_stat('client_recv_fps', msg.get('recv_fps'))
+            session.note_timeline({
+                'rtt': msg.get('rtt'), 'paint_ms': msg.get('paint_ms'),
+                'recv_fps': msg.get('recv_fps'),
+                'defs': msg.get('defs'), 'seq': msg.get('seq'),
+                'unacked': frame_no[0] - frame_no[1], 'sent': frame_no[0],
+            })
+            await sock.send_text(json.dumps({'type': 'pong', 't': msg.get('t')}))
 
     async def send_text(obj):
         # 送信が戻ってこないことがある(相手が消えた直後)。待ち続けると
@@ -2528,6 +2546,14 @@ async def ws(sock: WebSocket):
             if session.player is token:
                 session.disconnect_reason = why
                 print(f'[server] #{session.game_id} 接続が終わった理由: {why}')
+            else:
+                # 遊び終えて枠を手放したあとの接続。以前はここを黙って
+                # 捨てていたため、「遊び終えた直後に切れた」ときに理由が
+                # 何も残らなかった(報告の調査で行き止まりになった)。
+                print(f'[server] #{session.game_id} 遊び終えた接続が閉じました: {why}')
+            if err is not None:
+                print(''.join(traceback.format_exception(
+                    type(err), err, err.__traceback__)), flush=True)
     finally:
         for t in tasks:
             t.cancel()
