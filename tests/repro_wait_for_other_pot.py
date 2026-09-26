@@ -114,6 +114,20 @@ check('ミキサー待ちも同じ扱いにする',
 check('煮込み待ちは短くしない',
       CSPAgent._reason_means_missing('調理完了 (Done)') is False)
 
+# 8. 相手が材料を持ってくるのを待っているだけの状態も、短い時間で諦める
+#    (20260926_161533 の回。手ぶらのまま 5.2 秒
+#     「不足分がそろうのを待機中」で止まっていた)
+for reason in ('不足分がそろうのを待機中', 'マージ対象の食材を待機中',
+               'マージ対象がそろうのを待機中', '必要な食材 (Chopped) を待機中',
+               '指定テーブルが使用中のため待機中', '共有置き場ID未割当のため待機中'):
+    check(f'「{reason}」は短い見張り時間にする',
+          CSPAgent._reason_means_missing(reason) is True)
+
+# 放っておけば進む待ちは、これまでどおり長く待つ
+for reason in ('調理完了待ち', '受け渡し待ち'):
+    check(f'「{reason}」は短くしない',
+          CSPAgent._reason_means_missing(reason) is False)
+
 ok = sum(1 for r in results if r)
 print()
 if ok == len(results):

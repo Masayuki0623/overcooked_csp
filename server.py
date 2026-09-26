@@ -1376,12 +1376,24 @@ class WebGamePlay:
                    'chop_steps': _DEFAULT_CHOP_STEPS}
         if dbg and dbg.get('endless'):
             endless_pool = endless_pool_for((sel or {}).get('preset'))
+            # 補充する注文はくじ引きで決まる。くじの種をここで決めて記録に
+            # 残す。残さないと、あとからリプレイを回しても注文の並びが
+            # 変わってしまい、その回に何が起きたのかを追えない
+            # (実測: エンドレスの回の不具合を2件、注文が違うせいで
+            #  当時の AI の考えまで再現できなかった)。
+            order_seed = random.randrange(1 << 30)
             map_overrides = {
                 'endless_orders': True,
                 'order_pool': endless_pool,
+                'order_seed': order_seed,
                 'max_num_orders': dbg.get('orders_active') or 3,
                 'max_num_timesteps': dbg.get('seconds') or 60,
             }
+            if sel is not None:
+                sel['order_seed'] = order_seed
+                sel['order_pool'] = list(endless_pool)
+                sel['orders_active'] = map_overrides['max_num_orders']
+                sel['seconds'] = map_overrides['max_num_timesteps']
             orders = None
             if not uses_fruit(endless_pool):
                 # 補充元にジュースが無いなら、フルーツ・ミキサー・コップを

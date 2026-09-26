@@ -52,14 +52,25 @@ def load(path):
 def rebuild(sel):
     """その回と同じ地図・同じ注文で環境を作り直す。"""
     name = sel['map']
+    pool = list(sel.get('order_pool') or [])
     # フルーツを使わない回は、器具を外した版の地図で遊んでいる。
     # チュートリアルの地図は最初から必要な物しか置いていないので、そのまま。
-    if (not name.startswith('tutorial_')
-            and not any(f in r for r in sel.get('recipes', [])
-                        for f in ('Apple', 'Orange', 'Banana', 'Juice'))):
+    uses_fruit = any(f in r for f in ('Apple', 'Orange', 'Banana', 'Juice')
+                     for r in (pool or sel.get('recipes', [])))
+    if not name.startswith('tutorial_') and not uses_fruit:
         name = f"{name}_veg"
     kw = dict(MAP_SETTINGS[name])
     kw['order_recipes'] = tuple(sel['recipes'])
+    if sel.get('endless'):
+        # 補充はくじ引き。同じ種を入れないと注文の並びが変わり、
+        # その回に何が起きたのかを追えない。
+        kw.update({
+            'endless_orders': True,
+            'order_pool': tuple(pool),
+            'order_seed': sel.get('order_seed'),
+            'max_num_orders': sel.get('orders_active') or 3,
+            'max_num_timesteps': sel.get('seconds') or 90,
+        })
     env = OvercookedEnvironment(MapSetting(**kw))
     env.reset()
     return env
