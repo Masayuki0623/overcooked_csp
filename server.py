@@ -479,6 +479,15 @@ START_TIMEOUT_S = 120
 # ブラウザは1秒ごとに ping を送る。スマホは電波が切れても「閉じた」とは
 # 知らせてこないので、待っているだけでは枠が永久に空かない。
 PLAYER_SILENCE_TIMEOUT_S = 10
+# 遊んでいないあいだ(結果を見ている・アンケートに答えている・次の回を
+# 待っている)の上限。ここは長く取る。
+# 遊んでいる最中と違って、この間は画面に触らない時間が続く。スマホは
+# 画面が暗くなったり別のアプリに切り替わったりすると、1秒ごとの ping を
+# 出す時計ごと止めてしまう。10秒で切ると、結果を眺めているだけで枠を
+# 外され、「接続が切れました」と出てしまう(報告: 最後までプレイすると
+# 接続が切れると出る)。枠は前の回が終わった時点でもう手放しているので、
+# ここを長くしても次の人を待たせない。
+IDLE_SILENCE_TIMEOUT_S = 180
 # 1回の送信を待つ上限(秒)。これを超えたら相手は居ないとみなす。
 SEND_TIMEOUT_S = 5
 # 返事待ちで送れる盤面の数の下限と上限。往復時間に合わせて、この間で決める。
@@ -2453,10 +2462,17 @@ async def ws(sock: WebSocket):
                              'selection': session.selection_info()})
 
     async def watchdog():
-        """何も言わずに消えた端末(電波切れ等)を見つける。"""
+        """何も言わずに消えた端末(電波切れ等)を見つける。
+
+        遊んでいる最中だけ短く見る。遊んでいないあいだは、画面に触らない
+        時間が続くのが普通なので長く待つ。
+        """
         while True:
             await asyncio.sleep(1.0)
-            if time.time() - last_seen[0] > PLAYER_SILENCE_TIMEOUT_S:
+            limit = (PLAYER_SILENCE_TIMEOUT_S
+                     if session.state == 'running' and session.player is token
+                     else IDLE_SILENCE_TIMEOUT_S)
+            if time.time() - last_seen[0] > limit:
                 return
 
     # 入力・画面送り・見張りを別々に回し、どれか1つでも終わったら全部止めて
@@ -2556,9 +2572,28 @@ def parse_arguments():
     return p.parse_args()
 
 
+def _stamp_prints():
+    """記録に時刻を付ける。
+
+    不具合の報告は「いつ何が起きたか」を突き合わせないと追えない。
+    時刻が無いと、リプレイや通信の記録と並べられなかった(実測: 接続が
+    切れた回で、終了から再接続までが何秒だったか分からなかった)。
+    """
+    import builtins
+    original = builtins.print
+
+    def stamped(*args, **kwargs):
+        if args and isinstance(args[0], str) and args[0].startswith('['):
+            args = (time.strftime('%H:%M:%S') + ' ' + args[0],) + args[1:]
+        return original(*args, **kwargs)
+
+    builtins.print = stamped
+
+
 def main():
     global session, INSTANCE_ID
 
+    _stamp_prints()
     args = parse_arguments()
     INSTANCE_ID = int(args.instance)
     # 1秒あたりに行動できる回数。ゲームを組み立てる前に決めておく

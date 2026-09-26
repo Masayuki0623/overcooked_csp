@@ -1174,6 +1174,9 @@
   // 結果表示や順番待ちの表示を出したあとは、切断の案内で上書きしない。
   let settled = false;
   let started = false;
+  // この回がもう終わったか。終わったあとに切れても「接続が切れました」とは
+  // 言わない(遊び終えているのに失敗したように見え、やり直しを促してしまう)。
+  let finishedSeen = false;
 
   ws.onclose = () => {
     el.conn.textContent = '切断されました';
@@ -1181,6 +1184,14 @@
     if (settled) return;
     playing = false;
     el.overlay.classList.remove('countdown');
+    // もう終わった回なら、切れたこと自体は問題ではない。結果は受け取って
+    // いるので、そのまま次へ進めるように案内する。
+    if (finishedSeen) {
+      showOverlay('<div class="big">この回は終わりました</div>' +
+                  '<div class="sub">結果は記録しています。</div>' +
+                  '<button onclick="location.reload()">続ける</button>');
+      return;
+    }
     // 実験のセッションなら、黙ってやり直す。打ち切られた回はセッション数に
     // 数えないので、同じ条件をもう一度遊ぶだけでよい。端末が Wi-Fi と
     // モバイル回線を切り替えるとここに来ることがあり(実測: 途中で接続元の
@@ -1664,6 +1675,7 @@
   // ままで、カウントダウンが二度と始まらなかった)。
   function resetForNewGame() {
     settled = false;
+    finishedSeen = false;
     started = false;
     reporting = false;
     playing = false;
@@ -1780,6 +1792,7 @@
         showOverlay('<div class="big">盤面を描いています...</div>');
         startCountdown();
       } else if (msg.state === 'running') {
+        finishedSeen = false;  // 次の回が始まった
         clearRetry();          // 無事に始まったので、やり直しの数は忘れる
         el.overlay.classList.remove('countdown');
         if (!playing) {
@@ -1791,7 +1804,12 @@
 
         started = true;
         hideOverlay();
-      } else if (msg.state === 'finished' && msg.result) {
+      } else if (msg.state === 'finished') {
+        // 結果がまだ出来ていない1回目の知らせでも、終わったことは確か。
+        // ここで覚えておかないと、結果が届く前に切れたときに
+        // 「接続が切れました」と出て、遊び終えた回をやり直させてしまう。
+        finishedSeen = true;
+        if (!msg.result) return;
         // バグの報告でこちらから打ち切ったときは、案内を上書きしない
         if (reporting) return;
         settled = true;
