@@ -212,6 +212,9 @@ class GamePlay(Game):
         # CSPAgent の completed_task_ids は cook しか記録しない(chop と serve は
         # 「置くと決めた瞬間」であって実行確認ではない)ため、そちらは使えない。
         self.instruct_every = max(1, int(instruct_every or 1))
+        # 送ったコマンドをいつ送ったか(確認待ちが長引いたら送り直す)
+        self._await_since = {}
+        self._await_timeout_seen = set()
         self._ai_tasks_done = 0
         self._hist_cursor = 0
         self._world_changes = 0
@@ -379,6 +382,8 @@ class GamePlay(Game):
                 and self._facing_is_station(agent))
 
     AI_IDLE_REPORT_S = 3.0
+    # 送ったコマンドの確認をどれだけ待つか。過ぎたら諦めて送り直す。
+    AWAIT_CONFIRM_TIMEOUT_S = 1.0
 
     def _note_ai_idle(self, move, reason):
         """AI が動かない時間が続いたら、その理由を一度だけ記録に出す。
@@ -1128,11 +1133,28 @@ class GamePlay(Game):
         target_idx = self._target_idx_for_agent_id(agent_id)
         if self.human_agent_idx is not None and target_idx == self.human_agent_idx:
             return
-        if action != (0, 0) and awaiting_confirm.get(agent_id) is not None:
+        pending = awaiting_confirm.get(agent_id)
+        if action != (0, 0) and pending is not None:
             # 直前に送ったコマンドの結果がまだ確認できていない -> 二重送信を防ぐため今回はスキップ
-            return
+            #
+            # ただし待ち続けるのは危険。確認の合図を取りこぼすと、AI は次の
+            # コマンドを永久に送れなくなり、判断はできているのに環境へは
+            # (0,0) しか届かない。外からは「AI だけが固まった」ように見え、
+            # 例外も出ないので記録にも残らない(実測: バグ報告で3回)。
+            # 一定時間で諦めて送り直す。二重送信の害は1マス行き過ぎる程度で、
+            # 固まったまま試合が終わるよりずっと軽い。
+            since = self._await_since.get(agent_id)
+            if since is None or (time.time() - since) < self.AWAIT_CONFIRM_TIMEOUT_S:
+                return
+            if agent_id not in self._await_timeout_seen:
+                self._await_timeout_seen.add(agent_id)
+                print('[AI] 送ったコマンド %s の確認が %.1f秒 返ってこないので、'
+                      '諦めて送り直します (%s)'
+                      % (pending, self.AWAIT_CONFIRM_TIMEOUT_S, agent_id), flush=True)
+            awaiting_confirm.pop(agent_id, None)
         if action != (0, 0):
             awaiting_confirm[agent_id] = action
+            self._await_since[agent_id] = time.time()
         if self.debug_mode and agent_id == "ai_0":
             print(f"[AITRACE] push_action wall={time.time():.4f} pos_seen={env.self_pos} action={action}")
         self._q_env.put(('Action', {"agent": agent_id, "action": action}))
