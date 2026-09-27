@@ -7817,10 +7817,13 @@ class CSPAgent:
             'constrained_seconds': None,   # f'(d)
             'skip_budget': skip_budget,
             'status': 'unknown',
+            # 即時実行の損失 L(0) = f'(0) - f。その回の条件が何であっても
+            # 「いますぐやらせたら何秒損か」を必ず出す。条件をまたいで
+            # 比べられる量なので、対照条件(inf)の回でも残る。
+            'immediate_loss_seconds': None,
+            'immediate_seconds': None,     # f'(0)
+            'immediate_status': 'unknown',
         }
-        if skip_budget is None:
-            result['status'] = 'no_constraint'
-            return result
 
         try:
             # 本番の状態を一切汚さないよう、評価用の複製の上だけで解く。
@@ -7864,6 +7867,14 @@ class CSPAgent:
 
             def solve_makespan_frames(budget):
                 probe.skip_budget = budget
+                # 縛りの強さは、指示そのものが持っている skip_budget を見て
+                # 決まる(_apply_instruction_skip_budget_constraints)。
+                # エージェント側だけ差し替えても、その回の条件のまま解いて
+                # しまう。猶予を変えて解き比べるなら、こちらも必ず揃える。
+                for _holder in (probe, env_probe):
+                    for _p in (getattr(_holder, '_pending_instructions', None) or []):
+                        _p['skip_budget'] = budget
+                        _p['remaining_skip_budget'] = budget
                 # solve_csp_scheduling は orders 内のタスク辞書に order_obj を
                 # 書き込むため、毎回作り直した複製を渡す。
                 probe.solve_csp_scheduling(env_probe, orders=_dcopy(orders))
@@ -7887,13 +7898,42 @@ class CSPAgent:
 
             # f: 指示制約なし (skip_budget=None だと制約自体が追加されない)
             base = solve_makespan_frames(None)
+
+            # f'(0): 「いますぐやらせたら」。その回の条件が 1 でも 2 でも
+            # inf でも必ず出す。条件をまたいで比べられる量になる。
+            imm = (None if base.get('makespan_frames') is None
+                   else solve_makespan_frames(0))
+            if imm is not None and imm.get('makespan_frames') is not None:
+                _f = base['makespan_frames'] / float(self.fps)
+                _f0 = imm['makespan_frames'] / float(self.fps)
+                result.update({
+                    'immediate_loss_seconds': round(_f0 - _f, 3),
+                    'immediate_seconds': round(_f0, 3),
+                    'immediate_status': 'ok',
+                    'immediate_rank': imm.get('target_rank'),
+                    'immediate_start_s': imm.get('target_start_s'),
+                })
+            elif imm is not None:
+                result['immediate_status'] = (
+                    f"constrained_{imm.get('status', 'failed')}")
+
+            if skip_budget is None:
+                # 対照条件(inf)。縛りが無いので f'(d) は f と同じ模型になり、
+                # 差を取る意味がない。即時実行のぶんは上で出してある。
+                result['status'] = 'no_constraint'
+                if base.get('makespan_frames') is not None:
+                    result['baseline_seconds'] = round(
+                        base['makespan_frames'] / float(self.fps), 3)
+                return result
+
             # f'(d): 指示制約あり
-            cons = solve_makespan_frames(skip_budget)
+            cons = (solve_makespan_frames(skip_budget) if int(skip_budget) != 0
+                    else imm)
 
             if base.get('makespan_frames') is None:
                 result['status'] = f"baseline_{base.get('status', 'failed')}"
                 return result
-            if cons.get('makespan_frames') is None:
+            if cons is None or cons.get('makespan_frames') is None:
                 # d が厳しすぎて解が存在しない場合はここに来る。
                 result['status'] = f"constrained_{cons.get('status', 'failed')}"
                 result['baseline_seconds'] = base['makespan_frames'] / float(self.fps)
