@@ -317,13 +317,7 @@
   #overlay .survey .scale input:checked + span {
     background: #2f6f4b; border-color: #3f8a60; font-weight: 700;
   }
-  /* 項目名に添える原文(CCR の英語)。訳だけだと別の尺度になりかねない */
-  #overlay .survey .q .text em.en { color: var(--muted); font-size: 12px;
-                                    font-style: normal; margin-left: 6px; }
-  /* 名詞だけの項目に添える言い添え。何と何のあいだの話かを示す */
-  #overlay .survey .q .gloss { color: var(--muted); font-size: 13px;
-                               margin: 2px 0 6px; }
-  /* 0〜7 は数字だけなので細くしてよい(1行に収める) */
+  /* 数字だけの目盛り。言葉は両端にだけ置く */
   #overlay .survey .scale.num { gap: 4px; }
   #overlay .survey .scale.num label { min-width: 0; }
   #overlay .survey .anchors {
@@ -1965,38 +1959,32 @@
   //   Lin, Chen, Mutlu, Trafton, Sebo (2026)
   //   "The Reduced-Length Connection-Coordination Rapport (CCR) Scale"
   //   ACM Trans. Hum.-Robot Interact. 15(3), Article 57.
-  // 原文の項目は短い名詞。訳のぶれで別の尺度にならないよう、英語も併記する。
-  // 設問文も原文どおり「そのやりとりの中に、以下がどの程度あったと思うか」。
+  // 原文の項目は短い名詞(Connection, Empathy …)。英語の尺度ではそれで
+  // 通るが、日本語で名詞だけ並べると、誰と誰の話なのかが読み取れない。
+  // かといって「あなたとAIは、おたがいに共感していた」のように主語述語を
+  // きっちり書くと、堅くて読みづらい。短い言い方にして、相手が誰かは
+  // 設問文(「AIとのやりとりは、どうでしたか」)で一度だけ示す。
   //
-  // ただし名詞だけだと、日本語では「誰と誰のあいだのことか」が読み取れない
-  // (「共感」とだけ書かれても、自分がAIに感じたのか、AIが自分にか、
-  //  おたがいにか分からない)。項目そのものは原文のまま見せたうえで、
-  //  同じ意味を主語・目的語のある文で言い添える。論文は一人称での利用を
-  //  想定しており、そこでは「自分とロボットのあいだ」のラポールを測って
-  //  いるので(Study 3)、言い添えもその形にそろえる。
-  // 言い添えは、かならず「あなたとAIは」を主語にした文にする。
-  // 「あなたとAIのあいだに『共感』があった」だと、文の主語は「共感」で、
-  // 誰がそうしたのかが立たない。主語をそろえると、8項目とも
-  // 「あなたとAI」という同じ相手について答えるのだと読み取れる。
+  // 原文との対応(論文と突き合わせるとき用。画面には出さない):
+  //   conn_1  Connection      つながりを感じた
+  //   conn_2  Getting along   打ち解けられた
+  //   conn_3  Empathy         気持ちが通じ合った
+  //   conn_4  Respect         おたがいのやり方を大事にしていた
+  //   coord_1 Coordination    息が合っていた
+  //   coord_2 Engagement      おたがいに積極的だった
+  //   coord_3 Smooth flow     やりとりがスムーズだった
+  //   coord_4 Attentiveness   おたがいに気を配っていた
   const CCR_CONNECTION = [
-    ['conn_1', 'つながり', 'Connection',
-     'あなたとAIは、つながっていた'],
-    ['conn_2', '打ち解けていること', 'Getting along',
-     'あなたとAIは、打ち解けていた'],
-    ['conn_3', '共感', 'Empathy',
-     'あなたとAIは、おたがいに共感していた'],
-    ['conn_4', '尊重', 'Respect',
-     'あなたとAIは、おたがいを尊重していた'],
+    ['conn_1', 'つながりを感じた'],
+    ['conn_2', '打ち解けられた'],
+    ['conn_3', '気持ちが通じ合った'],
+    ['conn_4', 'おたがいのやり方を大事にしていた'],
   ];
   const CCR_COORDINATION = [
-    ['coord_1', '連携', 'Coordination',
-     'あなたとAIは、連携がとれていた'],
-    ['coord_2', '積極的な関与', 'Engagement',
-     'あなたとAIは、おたがいに積極的に関わっていた'],
-    ['coord_3', 'スムーズな流れ', 'Smooth flow',
-     'あなたとAIのやりとりは、スムーズに進んでいた'],
-    ['coord_4', '注意を払うこと', 'Attentiveness',
-     'あなたとAIは、おたがいに注意を払っていた'],
+    ['coord_1', '息が合っていた'],
+    ['coord_2', 'おたがいに積極的だった'],
+    ['coord_3', 'やりとりがスムーズだった'],
+    ['coord_4', 'おたがいに気を配っていた'],
   ];
   const FIVE_LABELS = ['全くそう思わない', 'そう思わない', 'どちらでもない',
                        'そう思う', '強くそう思う'];
@@ -2009,38 +1997,39 @@
   //   4 伝達  : 指示が届いたと感じたか
   //   5 納得  : 違う動きをしたときも理由があると思えたか
   //   6 有用  : 指示を出した甲斐があったか
-  // 主語は「あなた」でそろえる(パートAの言い添えと混ざらないように)。
+  // 誰の指示かは設問文(「AIに出した指示について」)で一度だけ示し、
+  // 項目そのものは短くする。
   const INSTR_ITEMS = [
-    ['instr_1', 'AIは、あなたが出した指示どおりに動いた'],
-    ['instr_2', 'AIは、あなたの指示にすぐ反応した'],
-    ['instr_3', 'AIは、あなたが指示した作業に早く取りかかった'],
-    ['instr_4', 'あなたの指示は、AIに伝わっていると感じた'],
-    ['instr_5', 'AIが指示とは違う動きをしたときも、それには理由があると感じた'],
-    ['instr_6', '指示を出したことで、作業がうまく進んだと感じた'],
+    ['instr_1', '指示どおりに動いてくれた'],
+    ['instr_2', '指示にすぐ反応してくれた'],
+    ['instr_3', '指示した作業にすぐ取りかかってくれた'],
+    ['instr_4', '指示が伝わっている気がした'],
+    ['instr_5', '指示と違う動きにも、理由がありそうだった'],
+    ['instr_6', '指示を出した甲斐があった'],
   ];
   // 自由記述。尺度では拾えない気づきを残すための欄で、回答は任意。
+  // 見出しだけにして、説明は置かない(長い文が3つ並ぶと読む気が失せる)。
   const FREE_ITEMS = [
-    ['free_good', 'AIの動きで「うまく噛み合った」と感じたところがあれば教えてください。'],
-    ['free_bad', 'AIの動きで「気になった」「思ったのと違った」ところがあれば教えてください。'],
-    ['free_instruction',
-     'あなたが出した指示に対して、AIがどう動いたか。'
-     + '気づいたことがあれば教えてください。'],
+    ['free_good', 'うまく噛み合ったところ'],
+    ['free_bad', '気になったところ'],
+    ['free_instruction', '指示に対するAIの動き'],
   ];
 
   function showSurvey(exp, result, summary) {
     playing = false;
     // 1〜5 の項目を並べる。番号は通しで振る(参加者から見て数えやすい)。
     let fiveNo = 0;
-    const fiveQs = (items) => items.map(([name, text, en, gloss]) => {
+    // 言葉は両端だけに付ける。5つ全部に付けると、狭い画面では
+    // 「全くそう思わ / ない」のように折り返して、かえって読みにくい。
+    const fiveQs = (items) => items.map(([name, text]) => {
       fiveNo += 1;
       const opts = FIVE_LABELS.map((lab, k) =>
         `<label><input type="radio" name="${name}" value="${k + 1}">` +
-        `<span>${k + 1}</span>${esc(lab)}</label>`).join('');
-      const note = en ? ` <em class="en">${esc(en)}</em>` : '';
-      // 言い添えは、項目の下に小さく。項目そのものは原文のまま残す。
-      const sub = gloss ? `<div class="gloss">${esc(gloss)}</div>` : '';
-      return `<div class="q" id="q-${name}"><div class="text">${fiveNo}. ${esc(text)}${note}</div>` +
-             sub + `<div class="scale">${opts}</div></div>`;
+        `<span>${k + 1}</span></label>`).join('');
+      return `<div class="q" id="q-${name}"><div class="text">${fiveNo}. ${esc(text)}</div>` +
+             `<div class="scale num">${opts}</div>` +
+             `<div class="anchors"><span>${esc(FIVE_LABELS[0])}</span>` +
+             `<span>${esc(FIVE_LABELS[FIVE_LABELS.length - 1])}</span></div></div>`;
     }).join('');
     const rapportQs = fiveQs(CCR_CONNECTION) + fiveQs(CCR_COORDINATION);
     fiveNo = 0;
@@ -2048,7 +2037,7 @@
 
     const freeQs = FREE_ITEMS.map(([name, text]) =>
       `<div class="q"><div class="text">${esc(text)}</div>` +
-      `<textarea id="${name}" rows="3" placeholder="任意です。空のままでも送信できます"></textarea></div>`
+      `<textarea id="${name}" rows="2" placeholder="任意"></textarea></div>`
     ).join('');
 
     el.overlay.classList.add('form');
@@ -2057,18 +2046,10 @@
     showOverlay(
       '<div class="survey">' +
       '<div class="big">ゲーム終了</div>' + summary +
-      `<div class="sub">セッション ${exp.session} / ${exp.sessions_total}` +
-      `(${esc(exp.participant_id)})<br>最後にアンケートにお答えください(1分ほど)。</div>` +
-      '<h3>パートA:あなたとAIのやりとりについて</h3>' +
-      '<div class="lead">今回の、<b>あなたとAIのやりとり</b>についてうかがいます。<br>' +
-      'そのやりとりの中に、以下がどの程度あったと思いますか。<br>' +
-      '1 = 全くそう思わない 〜 5 = 強くそう思う</div>' + rapportQs +
-      '<h3>パートB:あなたがAIに出した指示について</h3>' +
-      '<div class="lead">今回、<b>あなたがAIに出した指示</b>についてうかがいます。<br>' +
-      '以下について、どの程度そう思いますか。<br>' +
-      '1 = 全くそう思わない 〜 5 = 強くそう思う</div>' + instrQs +
-      '<h3>パートC:自由記述(任意)</h3>' +
-      '<div class="lead">当てはまるものが無ければ空のままで構いません。</div>' + freeQs +
+      `<div class="sub">セッション ${exp.session} / ${exp.sessions_total}</div>` +
+      '<h3>AIとのやりとりは、どうでしたか</h3>' + rapportQs +
+      '<h3>AIに出した指示について</h3>' + instrQs +
+      '<h3>気づいたこと(任意)</h3>' + freeQs +
       '<div class="err" id="sv-err"></div>' +
       '<div class="go"><button class="primary" id="sv-send">送信する</button></div>' +
       '</div>');
