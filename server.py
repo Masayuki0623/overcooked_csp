@@ -465,9 +465,42 @@ def note_session_done(participant, pattern=DEFAULT_PATTERN):
 
 
 def append_csv(path, fields, row):
+    """記録を1行足す。書けなくても、遊んでいる回は絶対に巻き添えにしない。
+
+    Windows では、その CSV を Excel で開いている間ずっと書き込めない
+    (PermissionError)。以前はここで例外がそのまま上へ抜け、セッションを
+    回している輪ごと落ちていた。遊ぶ側から見ると「ゲームが終わった瞬間に
+    接続が切れる」になる(報告あり。実測でも記録の CSV を開いたままだと
+    毎回そうなった)。
+
+    少し待って何度か試し、それでも駄目なら別ファイルへ逃がす。
+    どちらにしても、呼んだ側へ例外は返さない。
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    with CrossProcessLock(path):
-        _append_csv_locked(path, fields, row)
+    last = None
+    for wait in (0, 0.2, 0.5, 1.0):
+        if wait:
+            time.sleep(wait)
+        try:
+            with CrossProcessLock(path):
+                _append_csv_locked(path, fields, row)
+            return True
+        except PermissionError as e:
+            last = e
+        except Exception as e:
+            last = e
+            break
+    # 本命へ書けない。中身を捨てるほうが困るので、隣へ置いておく。
+    spare = path.with_name(f'{path.stem}-pending{path.suffix}')
+    try:
+        _append_csv_locked(spare, fields, row)
+        print(f'[server] {path.name} に書けないので {spare.name} へ逃がしました: '
+              f'{type(last).__name__} {last}', flush=True)
+        print(f'[server] {path.name} を Excel などで開いていませんか。'
+              f'閉じてから {spare.name} の中身を戻してください。', flush=True)
+    except Exception as e2:
+        print(f'[server] 記録を残せませんでした: {type(e2).__name__} {e2}', flush=True)
+    return False
 
 
 def _append_csv_locked(path, fields, row):
@@ -1570,64 +1603,94 @@ class WebGamePlay:
             print(f'[server] #{self.game_id} ブラウザからの接続を待っています...')
             self.client_connected.wait()
 
-            self.prepare()
-            sel = self.selection or {}
-            print(f"[server] #{self.game_id} 選択: {sel.get('map')} / {sel.get('preset')} "
-                  f"/ {sel.get('recipes')}")
-
-            # 時間を止めたまま始める。盤面は描いて送るので、端末は絵を読み
-            # 込んで最初の盤面を描き終えてから 3・2・1 を出し、合図(go)を
-            # 送ってくる。そこで時間を進め始める。組み立てた直後に進めると、
-            # スマホではまだ絵が描けていないうちにゲームが始まっていた。
-            self.game._q_env.put(('Pause', {}))
-            self._released = False
-            self._user_paused = False
-            self.state = 'ready'
-            self.perf.update(rendered=0, encoded=0, sent=0, started=time.time(),
-                             client_rtt_ms=[], client_paint_ms=[], client_recv_fps=[],
-                             send_wait_ms=[])
-            print(f'[server] #{self.game_id} 盤面を用意しました(開始の合図待ち)')
-            if self._aborted:
-                # 組み立てている間に切れていた
-                self._abort()
-            success = False
+            # この回で何が起きても、席は次の回へ進める。ここで例外が
+            # 上へ抜けると、その席のサーバーごと落ちて枠が死ぬ。遊ぶ側
+            # からは「ゲームが終わった瞬間に接続が切れた」に見える
+            # (実測: 記録の CSV を Excel で開いたままだと毎回落ちた)。
             try:
-                success = self.game.on_execute()
-            finally:
-                # 結果を先に作ってから「終わった」にすること。
-                # 逆にすると、状態だけ先に変わった隙に「終わりました」を
-                # 送ってしまい、その知らせに結果が載らない。端末は結果の
-                # 無い知らせを読み飛ばすので、その直後に接続が切れると
-                # 「遊び終えたのに接続が切れました」と出る(報告あり)。
-                # リプレイの保存は1秒ほどかかるので、この隙は実際に開く。
-                order = getattr(self.env, 'order_scheduler', None)
-                self.result = {
-                    'success': bool(success),
-                    'served': getattr(order, 'successful_orders', 0),
-                    'failed': getattr(order, 'failed_orders', 0),
-                    'reward': getattr(order, 'reward', 0),
-                    'aborted': bool(self._aborted),
-                    'makespan_s': round(float(getattr(self.env, 'current_time', 0.0) or 0.0), 1),
-                }
-                self.finished_meta[self.game_id] = {
-                    'experiment': self.experiment_info(),
-                    'selection': self.selection_info(),
-                }
-                self.results[self.game_id] = self.result
-                self.state = 'finished'
-                self._save_replay()
-                self._save_timeline('aborted' if self._aborted else 'finished')
 
-            print(f'[server] #{self.game_id} ゲーム終了: {self.result}')
-            self._log_session()
+                self.prepare()
+                sel = self.selection or {}
+                print(f"[server] #{self.game_id} 選択: {sel.get('map')} / {sel.get('preset')} "
+                      f"/ {sel.get('recipes')}")
 
-            # 結果は上(終わった直後)で残してある。番号を進めると、
-            # 遊んだ人の接続はそれを見て結果を受け取り、画面を結果表示に
-            # 切り替える。
-            with self._player_lock:
-                self.player = None
-            self.client_connected.clear()
-            self.game_id += 1
+                # 時間を止めたまま始める。盤面は描いて送るので、端末は絵を読み
+                # 込んで最初の盤面を描き終えてから 3・2・1 を出し、合図(go)を
+                # 送ってくる。そこで時間を進め始める。組み立てた直後に進めると、
+                # スマホではまだ絵が描けていないうちにゲームが始まっていた。
+                self.game._q_env.put(('Pause', {}))
+                self._released = False
+                self._user_paused = False
+                self.state = 'ready'
+                self.perf.update(rendered=0, encoded=0, sent=0, started=time.time(),
+                                 client_rtt_ms=[], client_paint_ms=[], client_recv_fps=[],
+                                 send_wait_ms=[])
+                print(f'[server] #{self.game_id} 盤面を用意しました(開始の合図待ち)')
+                if self._aborted:
+                    # 組み立てている間に切れていた
+                    self._abort()
+                success = False
+                try:
+                    success = self.game.on_execute()
+                finally:
+                    # 結果を先に作ってから「終わった」にすること。
+                    # 逆にすると、状態だけ先に変わった隙に「終わりました」を
+                    # 送ってしまい、その知らせに結果が載らない。端末は結果の
+                    # 無い知らせを読み飛ばすので、その直後に接続が切れると
+                    # 「遊び終えたのに接続が切れました」と出る(報告あり)。
+                    # リプレイの保存は1秒ほどかかるので、この隙は実際に開く。
+                    order = getattr(self.env, 'order_scheduler', None)
+                    self.result = {
+                        'success': bool(success),
+                        'served': getattr(order, 'successful_orders', 0),
+                        'failed': getattr(order, 'failed_orders', 0),
+                        'reward': getattr(order, 'reward', 0),
+                        'aborted': bool(self._aborted),
+                        'makespan_s': round(float(getattr(self.env, 'current_time', 0.0) or 0.0), 1),
+                    }
+                    self.finished_meta[self.game_id] = {
+                        'experiment': self.experiment_info(),
+                        'selection': self.selection_info(),
+                    }
+                    self.results[self.game_id] = self.result
+                    self.state = 'finished'
+                    self._safe('リプレイの保存', self._save_replay)
+                    self._safe('通信の記録の保存', self._save_timeline,
+                               'aborted' if self._aborted else 'finished')
+
+                print(f'[server] #{self.game_id} ゲーム終了: {self.result}')
+                self._safe('セッションの記録', self._log_session)
+
+                # 結果は上(終わった直後)で残してある。番号を進めると、
+                # 遊んだ人の接続はそれを見て結果を受け取り、画面を結果表示に
+                # 切り替える。
+                with self._player_lock:
+                    self.player = None
+                self.client_connected.clear()
+                self.game_id += 1
+            except Exception:
+                print(f'[server] #{self.game_id} この回で例外が出ました(席は次へ進めます)', flush=True)
+                print(traceback.format_exc(), flush=True)
+                with self._player_lock:
+                    self.player = None
+                self.client_connected.clear()
+                self.game_id += 1
+
+    def _safe(self, label, fn, *args):
+        """後片づけを1つ実行する。しくじっても輪は止めない。
+
+        1回ぶんの記録が残せないのと、遊んでいる回が巻き添えで落ちるのとでは
+        重さが違う。ここで例外が上へ抜けると、席を回している輪ごと止まり、
+        遊んでいる人からは「ゲームが終わった瞬間に接続が切れた」に見える
+        (実測: 記録の CSV を Excel で開いたままだと、毎回そうなった)。
+        """
+        try:
+            return fn(*args)
+        except Exception as e:
+            print(f'[server] {label}に失敗しました(続けます): '
+                  f'{type(e).__name__} {e}', flush=True)
+            print(traceback.format_exc(), flush=True)
+            return None
 
     def on_init_done(self):
         """pygame の初期化後に呼ぶ(display が出来てから差し替える)。
@@ -2095,8 +2158,6 @@ INSTR_FIELDS = [f'instr_{i}' for i in range(1, 7)]
 SURVEY_FIELDS = (['participant_id', 'session', 'pattern', 'timestamp']
                  + CCR_CONNECTION_FIELDS + CCR_COORDINATION_FIELDS
                  + ['connection_mean', 'coordination_mean', 'rapport']
-                 + [f'trust_{i}' for i in range(1, 9)]
-                 + ['trust_mean', 'trust_dnf_count']
                  + INSTR_FIELDS + ['instr_mean']
                  + FREE_TEXT_FIELDS
                  + ['map', 'skip_budget', 'case', 'served', 'makespan_s'])
@@ -2108,9 +2169,11 @@ async def survey(req: Request):
 
     ラポール(1〜5の8項目)は CCR 短縮版。因子ごとに平均してから、その2つを
     平均して rapport とする(論文どおりの出し方)。
-    信頼感(0〜7の8項目)は「あてはまらない」を欠損として除いた平均。
     指示についての項目(1〜5の6項目)は単純平均。
     自由記述(3欄)は任意で、書かなければ空のまま残す。
+
+    信頼感の8項目は外した。1回あたりの項目数を抑えるため(8セッション
+    続けてもらうので、答える負担がそのまま回答の質に効く)。
     """
     body = await req.json()
     pid = str(body.get('participant_id') or '').strip()
@@ -2137,27 +2200,11 @@ async def survey(req: Request):
     if err:
         return JSONResponse({'ok': False, 'error': err}, status_code=400)
 
-    trust = []
-    for i in range(1, 9):
-        v = body.get(f'trust_{i}')
-        if v in (None, '', 'dnf'):
-            trust.append(None)          # 「あてはまらない」= 欠損。0点ではない
-            continue
-        if not isinstance(v, (int, float)) or not (0 <= v <= 7):
-            return JSONResponse({'ok': False, 'error': f'信頼感の{i}番が未回答です'},
-                                status_code=400)
-        trust.append(int(v))
-    if body.get('answered_all') is not True and any(
-            body.get(f'trust_{i}') is None for i in range(1, 9)):
-        return JSONResponse({'ok': False, 'error': '信頼感に未回答があります'},
-                            status_code=400)
-
     # 自由記述は任意。長すぎる貼り付けだけ切って、あとはそのまま残す。
     free = {}
     for name in FREE_TEXT_FIELDS:
         free[name] = str(body.get(name) or '').strip()[:2000]
 
-    got = [v for v in trust if v is not None]
     connection_mean = round(sum(conn) / len(conn), 2)
     coordination_mean = round(sum(coord) / len(coord), 2)
     row = {
@@ -2169,8 +2216,6 @@ async def survey(req: Request):
         # 論文どおり、因子ごとの平均を出してからその2つを平均する。
         'rapport': round((connection_mean + coordination_mean) / 2, 2),
         **free,
-        'trust_mean': round(sum(got) / len(got), 2) if got else '',
-        'trust_dnf_count': sum(1 for v in trust if v is None),
         'instr_mean': round(sum(instr) / len(instr), 2),
         'map': body.get('map'), 'skip_budget': body.get('skip_budget'),
         'case': body.get('case'), 'served': body.get('served'),
@@ -2182,13 +2227,10 @@ async def survey(req: Request):
         row[name] = v
     for name, v in zip(INSTR_FIELDS, instr):
         row[name] = v
-    for i, v in enumerate(trust, 1):
-        row[f'trust_{i}'] = '' if v is None else v
     append_csv(SURVEY_PATH, SURVEY_FIELDS, row)
     print(f"[server] アンケートを保存しました: {pid} session={row['session']} "
           f"ラポール {row['rapport']} (つながり {connection_mean} / "
-          f"連携 {coordination_mean}) 信頼 {row['trust_mean']} "
-          f"指示 {row['instr_mean']}")
+          f"連携 {coordination_mean}) 指示 {row['instr_mean']}")
     return JSONResponse({'ok': True})
 
 
@@ -2599,7 +2641,8 @@ async def ws(sock: WebSocket):
                 # 捨てていたため、「遊び終えた直後に切れた」ときに理由が
                 # 何も残らなかった(報告の調査で行き止まりになった)。
                 print(f'[server] #{session.game_id} 遊び終えた接続が閉じました: {why}')
-            if err is not None:
+            # 普通に閉じただけなら中身は要らない。想定外のときだけ出す。
+            if err is not None and not isinstance(err, WebSocketDisconnect):
                 print(''.join(traceback.format_exception(
                     type(err), err, err.__traceback__)), flush=True)
     finally:
