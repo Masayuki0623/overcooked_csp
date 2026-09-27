@@ -1510,6 +1510,38 @@ class TaskAgent:
         local_assigned_counter_candidate = None
         local_assigned_counter_score = -float('inf')
 
+        # この注文の材料が載っている台を、先に全部見ておく。
+        # 「取り上げても意味があるか」は、他に重ねられる山があるかで決まる。
+        # 相手が残りを持ってくるのを待っている間、1つしかない山を取り上げると
+        # どこかへ置き戻すだけになり、置く⇄取るを繰り返す
+        # (報告: 「AI が X を置いたり取ったりして急かしているように見える」。
+        #  実測でも 0.2 秒で拾い直していた)。
+        piles = {}
+        for _pos, _obj in env.pos_obj.items():
+            if not self._is_available_object(_obj):
+                continue
+            if not self.can_use_position(env, _pos):
+                continue
+            _parts = (getattr(_obj, 'full_name', '') or '').replace(
+                'Cooking', 'Chopped').replace('Cooked', 'Chopped').replace(
+                'Charred', 'Chopped').split('-')
+            if _parts and all(p in order_allowed_names for p in _parts):
+                piles[_pos] = set(_parts)
+
+        def worth_taking(pos, parts):
+            """その山を取り上げると、前に進むか。
+
+            重ねられる相手が他にあるなら進む。同じ材料どうしは重ねられない
+            ので、材料が重ならない山があるかで見る。相手が1つも無ければ、
+            取っても置き戻すだけなので取らない。
+            """
+            for other_pos, other in piles.items():
+                if other_pos == pos:
+                    continue
+                if not (parts & other):
+                    return True
+            return False
+
         for pos, obj in env.pos_obj.items():
             if not self._is_available_object(obj):
                 continue
@@ -1542,7 +1574,16 @@ class TaskAgent:
             if valid_count > 0 and not has_unwanted:
                 dist = abs(self_pos[0] - pos[0]) + abs(self_pos[1] - pos[1])
                 score = (valid_count * 100) - dist
-                if assigned_counter and pos == assigned_counter and 0 < valid_count < len(missing_ings):
+                # 途中まで重なった山。取り上げても、重ねられる相手が他に
+                # 無ければ、どこかの台へ置き戻すだけで前に進まない。
+                # 最後の手段としてだけ呼び出し側へ渡す。
+                partial = 0 < valid_count < len(missing_ings)
+                if partial and not worth_taking(pos, set(parts)):
+                    if score > local_assigned_counter_score:
+                        local_assigned_counter_score = score
+                        local_assigned_counter_candidate = pos
+                    continue
+                if assigned_counter and pos == assigned_counter and partial:
                     if score > local_assigned_counter_score:
                         local_assigned_counter_score = score
                         local_assigned_counter_candidate = pos
