@@ -1166,8 +1166,10 @@ class WebGamePlay:
                 '繰り上がった順位': ((natural - exec_rank)
                                      if (natural and exec_rank) else None),
                 '着手した時刻_秒': started,
+                # 指示を登録したのと同じコマで取りかかると、丸め方しだいで
+                # -0.0 のような値になる。待ち時間なので 0 より下は取らない。
                 '着手までの秒数': (
-                    round(float(started) - float(accepted), 1)
+                    round(max(0.0, float(started) - float(accepted)), 1)
                     if started is not None and accepted is not None else None),
                 '着手せず終了': int(started is None),
                 '提供数': res.get('served'), '失敗数': res.get('failed'),
