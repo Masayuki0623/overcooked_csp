@@ -254,6 +254,50 @@ EXPERIMENT_MAP_PRESETS = {
 ASSIGN_PATH = ROOT / 'results' / 'assignments.json'
 SURVEY_PATH = ROOT / 'results' / 'survey.csv'
 SESSION_LOG_PATH = ROOT / 'results' / 'web_sessions.csv'
+# 指示1回につき1行。1回のゲームで何度も指示を出すので、セッションの行
+# (web_sessions.csv)には最初の1回ぶんしか入らない。実測ではエンドレスの
+# 90秒で5回出ていて、4回ぶんが分析に残らなかった。
+INSTRUCTION_LOG_PATH = ROOT / 'results' / 'web_instructions.csv'
+# 列の名前は日本語にして、見出しのすぐ下に説明の行を置く。
+# あとから自分で見返すとき、列名だけでは何の数字か思い出せない。
+#   pandas で読むときは pd.read_csv(path, skiprows=[1]) で説明行を飛ばす。
+INSTRUCTION_COLUMNS = [
+    ('記録時刻', 'この行を書いた日時'),
+    ('参加者ID', ''),
+    ('パターン', '1=注文3品を出し切る / 2=エンドレス / 3=エンドレス+鍋2つ'),
+    ('セッション番号', 'その参加者の何回目のセッションか'),
+    ('ゲーム番号', 'サーバー内の通し番号'),
+    ('地図', 'exp_ring=リング / exp_partition=仕切り'),
+    ('猶予', '指示の前に挟んでよい他の作業の数(skip_budget)。inf=指示を聞かない'),
+    ('注文の組み合わせ番号', ''),
+    ('指示の回数目', 'この回で何回目に出した指示か(1から)'),
+    ('指示した時刻_秒', '指示を受け取ったときのゲーム内時刻'),
+    ('指示の動作', 'chop=切る / cook=煮る / mix=混ぜる / serve系=提供'),
+    ('指示の対象', '料理名または材料名'),
+    ('料理の種類', 'salad / soup / juice'),
+    ('指示の結末',
+     'done=やり終えた / started=取りかかった / canceled=途中で実行できなくなり棄却'
+     ' / pending=最後まで取りかからなかった'),
+    ('効率損失量L_秒', "指示したせいで伸びた見込み時間。f'(猶予) - f"),
+    ('制約なしの見込み_秒', 'f = 指示しなければ全部出し終える見込みだった時刻'),
+    ('制約ありの見込み_秒', "f'= その指示を守ったときの見込み"),
+    ('L算出の可否', 'ok=出せた / no_constraint=縛りが掛からなかった / それ以外は理由'),
+    ('L算出時の工程数', 'そのとき解いた工程の数'),
+    ('割り込まれた作業数',
+     '指示した作業に取りかかるまでに、AI が先に片づけた他の作業の数'),
+    ('実際の実行順位', 'AI が何番目にその作業をやったか(割り込まれた作業数+1)'),
+    ('指示なしの実行順位', '指示しなかったら何番目になるはずだったか'),
+    ('繰り上がった順位', '指示なしの実行順位 - 実際の実行順位'),
+    ('着手した時刻_秒', 'AI がその作業に手を付けたゲーム内時刻'),
+    ('着手までの秒数', '指示してから、実際に取りかかるまでの秒数'),
+    ('着手せず終了', '1=最後まで取りかからなかった(待ち時間が測れていない)'),
+    ('提供数', 'その回に出せた品数'),
+    ('失敗数', 'その回に時間切れになった注文の数'),
+    ('プレイ時間_秒', ''),
+    ('正式な回か', '1=正式に数える回 / 0=バグ報告や途中離脱でやり直しになる回'),
+]
+INSTRUCTION_FIELDS = [name for name, _ in INSTRUCTION_COLUMNS]
+INSTRUCTION_NOTES = {name: note for name, note in INSTRUCTION_COLUMNS}
 _assign_lock = threading.Lock()
 
 
@@ -464,7 +508,7 @@ def note_session_done(participant, pattern=DEFAULT_PATTERN):
         _save_assignments(data)
 
 
-def append_csv(path, fields, row):
+def append_csv(path, fields, row, notes=None):
     """記録を1行足す。書けなくても、遊んでいる回は絶対に巻き添えにしない。
 
     Windows では、その CSV を Excel で開いている間ずっと書き込めない
@@ -483,7 +527,7 @@ def append_csv(path, fields, row):
             time.sleep(wait)
         try:
             with CrossProcessLock(path):
-                _append_csv_locked(path, fields, row)
+                _append_csv_locked(path, fields, row, notes)
             return True
         except PermissionError as e:
             last = e
@@ -493,7 +537,7 @@ def append_csv(path, fields, row):
     # 本命へ書けない。中身を捨てるほうが困るので、隣へ置いておく。
     spare = path.with_name(f'{path.stem}-pending{path.suffix}')
     try:
-        _append_csv_locked(spare, fields, row)
+        _append_csv_locked(spare, fields, row, notes)
         print(f'[server] {path.name} に書けないので {spare.name} へ逃がしました: '
               f'{type(last).__name__} {last}', flush=True)
         print(f'[server] {path.name} を Excel などで開いていませんか。'
@@ -503,7 +547,7 @@ def append_csv(path, fields, row):
     return False
 
 
-def _append_csv_locked(path, fields, row):
+def _append_csv_locked(path, fields, row, notes=None):
     # 中身が空のファイルが残っていることがある(編集の失敗など)。
     # 「ある」だけで見出しを書かずに足すと、見出しの無い CSV ができて
     # 読めなくなる。空なら新規と同じ扱いにする。
@@ -526,6 +570,11 @@ def _append_csv_locked(path, fields, row):
         w = csv.DictWriter(f, fieldnames=fields, extrasaction='ignore')
         if new:
             w.writeheader()
+            # 見出しのすぐ下に、それぞれの列が何かを書いた行を置く。
+            # 列名だけでは、あとから見て何の数字か思い出せない。
+            # 読むときは1行目を飛ばす(pandas なら skiprows=[1])。
+            if notes:
+                w.writerow({k: notes.get(k, '') for k in fields})
         w.writerow(row)
 
 
@@ -765,6 +814,9 @@ class WebGamePlay:
         # 指示の選択(ブラウザ側に出す)
         self.instruction_natural_rank = None
         self.instruction_kinds = ''
+        # 指示1回ぶんの控え(受け取った順)。指示しなかったときの順番など、
+        # pending 側に入らない値をここへ置く。
+        self.instruction_slots = []
         self.instruction_request = None
         self._instruction_answer = None
         self._instruction_seq = 0
@@ -1047,11 +1099,83 @@ class WebGamePlay:
             'accepted': int(not reason),
             'game_id': self.game_id,
         })
+        self._safe('指示の記録', self._log_instructions, reason)
         if not reason:
             # 正式に受理した回だけ数える。バグ報告の出た回と途中で抜けた回は
             # 同じ条件でやり直しになり、やり直した回が正式な1回になる。
             note_session_done(sel['participant'],
                               sel.get('pattern', DEFAULT_PATTERN))
+
+    def _log_instructions(self, reason):
+        """この回に出した指示を、1回1行で残す。
+
+        セッションの行(web_sessions.csv)に入るのは最初の1回ぶんだけ。
+        n個の作業ごとに指示を出す設計では1回のゲームで何度も指示が出るので
+        (実測: 90秒で5回)、それを全部残さないと L も挿入順も追えない。
+        """
+        sel = self.selection or {}
+        if not sel.get('participant'):
+            return
+        env = self.env
+        pend = list(getattr(env, '_pending_instructions', []) or []) if env else []
+        if not pend:
+            return
+        res = self.result or {}
+        slots = list(getattr(self, 'instruction_slots', []) or [])
+        now = datetime.now().isoformat(timespec='seconds')
+        for n, p in enumerate(pend, 1):
+            payload = p.get('task')
+            if isinstance(payload, (list, tuple)) and len(payload) >= 2:
+                payload = payload[1]
+            verb = payload.get('verb') if isinstance(payload, dict) else None
+            obj = payload.get('obj') if isinstance(payload, dict) else None
+            # 指示しなかったときの順番は別スレッドで測っている。受け取った
+            # 順に控えてあるので、同じ作業かどうかを確かめてから使う。
+            slot = slots[n - 1] if n - 1 < len(slots) else {}
+            if slot.get('verb') != verb or slot.get('obj') != obj:
+                slot = next((x for x in slots
+                             if x.get('verb') == verb and x.get('obj') == obj), {})
+            natural = slot.get('rank')
+            tasks_before = p.get('tasks_before')
+            exec_rank = (tasks_before + 1) if tasks_before is not None else None
+            accepted = p.get('accepted_env_time')
+            started = p.get('started_env_time')
+            loss = p.get('time_loss') or {}
+            append_csv(INSTRUCTION_LOG_PATH, INSTRUCTION_FIELDS, {
+                '記録時刻': now,
+                '参加者ID': sel['participant'],
+                'パターン': sel.get('pattern', DEFAULT_PATTERN),
+                'セッション番号': sel.get('session'),
+                'ゲーム番号': self.game_id,
+                '地図': sel.get('map'), '猶予': sel.get('skip_budget'),
+                '注文の組み合わせ番号': sel.get('case'),
+                '指示の回数目': n,
+                '指示した時刻_秒': (round(float(accepted), 1)
+                                    if accepted is not None else None),
+                '指示の動作': verb or '', '指示の対象': obj or '',
+                '料理の種類': slot.get('quality', ''),
+                '指示の結末': p.get('status', ''),
+                '効率損失量L_秒': loss.get('loss_seconds'),
+                '制約なしの見込み_秒': loss.get('baseline_seconds'),
+                '制約ありの見込み_秒': loss.get('constrained_seconds'),
+                'L算出の可否': loss.get('status', ''),
+                'L算出時の工程数': loss.get('num_tasks'),
+                '割り込まれた作業数': tasks_before,
+                '実際の実行順位': exec_rank,
+                '指示なしの実行順位': natural,
+                '繰り上がった順位': ((natural - exec_rank)
+                                     if (natural and exec_rank) else None),
+                '着手した時刻_秒': started,
+                '着手までの秒数': (
+                    round(float(started) - float(accepted), 1)
+                    if started is not None and accepted is not None else None),
+                '着手せず終了': int(started is None),
+                '提供数': res.get('served'), '失敗数': res.get('failed'),
+                'プレイ時間_秒': res.get('makespan_s'),
+                '正式な回か': int(not reason),
+            }, notes=INSTRUCTION_NOTES)
+        print(f"[server] 指示の記録を {len(pend)} 件残しました "
+              f"({sel['participant']} session={sel.get('session')})", flush=True)
 
     def _ai_errors_so_far(self):
         """この回で AI の判断が落ちた回数と、その中身。"""
@@ -1253,7 +1377,7 @@ class WebGamePlay:
         except Exception:
             return ''
 
-    def measure_natural_rank(self, verb, obj):
+    def measure_natural_rank(self, verb, obj, slot=None):
         """指示しなかったら、その作業は AI の何番目になるはずだったかを測る。
 
         指示を受けた場面をそのまま別の AI に解かせて、順番だけ見る。
@@ -1281,6 +1405,8 @@ class WebGamePlay:
                     tid = t.get('id')
                     if tid and str(tid[0]) == str(verb) and str(tid[1]) == str(obj):
                         self.instruction_natural_rank = i
+                        if slot is not None:
+                            slot['rank'] = i
                         return
             except Exception as e:
                 print(f'[server] 指示なしの順番を測れませんでした: {e}')
@@ -1380,7 +1506,13 @@ class WebGamePlay:
             payload = chosen[1] if isinstance(chosen, (list, tuple)) and len(chosen) > 1 else {}
             if isinstance(payload, dict) and payload.get('verb'):
                 self.instruction_kinds = self._dish_kinds_of(payload)
-                self.measure_natural_rank(payload['verb'], payload.get('obj'))
+                # 指示は1回ずつ順に出るので、受け取った順に枠を取っておく。
+                # 測るのは別スレッド(CP-SAT に数秒かかる)なので、先に枠だけ
+                # 作って、終わったらそこへ書いてもらう。
+                slot = {'verb': payload['verb'], 'obj': payload.get('obj'),
+                        'quality': self.instruction_kinds, 'rank': None}
+                self.instruction_slots.append(slot)
+                self.measure_natural_rank(payload['verb'], payload.get('obj'), slot)
             return chosen
         finally:
             with self._instruction_lock:
@@ -1597,6 +1729,7 @@ class WebGamePlay:
             self.discard_reason = ''
             self.instruction_natural_rank = None
             self.instruction_kinds = ''
+            self.instruction_slots = []
             with self._pending_lock:
                 self._draw = None      # 前のゲームの盤面を残さない
             self.state = 'waiting'
