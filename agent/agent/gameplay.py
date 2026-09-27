@@ -830,7 +830,15 @@ class GamePlay(Game):
             # 起きない限り、指示できる作業が増えることはない。
             orders = len(getattr(getattr(self.env, 'order_scheduler', None),
                                  'current_orders', ()) or ())
-            changes = self._count_world_changes()
+            # 数えるのは環境スレッド(盤面を配ったすぐ後)。ここで数え直しては
+            # いけない。候補は配られた盤面(_latest_env_state)から作るので、
+            # 「操作の記録はもう増えたが、盤面はまだ配られていない」一瞬に
+            # 当たると、古い盤面で判定して見送り、しかも合図だけ使い切る。
+            # 次の操作が起きるまで再試行しないので、せっかく候補がそろった
+            # 数秒間を丸ごと逃す(報告: 「切れるようになった瞬間ではなく
+            # 数秒後に指示リクエストが来た」。実測で候補が2つそろったのは
+            # 5.6 秒、画面が出たのは 10.4 秒。窓は 0.6 秒しかなかった)。
+            changes = self._world_changes
             seen = (changes, orders)
             if seen == self._pending_seen:
                 return
@@ -941,6 +949,7 @@ class GamePlay(Game):
                      time=info['current_time'],
                      chg_grid=info['chg_grid'])
         self._latest_env_state = dcopy(e)
+        self._count_world_changes()
         if self.ai is not None:
             self._q_ai.put_nowait(('Env', {"EnvState": e}))
 
@@ -1024,6 +1033,9 @@ class GamePlay(Game):
                              time=info['current_time'],
                              chg_grid=info['chg_grid'])
                 self._latest_env_state = dcopy(e)
+                # 盤面を配ったあとで数える。こうすると「数が増えた」ときには
+                # 必ずその操作が盤面にも入っている。
+                self._count_world_changes()
 
                 # 毎ステップAIへ最新状態を送る。
                 # 人間の操作だけで状態が変わった場合でも、CSPの再計画を即時に起こすため。
