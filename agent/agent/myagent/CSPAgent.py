@@ -1748,7 +1748,7 @@ class CSPAgent:
             names = []
             for content in getattr(obj, 'contents', []):
                 name = getattr(content, 'name', None)
-                if name in ('Lettuce', 'Onion', 'Tomato'):
+                if name in ('Lettuce', 'Onion', 'Tomato', 'Apple', 'Orange', 'Banana'):
                     names.append(name.lower())
             return names
 
