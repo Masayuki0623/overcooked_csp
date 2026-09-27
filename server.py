@@ -471,7 +471,10 @@ def append_csv(path, fields, row):
 
 
 def _append_csv_locked(path, fields, row):
-    new = not path.exists()
+    # 中身が空のファイルが残っていることがある(編集の失敗など)。
+    # 「ある」だけで見出しを書かずに足すと、見出しの無い CSV ができて
+    # 読めなくなる。空なら新規と同じ扱いにする。
+    new = not path.exists() or path.stat().st_size == 0
     if not new:
         # 項目が増えたのに古い見出しのまま足すと、列がずれて読めなくなる。
         # 見出しが変わっていたら、古いファイルは名前を変えて残す。
@@ -1105,6 +1108,9 @@ class WebGamePlay:
             # アンケートに添える条件(画面には出さない)
             'map': sel.get('map'), 'case': sel.get('case'),
             'skip_budget': sel.get('skip_budget'),
+            # どのパターンの回かも残す。これが無いと、集計のときに
+            # パターン1/2/3 を区別できない。
+            'pattern': sel.get('pattern'),
         }
 
     def selection_info(self, sel=None):
@@ -2071,11 +2077,27 @@ async def slot():
 
 
 # 自由記述。改行やカンマが入っても CSV が崩れないよう csv モジュールに任せる。
-FREE_TEXT_FIELDS = ['free_good', 'free_bad', 'free_other']
-SURVEY_FIELDS = (['participant_id', 'session', 'timestamp']
-                 + [f'coord_{i}' for i in range(1, 7)] + ['coord_mean']
+FREE_TEXT_FIELDS = ['free_good', 'free_bad', 'free_instruction']
+# ラポールは CCR 短縮版(8項目)。Connection 4項目 + Coordination 4項目。
+#   Lin, Chen, Mutlu, Trafton, Sebo (2026)
+#   "The Reduced-Length Connection-Coordination Rapport (CCR) Scale"
+#   ACM Trans. Hum.-Robot Interact. 15(3), Article 57.
+# 得点の出し方も論文どおり:
+#   (1) Connection の4項目の平均、(2) Coordination の4項目の平均、
+#   (3) その2つの平均を rapport とする。因子ごとの平均を先に取るので、
+#       8項目をまとめて平均するのとは値が変わる(項目数が同じなので
+#       今回は一致するが、手順は論文に合わせておく)。
+CCR_CONNECTION_FIELDS = [f'conn_{i}' for i in range(1, 5)]
+CCR_COORDINATION_FIELDS = [f'coord_{i}' for i in range(1, 5)]
+# 指示についての項目。この研究の本題(指示にどれだけ従うかで受け取り方が
+# どう変わるか)を直接きくもので、既製の尺度ではない。
+INSTR_FIELDS = [f'instr_{i}' for i in range(1, 7)]
+SURVEY_FIELDS = (['participant_id', 'session', 'pattern', 'timestamp']
+                 + CCR_CONNECTION_FIELDS + CCR_COORDINATION_FIELDS
+                 + ['connection_mean', 'coordination_mean', 'rapport']
                  + [f'trust_{i}' for i in range(1, 9)]
                  + ['trust_mean', 'trust_dnf_count']
+                 + INSTR_FIELDS + ['instr_mean']
                  + FREE_TEXT_FIELDS
                  + ['map', 'skip_budget', 'case', 'served', 'makespan_s'])
 
@@ -2084,8 +2106,10 @@ SURVEY_FIELDS = (['participant_id', 'session', 'timestamp']
 async def survey(req: Request):
     """セッション直後のアンケートを1行ずつ results/survey.csv に足す。
 
-    協調感(1〜5の6項目)は単純平均。信頼感(0〜7の8項目)は「あてはまらない」
-    を欠損として除いた平均。どちらも点数まで CSV に入れる。
+    ラポール(1〜5の8項目)は CCR 短縮版。因子ごとに平均してから、その2つを
+    平均して rapport とする(論文どおりの出し方)。
+    信頼感(0〜7の8項目)は「あてはまらない」を欠損として除いた平均。
+    指示についての項目(1〜5の6項目)は単純平均。
     自由記述(3欄)は任意で、書かなければ空のまま残す。
     """
     body = await req.json()
@@ -2093,13 +2117,25 @@ async def survey(req: Request):
     if not pid:
         return JSONResponse({'ok': False, 'error': '参加者IDがありません'}, status_code=400)
 
-    coord = []
-    for i in range(1, 7):
-        v = body.get(f'coord_{i}')
-        if not isinstance(v, (int, float)) or not (1 <= v <= 5):
-            return JSONResponse({'ok': False, 'error': f'協調感の{i}番が未回答です'},
-                                status_code=400)
-        coord.append(int(v))
+    def read_five(fields, label):
+        """1〜5 の必須項目をまとめて読む。未回答なら理由を返す。"""
+        out = []
+        for n, name in enumerate(fields, 1):
+            v = body.get(name)
+            if not isinstance(v, (int, float)) or not (1 <= v <= 5):
+                return None, f'{label}の{n}番が未回答です'
+            out.append(int(v))
+        return out, None
+
+    conn, err = read_five(CCR_CONNECTION_FIELDS, 'つながり')
+    if err:
+        return JSONResponse({'ok': False, 'error': err}, status_code=400)
+    coord, err = read_five(CCR_COORDINATION_FIELDS, '連携')
+    if err:
+        return JSONResponse({'ok': False, 'error': err}, status_code=400)
+    instr, err = read_five(INSTR_FIELDS, '指示について')
+    if err:
+        return JSONResponse({'ok': False, 'error': err}, status_code=400)
 
     trust = []
     for i in range(1, 9):
@@ -2122,25 +2158,37 @@ async def survey(req: Request):
         free[name] = str(body.get(name) or '').strip()[:2000]
 
     got = [v for v in trust if v is not None]
+    connection_mean = round(sum(conn) / len(conn), 2)
+    coordination_mean = round(sum(coord) / len(coord), 2)
     row = {
         'participant_id': pid, 'session': body.get('session'),
+        'pattern': body.get('pattern'),
         'timestamp': datetime.now().isoformat(timespec='seconds'),
-        'coord_mean': round(sum(coord) / len(coord), 2),
+        'connection_mean': connection_mean,
+        'coordination_mean': coordination_mean,
+        # 論文どおり、因子ごとの平均を出してからその2つを平均する。
+        'rapport': round((connection_mean + coordination_mean) / 2, 2),
         **free,
         'trust_mean': round(sum(got) / len(got), 2) if got else '',
         'trust_dnf_count': sum(1 for v in trust if v is None),
+        'instr_mean': round(sum(instr) / len(instr), 2),
         'map': body.get('map'), 'skip_budget': body.get('skip_budget'),
         'case': body.get('case'), 'served': body.get('served'),
         'makespan_s': body.get('makespan_s'),
     }
-    for i, v in enumerate(coord, 1):
-        row[f'coord_{i}'] = v
+    for name, v in zip(CCR_CONNECTION_FIELDS, conn):
+        row[name] = v
+    for name, v in zip(CCR_COORDINATION_FIELDS, coord):
+        row[name] = v
+    for name, v in zip(INSTR_FIELDS, instr):
+        row[name] = v
     for i, v in enumerate(trust, 1):
         row[f'trust_{i}'] = '' if v is None else v
     append_csv(SURVEY_PATH, SURVEY_FIELDS, row)
     print(f"[server] アンケートを保存しました: {pid} session={row['session']} "
-          f"協調 {row['coord_mean']} 信頼 {row['trust_mean']} "
-          f"あてはまらない {row['trust_dnf_count']}件")
+          f"ラポール {row['rapport']} (つながり {connection_mean} / "
+          f"連携 {coordination_mean}) 信頼 {row['trust_mean']} "
+          f"指示 {row['instr_mean']}")
     return JSONResponse({'ok': True})
 
 
