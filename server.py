@@ -556,7 +556,7 @@ def _append_csv_locked(path, fields, row, notes=None):
         # 項目が増えたのに古い見出しのまま足すと、列がずれて読めなくなる。
         # 見出しが変わっていたら、古いファイルは名前を変えて残す。
         try:
-            with path.open('r', encoding='utf-8', newline='') as f:
+            with path.open('r', encoding='utf-8-sig', newline='') as f:
                 head = next(csv.reader(f), [])
         except OSError:
             head = []
@@ -569,6 +569,11 @@ def _append_csv_locked(path, fields, row, notes=None):
     with path.open('a', newline='', encoding='utf-8') as f:
         w = csv.DictWriter(f, fieldnames=fields, extrasaction='ignore')
         if new:
+            # Excel は日本語 Windows では CSV を CP932 として読む。見出しや
+            # 説明行の日本語が「險倬鹸譎ょ綾」のように崩れる(報告あり)。
+            # 先頭に BOM を置くと UTF-8 だと分かる。読む側は utf-8-sig で
+            # 開く(BOM の無い古いファイルもそのまま読める)。
+            f.write('﻿')
             w.writeheader()
             # 見出しのすぐ下に、それぞれの列が何かを書いた行を置く。
             # 列名だけでは、あとから見て何の数字か思い出せない。

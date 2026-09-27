@@ -64,7 +64,7 @@ def main():
 
     H.MAX_SECONDS_OVERRIDE = 100.0
     sets = enumerate_order_recipes('experiment2')
-    rows = list(csv.DictReader(open(args.csv, encoding='utf-8')))
+    rows = list(csv.DictReader(open(args.csv, encoding='utf-8-sig')))
 
     base = {}
     for model in ('greedy', 'follow_plan'):
@@ -94,7 +94,7 @@ def main():
 
     p = Path(args.out)
     p.parent.mkdir(parents=True, exist_ok=True)
-    with p.open('w', newline='', encoding='utf-8') as f:
+    with p.open('w', newline='', encoding='utf-8-sig') as f:
         w = csv.DictWriter(f, fieldnames=list(out[0].keys()))
         w.writeheader()
         w.writerows(out)

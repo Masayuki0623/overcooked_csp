@@ -32,7 +32,7 @@ SKIP_BUDGETS = (0, 2, 4)
 
 def load(path):
     rows = []
-    with open(path, encoding='utf-8') as f:
+    with open(path, encoding='utf-8-sig') as f:
         for r in csv.DictReader(f):
             for k in ('seed', 'skip_budget', 'natural_rank', 'excess',
                       'inserted_count', 'constrained_rank'):

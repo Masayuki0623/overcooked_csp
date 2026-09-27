@@ -37,7 +37,7 @@ FLOAT_COLS = ('loss_s', 'makespan_actual_s', 'makespan_plan_baseline_s',
 def load(paths):
     rows = []
     for path in paths:
-        with open(path, encoding='utf-8') as f:
+        with open(path, encoding='utf-8-sig') as f:
             for r in csv.DictReader(f):
                 for k in INT_COLS:
                     r[k] = int(r[k]) if r.get(k) not in (None, '') else None

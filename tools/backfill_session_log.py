@@ -45,7 +45,7 @@ MATCH_WINDOW_S = 60
 def read_rows(path):
     if not path.exists():
         return []
-    with io.open(path, encoding='utf-8', newline='') as f:
+    with io.open(path, encoding='utf-8-sig', newline='') as f:
         return list(csv.DictReader(f))
 
 
@@ -113,7 +113,7 @@ def bug_reported_runs():
     out = set()
     for path in sorted((ROOT / 'results' / 'bug_reports').glob('*.json')):
         try:
-            rec = json.loads(io.open(path, encoding='utf-8').read())
+            rec = json.loads(io.open(path, encoding='utf-8-sig').read())
         except Exception:
             continue
         pid = str(rec.get('participant_id') or '')
@@ -245,7 +245,7 @@ def main():
         print('(--write を付けると results/web_sessions.csv へ書き戻します)')
         return 0
 
-    with io.open(LOG, 'w', encoding='utf-8', newline='') as f:
+    with io.open(LOG, 'w', encoding='utf-8-sig', newline='') as f:
         w = csv.DictWriter(f, fieldnames=fields, extrasaction='ignore')
         w.writeheader()
         w.writerows(rows)

@@ -34,7 +34,7 @@ VERB_COLOR = {'chop': '#4c9be8', 'cook': '#e8734c', 'mix': '#7bc47f',
 
 def load(path):
     rows = []
-    with open(path, encoding='utf-8') as f:
+    with open(path, encoding='utf-8-sig') as f:
         for r in csv.DictReader(f):
             if r.get('status') != 'ok':
                 continue

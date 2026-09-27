@@ -81,7 +81,7 @@ def pot_timeline(path):
 
 
 def main():
-    rows = [r for r in csv.DictReader(open(ROOT / 'results/web_sessions.csv', encoding='utf-8'))]
+    rows = [r for r in csv.DictReader(open(ROOT / 'results/web_sessions.csv', encoding='utf-8-sig'))]
     want = [r for r in rows
             if (r['participant_id'].startswith('924test') or r['participant_id'].startswith('925'))
             and r['accepted'] == '1']
