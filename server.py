@@ -1402,6 +1402,9 @@ class WebGamePlay:
                               skip_budget=getattr(self.game.ai, 'skip_budget', None))
                 ai.human_counterpart_mode = True
                 ai.own_agent_idx = getattr(self.game.ai, 'own_agent_idx', 0)
+                # 本番と同じ目的関数で解かないと、何番目に来るかがずれる。
+                ai.time_limit_seconds = getattr(
+                    self.game.ai, 'time_limit_seconds', None)
                 ai.priority_weights = {}
                 ai.gui_text_input = ''
                 ai.gui_constraint_input = ''

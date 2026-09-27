@@ -272,6 +272,14 @@ def init_env_replay(map_name, agent0_name, agent1_name, task_name=None, no_resch
                     instruction_request_timing=instruction_request_timing,
                     instruct_every=instruct_every)
     game.ai = ai
+    # このゲームの制限時間を計画側へ渡す。残り時間が分かって初めて
+    # 「間に合う品数を最大にする」が効く。渡さなければ、これまでどおり
+    # makespan だけを縮める計画になる(時間制限の無いパターン1がこれ)。
+    _limit = getattr(map_set, 'max_num_timesteps', None)
+    for _a in ([ai] if ai is not None else []):
+        for _one in (_a, getattr(_a, 'agent0', None), getattr(_a, 'agent1', None)):
+            if _one is not None and hasattr(_one, 'time_limit_seconds'):
+                _one.time_limit_seconds = _limit or None
     # 詳細トレースは --debug のときだけ出す。
     # これらは1回の判断ごとに数十行を出力するため、常時ONだと実コンソールへの
     # 書き込みだけで判断1回が数百msかかり(実測: 8.5ms -> 約350ms)、

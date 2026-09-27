@@ -143,6 +143,9 @@ class CSPAgent:
         self.fps = game_config.INPUT_HZ
         # 期限 (frames)
         self.deadline_seconds = deadline_seconds
+        # このゲームの制限時間(秒)。None なら時間制限なしとして扱い、
+        # これまでどおり makespan だけを最小化する。
+        self.time_limit_seconds = None
         self.deadline_frames = int(75 * self.fps) if deadline_seconds is None else int(deadline_seconds * self.fps)
         # skip_budget: 指示タスク前に同エージェントが実行してよい他タスクの上限個数 (None=使用しない)
         # 秒数ベースの deadline_seconds / deadline_frames は当面未使用だが削除しない
@@ -6890,6 +6893,28 @@ class CSPAgent:
             # print(f"[CSPAgent] 指示による締切制約の追加で失敗: {e}")
             pass
 
+    def _remaining_frames(self, env):
+        """いまから制限時間までの残りフレーム数。分からなければ None。
+
+        None のときは、これまでどおり makespan だけで解く。時間制限の無い
+        パターン1や、盤面だけを見る単体テストがここに入る。
+
+        盤面の時刻から引いて求める。実時間の時計は見ない
+        (docs/layers.md 決まり3)。
+        """
+        limit = getattr(self, 'time_limit_seconds', None)
+        if limit is None:
+            _al = getattr(env, 'arglist', None)
+            limit = getattr(_al, 'max_num_timesteps', None) if _al is not None else None
+        if not limit:
+            return None
+        now = getattr(env, 'time', None)
+        if now is None:
+            now = getattr(env, 'current_time', None)
+        if now is None:
+            return None
+        return max(0, int((float(limit) - float(now)) * self.fps))
+
     def solve_csp_scheduling(self, env, orders):
         """
         OR-Tools CP-SAT を用いたスケジューリング（移動コスト込み）。
@@ -6918,6 +6943,7 @@ class CSPAgent:
             'num_tasks': num_tasks,
             'makespan_frames': None,
             'objective': None,
+            'served_count': None,
         }
         if num_tasks == 0:
             self._emit_counter_debug("[CSPAgent] スケジュール対象タスクがありません。")
@@ -7528,6 +7554,51 @@ class CSPAgent:
                     instruction_watch = (_a, _p)
                     break
 
+        # ====== 残り時間の中で、出せる品数を最大にする ======
+        # makespan だけを見ていると、残りが10秒でも「鍋に入れて煮る」計画が
+        # 最適になりうる。実際には1品も増えないまま終わる(報告あり)。
+        # 出せる品数を第一に置き、そのうえで早く終える(= 余り時間を最大に)。
+        #
+        # 数えるのはここだけで、タスクは計画から消さない。消すと makespan の
+        # 見積もりからも消え、L の意味が変わる(docs/layers.md 決まり1)。
+        # 間に合わない注文は順番が後ろへ回るだけなので、実行側は手を付けない。
+        remaining_frames = self._remaining_frames(env)
+        missed_terms = []
+        in_time_vars = []
+        served_makespan = None
+        if remaining_frames is None:
+            # 時間制限が分からない。これまでどおり makespan だけで解く。
+            pass
+        else:
+            # 指示された注文は落とさない。指示は実験の独立変数なので優先して
+            # 守り、そのぶん品数が減るなら、その損失は L が拾う。
+            # ハード制約にはしない。物理的に間に合わない指示を受けた瞬間に
+            # 解が無くなり、計画ごと止まってしまう(報告: constrained_INFEASIBLE)。
+            # 他の注文を全部落とすより重くしておけば、実質固定と同じに効く。
+            instructed_uids = set()
+            if instruction_watch:
+                _iv, _io = instruction_watch[0]
+                for _uid, _vars in vars_by_order.items():
+                    if any(v['task']['verb'] == _iv and v['task']['obj'] == _io
+                           for v in _vars):
+                        instructed_uids.add(_uid)
+            served_makespan = model.NewIntVar(0, horizon, 'served_makespan')
+            n_orders = max(1, len(vars_by_order))
+            for _uid, _vars in vars_by_order.items():
+                finals = [v for v in _vars
+                          if v['task']['verb'] in self.SERVE_VERBS]
+                if not finals:
+                    continue
+                _end = finals[0]['end']
+                in_time = model.NewBoolVar(f'in_time_{_uid}')
+                model.Add(_end <= remaining_frames).OnlyEnforceIf(in_time)
+                model.Add(_end > remaining_frames).OnlyEnforceIf(in_time.Not())
+                # 余り時間は「出せる品の中で一番遅い終わり」で決まる。
+                model.Add(served_makespan >= _end).OnlyEnforceIf(in_time)
+                weight = (n_orders + 1) if _uid in instructed_uids else 1
+                missed_terms.append(weight * (1 - in_time))
+                in_time_vars.append(in_time)
+
         # Makespan 最小化
         makespan = model.NewIntVar(0, horizon, 'makespan')
         task_ends = [ends[i] for i in range(num_tasks)]
@@ -7543,15 +7614,31 @@ class CSPAgent:
             end_sum = end_sum + sum(burn_terms) * (weight_makespan * 10)
         if order_late_terms:
             end_sum = end_sum + sum(order_late_terms) * (weight_makespan * 10)
+        # 時間を表す項。残り時間が分かるなら、縮めたいのは「出せる品の中で
+        # 一番遅い終わり」のほう。全体の makespan を縮めにいくと、どうせ
+        # 間に合わない注文まで急いで進める計画が選ばれてしまう。
+        time_term = served_makespan if served_makespan is not None else makespan
+        objective = time_term * weight_makespan + end_sum
+        if missed_terms:
+            # weight_missed は時間の項が取り得る最大値より大きくする。
+            # こうすると「1品多く出せる計画」は、どれだけ遅くても
+            # 「1品少ない計画」に必ず勝つ(辞書式)。
+            weight_missed = (
+                horizon * weight_makespan
+                + num_tasks * horizon
+                + (len(burn_terms) + len(order_late_terms))
+                * horizon * weight_makespan * 10
+                + 1)
+            objective = sum(missed_terms) * weight_missed + objective
         if switch_penalty_terms:
             # switch_scale は switch_penalty が取り得る最大値より大きくし、
-            # (makespan, end_sum) の優先順位を一切変えずに完全な同点のときだけ
-            # 担当エージェント維持側を選ばせる。
+            # (品数, 時間, 終了時刻の和) の優先順位を一切変えずに完全な同点の
+            # ときだけ担当エージェント維持側を選ばせる。
             switch_scale = len(switch_penalty_terms) + 1
             switch_penalty = sum(switch_penalty_terms)
-            model.Minimize((makespan * weight_makespan + end_sum) * switch_scale + switch_penalty)
+            model.Minimize(objective * switch_scale + switch_penalty)
         else:
-            model.Minimize(makespan * weight_makespan + end_sum)
+            model.Minimize(objective)
 
         solver = cp_model.CpSolver()
         # 既定では複数の worker が並列に探索するため、同点の解が複数ある
@@ -7594,6 +7681,11 @@ class CSPAgent:
         if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
             actual_makespan = solver.Value(makespan)
             self._last_solve_metrics['makespan_frames'] = int(actual_makespan)
+            # 残り時間に間に合う品数。L は時間の差だけで測るので、ここが
+            # 変わった指示は「時間では比べられない回」として印を残す。
+            self._last_solve_metrics['served_count'] = (
+                sum(solver.Value(v) for v in in_time_vars)
+                if in_time_vars else None)
             self._last_solve_metrics['objective'] = solver.ObjectiveValue()
             self._emit_counter_debug(f"[CSPAgent] 最適Makespan(移動込み): {actual_makespan} (評価値: {solver.ObjectiveValue()})")
             
@@ -7828,7 +7920,17 @@ class CSPAgent:
                                  else None),
                 'free_rank': base.get('target_rank'),
                 'bound_rank': cons.get('target_rank'),
-                'status': 'ok',
+                # 残り時間に間に合う品数。指示の有無でここが変わった回は、
+                # 時間の差だけを比べても意味がない(1品あきらめれば当然
+                # 早く終わる)。L は今までどおり時間の差で出しておき、
+                # 比べられない回だと分かる印を付ける。
+                'free_served': base.get('served_count'),
+                'bound_served': cons.get('served_count'),
+                'status': ('dish_count_changed'
+                           if (base.get('served_count') is not None
+                               and cons.get('served_count') is not None
+                               and base['served_count'] != cons['served_count'])
+                           else 'ok'),
             })
         except Exception as e:
             result['status'] = f'error: {e}'

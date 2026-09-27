@@ -43,11 +43,27 @@ print('--- 1. 目的関数 ---')
 # makespan を辞書式に優先する。重みはタスク数 × 1000。
 check('makespan の重みはタスク数×1000',
       'weight_makespan = num_tasks * 1000' in SRC)
-check('最小化するのは makespan*重み + 各タスクの終了時刻の和',
-      'model.Minimize(makespan * weight_makespan + end_sum)' in SRC)
+check('時間の項は「時間*重み + 各タスクの終了時刻の和」',
+      'objective = time_term * weight_makespan + end_sum' in SRC
+      and 'model.Minimize(objective)' in SRC)
+
+# 残り時間が迫ったとき、makespan だけでは「間に合わない品に手を付ける」
+# 計画が最適になってしまう。出せる品数を第一に、そのうえで早く終える。
+check('出せない品数が、時間より上の優先度で入っている',
+      'missed_terms' in SRC and 'weight_missed' in SRC,
+      '品数を最優先にする項が無い')
+check('品数の重みは、時間の項が取り得る最大値より大きい',
+      'weight_missed = ' in SRC and 'weight_makespan' in SRC
+      and 'horizon' in SRC)
+check('「間に合う」は、残り時間との比較で決める(時計の履歴では決めない)',
+      'remaining_frames' in SRC and 'in_time' in SRC)
+check('残り時間が分からないときは、これまでどおり makespan だけで解く',
+      'if remaining_frames is None' in SRC)
+check('余り時間は「出せる品の中で一番遅い終わり」を早めて最大化する',
+      'served_makespan' in SRC)
 check('担当替えの罰は、同点のときだけ効く形で足す',
       'switch_scale = len(switch_penalty_terms) + 1' in SRC
-      and '(makespan * weight_makespan + end_sum) * switch_scale + switch_penalty' in SRC)
+      and 'model.Minimize(objective * switch_scale + switch_penalty)' in SRC)
 check('締切遅れは罰(ハード制約にしない)',
       'order_late_terms' in SRC and 'sum(order_late_terms) * (weight_makespan * 10)' in SRC
       and 'model.Add(_late >= finals[0][\'end\'] - _dl)' in SRC)
