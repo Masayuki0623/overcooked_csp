@@ -1946,7 +1946,8 @@ class CSPAgent:
                 if not tid:
                     continue
                 if (self._task_is_available_in_virtual_state(task, remaining_tids)
-                        and self._task_startable_now(env, task)):
+                        and self._task_startable_now(
+                            env, task, ignore_partner_held=True)):
                     ready.add((tid[0], tid[1]))
 
         candidates = []
@@ -4225,10 +4226,34 @@ class CSPAgent:
                 t['end_pos'] = delivery
                 t['fixed_res'] = ('delivery', delivery)
 
-    def _world_object_names(self, env):
-        """盤面にある物の名前を全部集める。持っている物も含める。"""
-        return [fn for o in (getattr(env, 'all_obj_a', None) or [])
-                if (fn := getattr(o, 'full_name', None))]
+    def _world_object_names(self, env, ignore_partner_held=False):
+        """盤面にある物の名前を全部集める。持っている物も含める。
+
+        ignore_partner_held: 相手(人間)が手に持っている物を除くか。
+
+        「いま指示できるか」を見るときは除く。相手の手の中の物は、台に
+        置いてもらうまで AI は触れない。数に入れると、まだ作れない料理を
+        指示の候補に出してしまう(報告: 人が切ったレタスを持ったままの
+        ときに「スープを調理して」が出た)。
+        自分が持っている物はそのまま使えるので、除かない。
+        """
+        skip = set()
+        if ignore_partner_held:
+            me = self.own_agent_idx if self.sc_2agent else 0
+            for i, a in enumerate(getattr(env, 'agents', None) or []):
+                if i == me:
+                    continue
+                held = getattr(a, 'holding', None)
+                if held is not None:
+                    skip.add(id(held))
+        out = []
+        for o in (getattr(env, 'all_obj_a', None) or []):
+            if id(o) in skip:
+                continue
+            fn = getattr(o, 'full_name', None)
+            if fn:
+                out.append(fn)
+        return out
 
     # 山に混ざっていても、材料を数える邪魔にならない物。
     _PILE_CONTAINERS = ('Plate', 'Cup')
@@ -4321,12 +4346,18 @@ class CSPAgent:
         # その器具が地図に無いなら、条件として課さない(これまでどおり)
         return not found
 
-    def _task_startable_now(self, env, task, require_station_free=True):
+    def _task_startable_now(self, env, task, require_station_free=True,
+                            ignore_partner_held=False):
         """いまこの瞬間に手を付けられる工程か(指示の候補に出すかの判断)。
 
         _task_is_available_in_virtual_state は工程の前後関係しか見ないので、
         「鍋に入れ終わった」と「煮上がった」を区別しない。指示の選択肢は
         その場で実行できるものに限りたいので、盤面の実物を見て判断する。
+
+        ignore_partner_held: 相手が手に持っている物を数に入れないか。
+            選択肢を出すときは入れない(台に置いてもらうまで触れない)。
+            受けた指示がまだできるかを見るときは入れる。持っているだけで
+            捨ててしまうと、置いた瞬間にできるはずの指示が消える。
 
         require_station_free: 鍋/ミキサーが空いていることを求めるか。
             選択肢を出すときは求める(塞がっていたら今は始められない)。
@@ -4337,7 +4368,7 @@ class CSPAgent:
         verb, obj, _uid = task['id']
         if verb not in ('serve', 'serve_juice', 'serve_salad', 'cook', 'mix'):
             return True
-        names = self._world_object_names(env)
+        names = self._world_object_names(env, ignore_partner_held)
         ings = [i.capitalize() for i in dish_ingredients(obj)]
 
         def has(prefix, ing):
