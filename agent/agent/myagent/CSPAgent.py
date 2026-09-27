@@ -1767,7 +1767,19 @@ class CSPAgent:
                 items.append(obj)
                 
         for obj in items:
-            if getattr(obj, 'location', None) in cutboard_locs:
+            # まな板の上は、刻みかけ(Chopping)のものが載っている。半端な状態を
+            # 「もうある」と数えると、まだ誰も刻み終えていないのに次の工程へ
+            # 進んでしまうので、そこは数えない。
+            #
+            # ただし刻み終わった物まで無視してはいけない。無視すると、もう
+            # 切ってあるのに ('chop', 食材) が永久に残り、指示の候補にも
+            # 「切って」が出てしまう。選ぶと、AI はまな板から切った物を
+            # 拾って別の場所へ置くだけで終わる(報告あり)。
+            # is_chopped() は Chopped のときだけ真なので、刻みかけは
+            # これまでどおり外れる。まな板から拾えることは環境側の規則でも
+            # 保証されている(interact.py: 刻む必要が無ければ拾う)。
+            if (getattr(obj, 'location', None) in cutboard_locs
+                    and not (hasattr(obj, 'is_chopped') and obj.is_chopped())):
                 continue
 
             if hasattr(obj, 'is_chopped') and obj.is_chopped():
