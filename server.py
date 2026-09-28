@@ -253,13 +253,15 @@ EXPERIMENT_MAP_PRESETS = {
     'exp_partition': 'experiment2',
     'exp_ring': 'experiment1',
 }
-ASSIGN_PATH = ROOT / 'results' / 'assignments.json'
-SURVEY_PATH = ROOT / 'results' / 'survey.csv'
-SESSION_LOG_PATH = ROOT / 'results' / 'web_sessions.csv'
+# 記録の保存先。実験を仕切り直したので、これまでの results/ 直下には
+# 何も書かず、この下にだけ書く(2026-09-29〜)。
+RESULTS_DIR = ROOT / 'results' / 'experience1'
+ASSIGN_PATH = RESULTS_DIR / 'assignments.json'
+SESSION_LOG_PATH = RESULTS_DIR / 'web_sessions.csv'
 # 指示1回につき1行。1回のゲームで何度も指示を出すので、セッションの行
 # (web_sessions.csv)には最初の1回ぶんしか入らない。実測ではエンドレスの
 # 90秒で5回出ていて、4回ぶんが分析に残らなかった。
-INSTRUCTION_LOG_PATH = ROOT / 'results' / 'web_instructions.csv'
+INSTRUCTION_LOG_PATH = RESULTS_DIR / 'web_instructions.csv'
 
 # ------------------------------------------------------------------
 # 実験用の記録。見出しは日本語、そのすぐ下に説明の行を置く。
@@ -279,7 +281,7 @@ INSTRUCTION_LOG_PATH = ROOT / 'results' / 'web_instructions.csv'
 # 使わない。分析が終わったらこのファイルごと捨てられるようにしてある。
 # ------------------------------------------------------------------
 CONTACT_PATH = ROOT / 'config' / 'contact.json'
-ROSTER_PATH = ROOT / 'results' / 'participant_roster.csv'
+ROSTER_PATH = RESULTS_DIR / 'participant_roster.csv'
 ROSTER_COLUMNS = [
     ('参加者番号', 'p01 など。自動で採番する'),
     ('お名前', '名簿だけに残す。実験データには書かない'),
@@ -309,8 +311,83 @@ def contact_info():
         return {'name': '', 'affiliation': '', 'email': ''}
 
 
-QUAL_PATH = ROOT / 'results' / 'exp_qualitative.csv'
-QUANT_PATH = ROOT / 'results' / 'exp_quantitative.csv'
+QUAL_PATH = RESULTS_DIR / 'exp_qualitative.csv'
+QUANT_PATH = RESULTS_DIR / 'exp_quantitative.csv'
+
+# ゲーム1回1行の記録(web_sessions.csv)。内部では英語のキーで扱い、
+# 書くときに日本語の見出しへ、読むときに英語へ戻す。
+#   (キー, 見出し, 説明)
+SESSION_COLUMNS = [
+    ('timestamp', '記録時刻', 'ゲームが終わって行を書いた日時'),
+    ('started_at', '開始時刻', 'ゲームが動き出した日時(指示の選択とカウントダウンは含まない)'),
+    ('participant_id', '参加者ID', ''),
+    ('pattern', 'パターン', '4=固定の注文3品・指示は開始時に1回・条件ごとに別の相方'),
+    ('group', 'グループ', '順序統制の割り当て(G1〜G6)'),
+    ('session', 'セッション番号', 'その参加者の何回目のゲームか(通し番号)'),
+    ('agent', 'エージェント', '参加者に見せた相方の名前'),
+    ('game_in_block', 'ブロック内の回', '同じ相方との何ゲーム目か'),
+    ('map', '地図', 'exp_ring=リング / exp_partition=仕切り'),
+    ('skip_budget', '割り込み許容数', '0=すぐやる / 1=1つまで割り込み可 / inf=指示を聞かない'),
+    ('case', '注文の組み合わせ番号', ''),
+    ('orders', '注文', '3品を | で区切る'),
+    ('instruction', '指示', '最初の指示(動作_対象)。空=指示なし'),
+    ('instruction_verb', '指示の動作', 'chop=切る / cook=煮る / mix=混ぜる / serve系=提供'),
+    ('instruction_obj', '指示の対象', ''),
+    ('quality', '指示の質', '自動の分類'),
+    ('instruction_accepted_s', '指示を受けた時刻_秒', 'ゲーム内の秒'),
+    ('wait_seconds', '指示までの待ち_秒', '指示を選ぶまでにかかった秒'),
+    ('wait_after_instruction_s', '指示後に着手するまで_秒', ''),
+    ('wait_censored', '着手せず終了', '1=最後まで着手しなかった'),
+    ('exec_rank', '実際の実行順位', 'AI が何番目にその作業をしたか'),
+    ('natural_rank', '制約なしの順位', '指示が無ければ何番目だったか'),
+    ('rank_gain', '順位の前倒し', '制約なしの順位 − 実際の順位'),
+    ('tasks_before', '先に挟まった作業数', ''),
+    ('loss_seconds', '効率損失量L_秒', "f'(d) − f"),
+    ('baseline_seconds', '制約なしの所要_秒', 'f'),
+    ('constrained_seconds', '制約ありの所要_秒', "f'(d)"),
+    ('loss_status', 'L算出の可否', 'ok / 解けなかった理由'),
+    ('loss_num_tasks', 'L算出時の工程数', ''),
+    ('free_start_s', '制約なしの開始_秒', ''),
+    ('bound_start_s', '制約ありの開始_秒', ''),
+    ('start_gain_s', '開始の前倒し_秒', ''),
+    ('free_rank', '制約なしの開始順位', ''),
+    ('bound_rank', '制約ありの開始順位', ''),
+    ('served', '提供数', ''),
+    ('failed', '失敗数', ''),
+    ('completed', '完了したか', '1=3品を出し切った'),
+    ('makespan_s', 'プレイ時間_秒', 'ゲーム内の経過秒'),
+    ('serve_times_s', '提供時刻_秒', '1品ごと、| 区切り'),
+    ('serve_dishes', '提供した料理', '| 区切り'),
+    ('misserved', '注文外の提供数', '注文に無い物を提供口へ出した回数'),
+    ('aborted', '中断したか', '1=途中で終わった'),
+    ('discard_reason', '除外理由', 'quit=途中で抜けた / bug=バグ報告。空=正式な回'),
+    ('accepted', '正式な回か', '1=集計に入れる'),
+    ('game_id', 'ゲーム番号', 'サーバー内の通し番号'),
+]
+SESSION_JA_FIELDS = [ja for _k, ja, _n in SESSION_COLUMNS]
+SESSION_NOTES = {ja: n for _k, ja, n in SESSION_COLUMNS}
+_SESSION_KEY_TO_JA = {k: ja for k, ja, _n in SESSION_COLUMNS}
+_SESSION_JA_TO_KEY = {ja: k for k, ja, _n in SESSION_COLUMNS}
+
+
+def session_row_ja(row):
+    """英語キーの行を、日本語の見出しの行にする。"""
+    return {_SESSION_KEY_TO_JA[k]: v for k, v in row.items() if k in _SESSION_KEY_TO_JA}
+
+
+def _read_sessions():
+    """ゲームの記録を英語キーで読む。見出しの下の説明行は飛ばす。"""
+    out = []
+    try:
+        with SESSION_LOG_PATH.open('r', encoding='utf-8-sig', newline='') as f:
+            for r in csv.DictReader(f):
+                row = {_SESSION_JA_TO_KEY.get(k, k): v for k, v in r.items()}
+                if not str(row.get('timestamp', '')).startswith('20'):
+                    continue                     # 説明行
+                out.append(row)
+    except OSError:
+        pass
+    return out
 
 # 条件の欄は両方のファイルで同じにしてある(参加者IDとセッション番号で
 # 突き合わせられるが、片方だけ見ても条件が分かるようにしておく)。
@@ -749,7 +826,7 @@ def note_session_done(participant, pattern=DEFAULT_PATTERN):
         _save_assignments(data)
 
 
-SURVEY_OWED_PATH = ROOT / 'results' / 'surveys_owed.json'
+SURVEY_OWED_PATH = RESULTS_DIR / 'surveys_owed.json'
 _survey_owed_lock = threading.Lock()
 
 
@@ -827,8 +904,8 @@ def map_rank(map_name, participant, makespan, completed):
     """
     best = {}
     try:
-        with SESSION_LOG_PATH.open('r', encoding='utf-8-sig', newline='') as f:
-            for r in csv.DictReader(f):
+        if True:
+            for r in _read_sessions():
                 pid = str(r.get('participant_id') or '').strip()
                 if not pid or pid.lower().startswith('zz'):
                     continue                     # 動作確認の番号は数えない
@@ -992,7 +1069,7 @@ def _drain_pending(path):
 def drain_all_pending():
     """逃がしてある記録を探して、書けるようになっていたら戻す。"""
     try:
-        spares = sorted((ROOT / 'results').glob('*-pending.csv'))
+        spares = sorted(RESULTS_DIR.glob('*-pending.csv'))
     except OSError:
         return
     for spare in spares:
@@ -1397,6 +1474,10 @@ class WebGamePlay:
             self._released = True
             self.game._q_env.put(('Continue', {}))
             self.state = 'running'
+            # 開始時刻(壁時計)。終了時刻は記録の行を書く時刻で分かるが、
+            # 開始は「終了 − プレイ時間」では出ない(指示の選択や
+            # カウントダウンが含まれない)ので、ここで取る。
+            self.started_at = datetime.now()
             print(f'[server] #{self.game_id} ゲームを開始します')
 
     def set_paused(self, token, on):
@@ -1612,19 +1693,7 @@ class WebGamePlay:
                    game_t=round(float(getattr(env, 'current_time', 0.0) or 0.0), 1))
         self.timeline.append(row)
 
-    SESSION_FIELDS = ['timestamp', 'participant_id', 'pattern', 'session', 'map', 'skip_budget',
-                      'case', 'orders', 'instruction', 'instruction_verb',
-                      'instruction_obj', 'quality',
-                      'instruction_accepted_s', 'wait_seconds',
-                      'wait_after_instruction_s', 'wait_censored',
-                      'exec_rank', 'natural_rank', 'rank_gain', 'tasks_before',
-                      'loss_seconds', 'baseline_seconds', 'constrained_seconds',
-                      'loss_status', 'loss_num_tasks',
-                      'free_start_s', 'bound_start_s', 'start_gain_s',
-                      'free_rank', 'bound_rank',
-                      'served', 'failed', 'completed',
-                      'makespan_s', 'serve_times_s', 'serve_dishes', 'misserved',
-                      'aborted', 'discard_reason', 'accepted', 'game_id']
+    SESSION_FIELDS = [k for k, _ja, _note in SESSION_COLUMNS]
 
     def _log_session(self):
         """実験のセッションを results/web_sessions.csv に1行ずつ残す。
@@ -1645,9 +1714,14 @@ class WebGamePlay:
                       if d.get('ok', True)]
         misserved = len([d for d in (getattr(env, 'delivery_log', None) or [])
                          if not d.get('ok', True)])
-        append_csv(SESSION_LOG_PATH, self.SESSION_FIELDS, {
+        _row = {
             **self.instruction_record(),
             'timestamp': datetime.now().isoformat(timespec='seconds'),
+            'started_at': (self.started_at.isoformat(timespec='seconds')
+                           if getattr(self, 'started_at', None) else ''),
+            'group': sel.get('group', ''),
+            'agent': sel.get('agent') or '',
+            'game_in_block': sel.get('game_in_block') or 1,
             'participant_id': sel['participant'],
             'pattern': sel.get('pattern', DEFAULT_PATTERN),
             'session': sel.get('session'),
@@ -1669,7 +1743,8 @@ class WebGamePlay:
             'discard_reason': reason,
             'accepted': int(not reason),
             'game_id': self.game_id,
-        })
+        }
+        append_csv(SESSION_LOG_PATH, SESSION_JA_FIELDS, session_row_ja(_row), SESSION_NOTES)
         self._safe('指示の記録', self._log_instructions, reason)
         if not reason:
             # 正式に受理した回だけ数える。バグ報告の出た回と途中で抜けた回は
@@ -1886,12 +1961,12 @@ class WebGamePlay:
         起きたかを replay_trace で再現できる。
         """
         stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        outdir = ROOT / 'results' / 'bug_reports'
+        outdir = RESULTS_DIR / 'bug_reports'
         outdir.mkdir(parents=True, exist_ok=True)
 
         replay_name = None
         try:
-            repdir = ROOT / 'agent' / 'agent' / 'replay'
+            repdir = RESULTS_DIR / 'replays'
             repdir.mkdir(parents=True, exist_ok=True)
             replay_name = f'bug-{stamp}-i{INSTANCE_ID}.rep'
             self.replay.save(repdir / replay_name)
@@ -2108,7 +2183,7 @@ class WebGamePlay:
     def _save_timeline(self, reason):
         if not self.timeline:
             return
-        outdir = ROOT / 'results' / 'web_perf'
+        outdir = RESULTS_DIR / 'web_perf'
         outdir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         path = outdir / f'{stamp}-i{INSTANCE_ID}-game{self.game_id}.json'
@@ -2709,7 +2784,7 @@ class WebGamePlay:
 
     def _save_replay(self):
         a = self.args
-        repdir = ROOT / 'agent' / 'agent' / 'replay'
+        repdir = RESULTS_DIR / 'replays'
         repdir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         map_name = (self.selection or {}).get('map') or a.map
@@ -3115,7 +3190,8 @@ async def survey(req: Request):
         row[name] = v
     for name, v in zip(INSTR_FIELDS, instr):
         row[name] = v
-    append_csv(SURVEY_PATH, SURVEY_FIELDS, row)
+    # 以前はここで survey.csv にも書いていたが、定性ファイル
+    # (exp_qualitative.csv)に同じ内容が日本語の見出しで入るので、やめた。
     # 書いてから消す。先に消すと、書けなかったときに出し直せなくなる。
     clear_survey_owed(pid, body.get('session'))
 
@@ -3852,7 +3928,7 @@ def main():
     except Exception:
         # 落ちた理由を残す。画面のログは流れて消えるので、ファイルにも書く。
         import traceback
-        log = ROOT / 'results' / 'server_crash.log'
+        log = RESULTS_DIR / 'server_crash.log'
         log.parent.mkdir(parents=True, exist_ok=True)
         with log.open('a', encoding='utf-8') as f:
             f.write('--- ' + datetime.now().isoformat(timespec='seconds') + ' ---' + chr(10))

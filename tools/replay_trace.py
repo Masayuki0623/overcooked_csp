@@ -26,7 +26,7 @@ from gym_cooking.utils.replay import Replay  # noqa: E402
 from agent.executor.low import EnvState  # noqa: E402
 from agent.myagent.CSPAgent import CSPAgent  # noqa: E402
 
-REPLAY_DIR = ROOT / 'agent' / 'agent' / 'replay'
+REPLAY_DIR = ROOT / 'results' / 'experience1' / 'replays'   # 2026-09-29 から。古い分は agent/agent/replay
 
 
 def load(path):
