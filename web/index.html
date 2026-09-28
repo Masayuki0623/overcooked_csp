@@ -1585,6 +1585,48 @@
   let countdownRan = false;
   let needInstruction = false;   // この回は最初に指示を選ぶか
   let sessionExp = null;         // 実験のセッションなら、その条件(参加者ID等)
+
+  // ---- アンケートの下書き ----------------------------------------------
+  // ゲームが終わってアンケートを出したあと、画面を閉じる・再読み込みする・
+  // 端末が寝る などで回答が消えていた。セッションが済んだ印はゲームの終了
+  // 時点で付くので、入り直すと次のセッションへ進んでしまい、その回の
+  // アンケートは二度と取れない。書いた端末に残しておいて、次に開いたとき
+  // 続きから出せるようにする。
+  const SURVEY_DRAFT_STORE = 'overcooked-survey-draft-v1';
+  let surveyRestored = false;    // この表示で一度戻したか
+
+  function readSurveyAnswers() {
+    const out = {};
+    el.overlayText.querySelectorAll('input[type="radio"]:checked')
+      .forEach((i) => { out[i.name] = i.value; });
+    el.overlayText.querySelectorAll('textarea')
+      .forEach((t) => { if (t.value) out[t.id] = t.value; });
+    return out;
+  }
+
+  function saveSurveyDraft(exp, result, summary) {
+    if (surveyPreview) return;   // 見た目を確かめているだけのときは残さない
+    try {
+      localStorage.setItem(SURVEY_DRAFT_STORE, JSON.stringify(
+        { exp, result, summary, answers: readSurveyAnswers(), ts: Date.now() }));
+    } catch (e) {}
+  }
+
+  function clearSurveyDraft() {
+    try { localStorage.removeItem(SURVEY_DRAFT_STORE); } catch (e) {}
+  }
+
+  function readSurveyDraft() {
+    try {
+      const raw = localStorage.getItem(SURVEY_DRAFT_STORE);
+      if (!raw) return null;
+      const d = JSON.parse(raw);
+      if (!d || !d.exp || !d.exp.participant_id || !d.result) return null;
+      // 古い下書きは出さない。同じ端末を次の人が使うことがある。
+      if (Date.now() - (d.ts || 0) > 12 * 3600 * 1000) { clearSurveyDraft(); return null; }
+      return d;
+    } catch (e) { return null; }
+  }
   let reporting = false;         // バグを報告して、やり直しを待っている最中
   let lastSelection = null;
   // CSP が立てた計画を画面の端に出す(デバッグの回だけ送られてくる)。
@@ -2083,6 +2125,16 @@
   function showStart() {
     // アンケートの見た目を確かめているだけのときは、上書きしない。
     if (surveyPreview) return;
+    // 前の回のアンケートを出し終えていない。それを先に片付ける。
+    if (!surveyRestored) {
+      const draft = readSurveyDraft();
+      if (draft) {
+        surveyRestored = true;
+        sessionExp = draft.exp;
+        showSurvey(draft.exp, draft.result, draft.summary || '', draft.answers);
+        return;
+      }
+    }
     if (!mode && !DEV) { renderModePick(); return; }
     if (mode === 'tutorial') { showTutorialCard(); return; }
     if (mode === 'practice') {
@@ -2391,7 +2443,7 @@
     ['free_instruction', '指示に対するAIの動き'],
   ];
 
-  function showSurvey(exp, result, summary) {
+  function showSurvey(exp, result, summary, answers) {
     playing = false;
     // 1〜5 の項目を並べる。番号は通しで振る(参加者から見て数えやすい)。
     let fiveNo = 0;
@@ -2430,6 +2482,27 @@
       '<div class="go"><button class="primary" id="sv-send">送信する</button></div>' +
       '</div>');
 
+    // 前に書きかけていた分を戻す。
+    if (answers) {
+      for (const name of Object.keys(answers)) {
+        const v = answers[name];
+        if (v === '' || v === null || v === undefined) continue;
+        const radio = el.overlayText.querySelector(
+          `input[name="${name}"][value="${v}"]`);
+        if (radio) { radio.checked = true; continue; }
+        const box = document.getElementById(name);
+        if (box && box.tagName === 'TEXTAREA') box.value = v;
+      }
+    }
+    // 出した時点と、触るたびに残す。送れたら消す。
+    saveSurveyDraft(exp, result, summary);
+    const form = el.overlayText.querySelector('.survey');
+    if (form) {
+      const keep = () => saveSurveyDraft(exp, result, summary);
+      form.addEventListener('change', keep);
+      form.addEventListener('input', keep);
+    }
+
     document.getElementById('sv-send').addEventListener('click', () => {
       const err = document.getElementById('sv-err');
       const body = {
@@ -2467,6 +2540,7 @@
         .then(r => r.json())
         .then((r) => {
           if (!r.ok) throw new Error(r.error || '保存できませんでした');
+          clearSurveyDraft();
           el.overlay.classList.remove('form');
           const last = exp.session >= exp.sessions_total;
           // 盤面と操作ボタンを戻す(次の回はこの上で遊ぶ)
