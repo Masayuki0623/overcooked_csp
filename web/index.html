@@ -257,6 +257,11 @@
   }
   .consent .c-chk input { margin-top: 3px; width: 18px; height: 18px; flex: 0 0 auto; }
   .consent .go { margin-top: 16px; text-align: center; }
+  /* 参加者番号は書き換えさせない。入力欄ではなく、ただの表示にする。 */
+  .fixed-id {
+    font-size: 20px; font-weight: 600; letter-spacing: 0.08em;
+    padding: 8px 0 2px;
+  }
   .modes { display: flex; flex-direction: column; gap: 10px; margin: 14px 0 4px; }
   .modes button {
     display: block; width: 100%; text-align: left; padding: 12px 14px;
@@ -1346,15 +1351,25 @@
     // 条件を指定して練習するときは、参加者IDを見ずに全部の選択を出す。
     const custom = (mode === 'custom');
     const experiment = custom ? false : (!!participantId || !DEV);
-    const idBox =
-      '<div class="pick"><div class="lab">参加者ID(実験のときだけ入れてください)</div>' +
-      `<input type="text" id="pid" value="${esc(participantId)}" placeholder="例: p01" ` +
-      'autocomplete="off" autocapitalize="off" spellcheck="false">' +
-      `<div class="hint">${experiment && assignment
-        ? (assignment.finished
-            ? `${esc(participantId)} さんは ${assignment.total} セッション全部が終わっています`
-            : `${esc(participantId)} さん / セッション ${assignment.session} / ${assignment.total}`)
-        : '空のままなら、自由に遊ぶモードです'}</div></div>`;
+    // 参加者番号は同意のときに自動で採番する。手で書き換えられると、
+    // 別人の記録が同じ番号で混ざったり、割り当ての順番が飛んだりする。
+    // 参加者の画面では、決まった番号を表示するだけにして触らせない。
+    // 動作確認のときだけ ?dev=1 で入力欄を出す。
+    const progress = assignment
+      ? (assignment.finished
+          ? `${assignment.total} セッション全部が終わっています`
+          : `セッション ${assignment.session} / ${assignment.total}`)
+      : '';
+    const idBox = (DEV && !participantId) || (DEV && !experiment)
+      ? '<div class="pick"><div class="lab">参加者ID(確認用)</div>' +
+        `<input type="text" id="pid" value="${esc(participantId)}" placeholder="例: p01" ` +
+        'autocomplete="off" autocapitalize="off" spellcheck="false">' +
+        `<div class="hint">${esc(progress) || '空のままなら、自由に遊ぶモードです'}</div></div>`
+      : (participantId
+          ? '<div class="pick"><div class="lab">参加者番号</div>' +
+            `<div class="fixed-id">${esc(participantId)}</div>` +
+            `<div class="hint">${esc(progress)}</div></div>`
+          : '');
 
     showOverlay(
       '<div class="stage-pick">' +
