@@ -1593,7 +1593,7 @@
   // アンケートは二度と取れない。書いた端末に残しておいて、次に開いたとき
   // 続きから出せるようにする。
   const SURVEY_DRAFT_STORE = 'overcooked-survey-draft-v1';
-  let surveyRestored = false;    // この表示で一度戻したか
+  let surveyChecked = false;     // この表示で一度確かめたか
 
   function readSurveyAnswers() {
     const out = {};
@@ -1614,6 +1614,45 @@
 
   function clearSurveyDraft() {
     try { localStorage.removeItem(SURVEY_DRAFT_STORE); } catch (e) {}
+  }
+
+  // 出し終えていないアンケートが無いか、開いた時点で一度だけ確かめる。
+  // 端末の下書きが先。結果が届く前に切れていると下書きは無いので、
+  // そのときはサーバーに聞く。
+  let surveyGate = null;
+
+  function checkOwedSurvey() {
+    if (surveyGate) return surveyGate;
+    const draft = readSurveyDraft();
+    if (draft || surveyPreview || !participantId) {
+      surveyGate = Promise.resolve(draft || null);
+      return surveyGate;
+    }
+    surveyGate = fetch(
+      `/api/pending_survey?participant=${encodeURIComponent(participantId)}`)
+      .then((r) => r.json())
+      .then((r) => ((r && r.ok && r.owed) ? r.owed : null))
+      .catch(() => null);
+    return surveyGate;
+  }
+
+  // 出し忘れがあれば、それを先に片付ける。出したら true。
+  function showOwedSurvey(owed) {
+    if (!owed || !owed.exp) return false;
+    const res = owed.result || {};
+    sessionExp = owed.exp;
+    settled = true;              // 切断の案内で上書きしない
+    showSurvey(owed.exp, res, owed.summary ||
+      `<div class="sub">提供 ${res.served} 件 / 失敗 ${res.failed} 件` +
+      `<br>スコア ${res.reward}</div>`, owed.answers || null);
+    return true;
+  }
+
+  // 確かめ終わってから next() へ進む。出し忘れがあればそちらを優先する。
+  function afterSurveyCheck(next) {
+    if (surveyChecked) { next(); return; }
+    surveyChecked = true;
+    checkOwedSurvey().then((owed) => { if (!showOwedSurvey(owed)) next(); });
   }
 
   function readSurveyDraft() {
@@ -2125,16 +2164,8 @@
   function showStart() {
     // アンケートの見た目を確かめているだけのときは、上書きしない。
     if (surveyPreview) return;
-    // 前の回のアンケートを出し終えていない。それを先に片付ける。
-    if (!surveyRestored) {
-      const draft = readSurveyDraft();
-      if (draft) {
-        surveyRestored = true;
-        sessionExp = draft.exp;
-        showSurvey(draft.exp, draft.result, draft.summary || '', draft.answers);
-        return;
-      }
-    }
+    // 前の回のアンケートを出し終えていないなら、それを先に片付ける。
+    if (!surveyChecked) { afterSurveyCheck(showStart); return; }
     if (!mode && !DEV) { renderModePick(); return; }
     if (mode === 'tutorial') { showTutorialCard(); return; }
     if (mode === 'practice') {
@@ -2155,6 +2186,23 @@
     if (options) { renderPick(); return; }
     showOverlay('<div class="big">読み込み中...</div>');
     optionsReady.then(renderPick);
+  }
+
+  // 順番待ちの状態になったときの続き。アンケートの出し忘れを確かめてから
+  // ここへ来る(確かめる前に次のセッションを始めると、前の回のアンケートを
+  // 飛ばしてしまう)。
+  function onWaiting() {
+    if (autoStartPending() && participantId) {
+      clearAutoStart();
+      showOverlay('<div class="big">次のセッションを準備しています...</div>');
+      // 絵が揃ってから送る(揃う前に始めると最初の盤面が描けない)。
+      optionsReady.then(() => whenSpritesLoaded(() => {
+        send({ type: 'start', participant: participantId,
+               pattern: Number(pick.pattern) || 1 });
+      }));
+      return;
+    }
+    showStart();
   }
 
   ws.onmessage = (ev) => {
@@ -2223,17 +2271,12 @@
       }
       if (msg.state !== 'running') hidePlan();
       if (msg.state === 'waiting' && !started) {
-        if (autoStartPending() && participantId) {
-          clearAutoStart();
-          showOverlay('<div class="big">次のセッションを準備しています...</div>');
-          // 絵が揃ってから送る(揃う前に始めると最初の盤面が描けない)。
-          optionsReady.then(() => whenSpritesLoaded(() => {
-            send({ type: 'start', participant: participantId,
-                   pattern: Number(pick.pattern) || 1 });
-          }));
+        if (!surveyChecked) {
+          afterSurveyCheck(() => { if (!started) onWaiting(); });
           return;
         }
-        showStart();
+        onWaiting();
+        return;
       } else if (msg.state === 'ready') {
         showOverlay('<div class="big">盤面を描いています...</div>');
         startCountdown();

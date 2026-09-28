@@ -697,6 +697,69 @@ def note_session_done(participant, pattern=DEFAULT_PATTERN):
         _save_assignments(data)
 
 
+SURVEY_OWED_PATH = ROOT / 'results' / 'surveys_owed.json'
+_survey_owed_lock = threading.Lock()
+
+
+def _load_survey_owed():
+    try:
+        with SURVEY_OWED_PATH.open('r', encoding='utf-8') as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_survey_owed(data):
+    SURVEY_OWED_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp = SURVEY_OWED_PATH.with_suffix('.tmp')
+    with tmp.open('w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=1)
+    tmp.replace(SURVEY_OWED_PATH)
+
+
+def note_survey_owed(participant, owed):
+    """この回のアンケートがまだ出ていない、と覚えておく。
+
+    セッションを数える印はゲームが終わった時点で付く。終わってから
+    アンケートを出すまでのあいだに画面を閉じられると、入り直したときに
+    次のセッションへ進んでしまい、その回のアンケートは二度と取れない。
+    端末に残した下書きでも大体は足りるが、結果が届く前に切れると
+    下書きも作られない。こちら側にも覚えておく。
+    """
+    pid = str(participant or '').strip()
+    if not pid:
+        return
+    with _survey_owed_lock, CrossProcessLock(SURVEY_OWED_PATH):
+        data = _load_survey_owed()
+        data[pid] = owed
+        _save_survey_owed(data)
+
+
+def clear_survey_owed(participant, session=None):
+    """アンケートを受け取ったので、覚え書きを消す。"""
+    pid = str(participant or '').strip()
+    if not pid:
+        return
+    with _survey_owed_lock, CrossProcessLock(SURVEY_OWED_PATH):
+        data = _load_survey_owed()
+        rec = data.get(pid)
+        if rec is None:
+            return
+        # 別の回のアンケートが遅れて届いただけなら、今の分は残す。
+        if session is not None and str(rec.get('exp', {}).get('session')) != str(session):
+            return
+        data.pop(pid, None)
+        _save_survey_owed(data)
+
+
+def survey_owed_for(participant):
+    pid = str(participant or '').strip()
+    if not pid:
+        return None
+    return _load_survey_owed().get(pid)
+
+
 def _read_roster():
     """名簿を読む。無ければ空。"""
     if not ROSTER_PATH.exists():
@@ -1510,6 +1573,22 @@ class WebGamePlay:
                                   sel.get('pattern', DEFAULT_PATTERN))
             if int(_rec.get('done', 0)) >= len(_rec.get('order') or []):
                 _update_roster(sel['participant'], **{'完了したか': 1})
+            self._safe('アンケート待ちの記録', note_survey_owed,
+                       sel['participant'],
+                       {'exp': {'participant_id': sel['participant'],
+                                'pattern': sel.get('pattern', DEFAULT_PATTERN),
+                                'session': sel.get('session'),
+                                'sessions_total': len(_rec.get('order') or []),
+                                'map': sel.get('map'),
+                                'skip_budget': sel.get('skip_budget'),
+                                'case': sel.get('case'),
+                                'group': sel.get('group', '')},
+                        'result': {'served': res.get('served'),
+                                   'failed': res.get('failed'),
+                                   'reward': res.get('reward'),
+                                   'makespan_s': round(float(
+                                       getattr(env, 'current_time', 0.0) or 0.0), 1)},
+                        'ts': datetime.now().isoformat(timespec='seconds')})
 
     def _log_instructions(self, reason):
         """この回に出した指示を、1回1行で残す。
@@ -2904,6 +2983,8 @@ async def survey(req: Request):
     for name, v in zip(INSTR_FIELDS, instr):
         row[name] = v
     append_csv(SURVEY_PATH, SURVEY_FIELDS, row)
+    # 書いてから消す。先に消すと、書けなかったときに出し直せなくなる。
+    clear_survey_owed(pid, body.get('session'))
 
     # 実験用の定性ファイル。見出しは日本語、説明の行つき。
     # 条件の欄は定量ファイルと同じ並びにしてあるので、参加者IDと
@@ -3093,6 +3174,13 @@ async def resume(participant: str = ''):
     return JSONResponse({'ok': True, 'participant_id': pid,
                          'session': min(done + 1, total), 'total': total,
                          'finished': done >= total})
+
+
+@app.get('/api/pending_survey')
+async def pending_survey(participant: str = ''):
+    """まだ出していないアンケートがあれば、その回の条件と結果を返す。"""
+    owed = survey_owed_for(participant)
+    return JSONResponse({'ok': True, 'owed': owed})
 
 
 @app.get('/api/assignment')
