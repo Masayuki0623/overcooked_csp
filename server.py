@@ -375,6 +375,83 @@ def session_row_ja(row):
     return {_SESSION_KEY_TO_JA[k]: v for k, v in row.items() if k in _SESSION_KEY_TO_JA}
 
 
+# 1ゲーム1行の統合ファイル。ゲームの記録 + 最初の指示の記録 + アンケート
+# を1行にまとめる。アンケートを受け取った時点で書く(それまでの分は
+# 元のファイルにある)。列はカテゴリ順に、大事なものを左に置く。
+ALL_PATH = RESULTS_DIR / 'all_in_one.csv'
+ALL_COLUMNS = [
+    # --- 識別 ---
+    '記録時刻', '参加者ID', 'グループ', 'セッション番号', 'エージェント', '正式な回か', '除外理由',
+    # --- 条件 ---
+    '地図', '割り込み許容数', '注文の組み合わせ番号', '注文',
+    # --- 結果 ---
+    '完了したか', '提供数', '失敗数', 'プレイ時間_秒', '注文外の提供数', '提供した料理', '提供時刻_秒',
+    # --- 効率損失(先) と 指示の内容(後) ---
+    '効率損失量L_秒', '即時実行の効率損失量L0_秒', 'L算出の可否', 'L0算出の可否',
+    '制約なしの所要_秒', '制約ありの所要_秒',
+    '実際の実行順位', '制約なしの順位', '順位の前倒し', '先に挟まった作業数',
+    '指示後に着手するまで_秒', '着手せず終了', '指示の結末', '人がやったか', '先にやったのは',
+    '指示の動作', '指示の対象', '指示を受けた時刻_秒', '指示までの待ち_秒',
+    # --- アンケート ---
+    'つながり1', 'つながり2', 'つながり3', 'つながり4',
+    '協調1', '協調2', '協調3', '協調4', 'つながり平均', '協調平均', 'ラポール',
+    '指示1', '指示2', '指示3', '指示4', '指示5', '指示6', '指示平均',
+    'うまく噛み合ったところ', '気になったところ', '指示に対するAIの動き', 'アンケート記録時刻',
+    # --- 参加者 ---
+    '年齢', 'ゲーム経験',
+    # --- 補助 ---
+    '開始時刻', '中断したか', 'パターン', 'ゲーム番号', 'ブロック内の回', '指示の質',
+    '制約なしの開始_秒', '制約ありの開始_秒', '開始の前倒し_秒', '制約なしの開始順位',
+    '制約ありの開始順位', 'L算出時の工程数',
+]
+
+
+def _all_notes():
+    notes = {}
+    notes.update({k: v for k, v in dict(INSTRUCTION_COLUMNS).items()})
+    notes.update({k: v for k, v in dict(QUAL_COLUMNS).items()})
+    notes.update(SESSION_NOTES)
+    notes['アンケート記録時刻'] = 'アンケートを受け取った日時'
+    return {c: notes.get(c, '') for c in ALL_COLUMNS}
+
+
+def _read_instruction_rows():
+    """指示の記録(日本語の見出し)を読む。説明行は飛ばす。"""
+    out = []
+    try:
+        with INSTRUCTION_LOG_PATH.open('r', encoding='utf-8-sig', newline='') as f:
+            for r in csv.DictReader(f):
+                if str(r.get('記録時刻', '')).startswith('20'):
+                    out.append(r)
+    except OSError:
+        pass
+    return out
+
+
+def write_all_in_one(pid, session, qual):
+    """その回のゲーム記録・指示の記録・アンケートを1行にして足す。"""
+    game = None
+    for r in _read_sessions():
+        if r.get('participant_id') == pid and str(r.get('session')) == str(session):
+            game = r                       # 同じ回が複数あれば最後(やり直し後)
+    instr = None
+    for r in _read_instruction_rows():
+        if r.get('参加者ID') == pid and str(r.get('セッション番号')) == str(session):
+            instr = r
+    row = {}
+    if game:
+        row.update(session_row_ja(game))
+    if instr:
+        for c in ('即時実行の効率損失量L0_秒', 'L0算出の可否', '指示の結末',
+                  '人がやったか', '先にやったのは'):
+            row[c] = instr.get(c, '')
+    row.update({k: v for k, v in qual.items() if k in ALL_COLUMNS and k != '記録時刻'})
+    row['アンケート記録時刻'] = qual.get('記録時刻', '')
+    if not row.get('記録時刻'):
+        row['記録時刻'] = qual.get('記録時刻', '')
+    append_csv(ALL_PATH, ALL_COLUMNS, {c: row.get(c, '') for c in ALL_COLUMNS}, _all_notes())
+
+
 def _read_sessions():
     """ゲームの記録を英語キーで読む。見出しの下の説明行は飛ばす。"""
     out = []
@@ -3169,6 +3246,7 @@ async def survey(req: Request):
 
     connection_mean = round(sum(conn) / len(conn), 2)
     coordination_mean = round(sum(coord) / len(coord), 2)
+    _rec_prof = assignment_for(pid, pattern_of(body.get('pattern') or EXPERIMENT_PATTERN))
     row = {
         'participant_id': pid, 'session': body.get('session'),
         'pattern': body.get('pattern'),
@@ -3209,8 +3287,10 @@ async def survey(req: Request):
         '地図': body.get('map'),
         '割り込み許容数': body.get('skip_budget'),
         '注文の組み合わせ番号': body.get('case'),
-        '年齢': body.get('age'),
-        'ゲーム経験': body.get('game_experience', ''),
+        # 年齢とゲーム経験は同意のときに割り当ての記録へ入れてある。
+        # 画面は送ってこないので、ここで引く(以前は空のままだった)。
+        '年齢': _rec_prof.get('age'),
+        'ゲーム経験': _rec_prof.get('game_experience') or '',
         'つながり平均': connection_mean,
         '協調平均': coordination_mean,
         'ラポール': row['rapport'],
@@ -3229,6 +3309,11 @@ async def survey(req: Request):
     for i, v in enumerate(instr, 1):
         qual[f'指示{i}'] = v
     append_csv(QUAL_PATH, QUAL_FIELDS, qual, notes=QUAL_NOTES)
+    # 1ゲーム1行の統合ファイル(ゲーム記録 + 指示 + アンケート)
+    try:
+        write_all_in_one(pid, body.get('session'), qual)
+    except Exception as e:
+        print(f'[server] 統合ファイルに書けませんでした: {type(e).__name__} {e}', flush=True)
     print(f"[server] アンケートを保存しました: {pid} session={row['session']} "
           f"ラポール {row['rapport']} (つながり {connection_mean} / "
           f"連携 {coordination_mean}) 指示 {row['instr_mean']}")
