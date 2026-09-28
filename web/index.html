@@ -265,6 +265,8 @@
     border-radius: 8px; padding: 8px 10px; font-size: 11px; line-height: 1.5;
   }
   #plan.show { display: block; }
+  /* アンケートの間は盤面を隠すので、計画表も一緒に隠す */
+  body.survey #plan { display: none !important; }
   #plan h4 { margin: 6px 0 3px; font-size: 12px; color: var(--muted); }
   #plan table { width: 100%; border-collapse: collapse; }
   #plan th { color: var(--muted); font-weight: 400; text-align: right; padding: 0 3px; }
@@ -1609,6 +1611,13 @@
     box.classList.add('show');
   }
 
+  // 遊んでいる間だけ出す。終わった回の計画を残したままにすると、
+  // 次の回が始まったときに古い中身が見えて紛らわしい。
+  function hidePlan() {
+    const box = document.getElementById('plan');
+    if (box) { box.classList.remove('show'); box.innerHTML = ''; }
+  }
+
   function selectionNote() {
     // 何を選んだかは、始まる前(カウントダウン中)にだけ見せる。
     // ただし実験の参加者には見せない。地図の名前・レシピ束・注文の一覧は
@@ -2160,6 +2169,7 @@
       if (msg.experiment && msg.experiment.participant_id) {
         sessionExp = msg.experiment;
       }
+      if (msg.state !== 'running') hidePlan();
       if (msg.state === 'waiting' && !started) {
         if (autoStartPending() && participantId) {
           clearAutoStart();
