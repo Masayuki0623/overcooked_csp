@@ -298,6 +298,12 @@ def interact(agent, world, current_time) -> Event:
             except AttributeError:
                 needs_chopped = False
             if isinstance(gs, Cutboard) and needs_chopped:
+                # 名前は Fresh のものを使う。環境が知っている出来事の
+                # 一覧は Chop_Fresh<食材> だけ(utils/event.py)。切りかけや
+                # 切り終わりの名前で出すと「不正な出来事」と言われる。
+                # 台に置いて切るほうも、置いた時点では Fresh なので同じ形。
+                _names = [getattr(c, 'name', '') for c in getattr(obj, 'contents', [])]
+                _ev = f'Chop_Fresh{_names[0]}' if len(_names) == 1 else None
                 obj.chop(current_time)
                 # 置いてある物を切り終えたときは、これまで何の記録も
                 # 残っていなかった。Chop_ が出るのは「持っている物を
@@ -305,9 +311,8 @@ def interact(agent, world, current_time) -> Event:
                 # 押し続けて切り上げた分は、誰がやったのか追えなかった。
                 # 切り終わった1回だけ記録する(途中の一押しでは出さない)。
                 try:
-                    if not obj.needs_chopped():
-                        return Event(playerA=agent.name,
-                                     event=f'Chop_{obj.full_name}',
+                    if _ev and not obj.needs_chopped():
+                        return Event(playerA=agent.name, event=_ev,
                                      location=gs.location, time=current_time)
                 except AttributeError:
                     pass
