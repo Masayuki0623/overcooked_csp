@@ -57,6 +57,14 @@ def rebuild(sel):
     # チュートリアルの地図は最初から必要な物しか置いていないので、そのまま。
     uses_fruit = any(f in r for f in ('Apple', 'Orange', 'Banana', 'Juice')
                      for r in (pool or sel.get('recipes', [])))
+    # 付ける順番は _2pot -> _veg。登録してある名前がその並び
+    # (exp_ring_2pot_veg)なので、逆にすると見つからない。
+    #
+    # パターン3は鍋が2つ。差し替えないと当時と違う盤面で再現してしまい、
+    # 鍋の取り合いが起きるかどうかが変わる(実測: 鍋1つで復元され、調べて
+    # いた場面の前提が食い違った)。
+    if int(sel.get('pots') or 1) == 2:
+        name = f'{name}_2pot'
     if not name.startswith('tutorial_') and not uses_fruit:
         name = f"{name}_veg"
     kw = dict(MAP_SETTINGS[name])
