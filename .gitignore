@@ -61,3 +61,6 @@ results/server.log
 
 # バグ報告(参加者の記録なので追跡しない)
 results/bug_reports/
+
+# 実験の記録は全部 git に入れない(名簿に名前が入る。図や動画も含めて手元だけ)
+results/
