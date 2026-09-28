@@ -2467,6 +2467,62 @@ class CSPAgent:
                 return True
         return False
 
+    def _has_usable_blender_for_mix(self, env, juice_name):
+        """この mix タスクが実際に使えるミキサーがあるか。
+
+        鍋と同じで、中身の入ったミキサーには足せない。使えるのは
+        (a) 空のミキサー か (b) 既にこのジュースが入っているものだけ。
+        """
+        expected = self._recipe_ingredient_set(juice_name)
+        for blender in self._get_resources(env).get('blenders', []):
+            if env.pos_obj.get(blender) is None:
+                return True
+            if expected and self._get_counter_food_names(env, blender) == expected:
+                return True
+        return False
+
+    def _find_blender_unblock_task(self, env, agent_idx):
+        """ミキサーが塞がって mix が進めないとき、空けられる作業を探す。
+
+        鍋の場合(_find_ready_serve_task)と同じ行き詰まり方をするが、
+        ミキサーは途中の状態が2つある。混ぜかけ(Mixing)なら回し切る
+        mix を、混ぜ終わり(Mixed)ならカップへ注ぐ serve_juice を先に
+        行えば空く。どちらも計画の後ろにあると、前にある別のジュースの
+        mix がミキサー待ちのまま動かず、順番も永久に来ない
+        (実測: 別のジュースを混ぜたあと、18秒その場で止まったまま終わった)。
+
+        自分の計画に無ければ相手の分からも探す。塞がったミキサーは相手も
+        使えないので、どちらが空けても構わない。
+        """
+        blenders = self._get_resources(env).get('blenders', [])
+        if not blenders:
+            return None
+        schedules = [self.schedule_per_agent.get(agent_idx, [])]
+        for other, sched in (self.schedule_per_agent or {}).items():
+            if other != agent_idx:
+                schedules.append(sched)
+        for blender in blenders:
+            b_obj = env.pos_obj.get(blender)
+            if b_obj is None:
+                continue
+            have = self._get_counter_food_names(env, blender)
+            if not have:
+                continue
+            is_mixed = getattr(b_obj, 'is_mixed', None)
+            done = callable(is_mixed) and is_mixed()
+            want_verb = 'serve_juice' if done else 'mix'
+            for sched in schedules:
+                for candidate in sched:
+                    task_id = candidate.get('id')
+                    if not (isinstance(task_id, tuple) and len(task_id) >= 3):
+                        continue
+                    verb, obj, _order_uid = task_id
+                    if verb != want_verb:
+                        continue
+                    if self._recipe_ingredient_set(obj) == have:
+                        return candidate
+        return None
+
     def _collect_ready_cook_actions(self, env, current_orders):
         """「いま即座に着手できる cook タスク」を (動詞, 対象) の集合で返す。
 
@@ -3342,6 +3398,17 @@ class CSPAgent:
                             f"{ready_serve['id']} (元のタスク {tid} は保留)"
                         )
                         task = ready_serve
+                        tid = task['id']
+                        verb, obj, order_uid = tid
+                # ミキサーも同じ。別のジュースが入ったままだと混ぜられない。
+                elif verb == 'mix' and not self._has_usable_blender_for_mix(env, obj):
+                    ready_pour = self._find_blender_unblock_task(env, agent_idx)
+                    if ready_pour is not None:
+                        self._emit_counter_debug(
+                            f"[DEBUG] AI{agent_idx} ミキサーが塞がっているため注ぎを先行実行: "
+                            f"{ready_pour['id']} (元のタスク {tid} は保留)"
+                        )
+                        task = ready_pour
                         tid = task['id']
                         verb, obj, order_uid = tid
 
@@ -5251,7 +5318,11 @@ class CSPAgent:
             return ''
 
         text = text.replace('-', '').replace('_', '').replace(' ', '')
-        for prefix in ('fresh', 'chopped', 'cooked', 'cooking', 'raw', 'cut'):
+        # ジュースは鍋と同じで、混ぜる前後で名前が変わる
+        # (Mixing.../Mixed...)。鍋側(cooking/cooked)だけを外していたため、
+        # ミキサーの中身がどの注文の物か分からず、注ぎに行けなかった。
+        for prefix in ('fresh', 'chopped', 'cooked', 'cooking',
+                       'mixed', 'mixing', 'raw', 'cut'):
             if text.startswith(prefix):
                 text = text[len(prefix):]
                 break
