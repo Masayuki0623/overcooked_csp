@@ -534,6 +534,9 @@ EXPERIMENT_PATTERNS = {
     },
 }
 DEFAULT_PATTERN = 1
+# 本実験で使うパターン。エンドレス90秒・鍋2つ・3工程ごとに指示。
+# 参加者ごとに進み方が変わらないよう、ここで固定する。
+EXPERIMENT_PATTERN = 3
 
 
 def pattern_of(value):
@@ -1199,7 +1202,14 @@ class WebGamePlay:
 
         participant = str(choice.get('participant') or '').strip()
         if participant:
-            pattern = pattern_of(choice.get('pattern'))
+            # 実験のセッションはパターン3で固定する。画面側でも選ばせて
+            # いないが、ここでも押さえておく。参加者ごとに進み方が違うと
+            # 比べられなくなるので、送られてきた値は当てにしない。
+            pattern = EXPERIMENT_PATTERN
+            # デバッグ設定も効かせない。煮込み時間や切る回数が変わると
+            # 条件そのものが変わってしまう。
+            choice = dict(choice or {})
+            choice['debug'] = None
             spec = EXPERIMENT_PATTERNS[pattern]
             rec = assignment_for(participant, pattern)
             done = int(rec.get('done', 0))

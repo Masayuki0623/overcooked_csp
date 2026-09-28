@@ -1376,7 +1376,9 @@
       `<div class="big">${custom ? '条件を指定して練習'
         : (experiment ? 'セッションを始めます' : 'ステージを選んでください')}</div>` +
       (custom ? '<div class="sub">好きな条件で遊べます。記録は残りません。</div>' : idBox) +
-      (custom ? '' : patternBlock()) +
+      // 実験セッションはパターン3で固定。選ばせると、参加者ごとに
+      // 違う進み方になって比べられなくなる。
+      (custom || experiment ? '' : patternBlock()) +
       (experiment ? '' :
         `<div class="pick"><div class="lab">地図</div><div class="opts">${btns(options.maps, 'map')}</div>` +
         `<div class="hint">${esc(map.desc)}</div></div>` +
@@ -1405,7 +1407,9 @@
             `class="${Number(pick.skip_budget) === b ? 'on' : ''}">${b}</button>`).join('') +
           `</div><div class="hint">${esc(SKIP_BUDGET_DESC[String(pick.skip_budget)] || '')}` +
           '</div></div>' : '')) +
-      debugBlock() +
+      // デバッグ設定(煮込み時間・切る回数・エンドレスなど)は、実験
+      // セッションでは出さない。触られると条件が変わってしまう。
+      (experiment ? '' : debugBlock()) +
       '<div class="go"><button class="primary" id="start" disabled>スタート</button> ' +
       '<button id="pick-back">最初に戻る</button>' +
       '<div class="sub" id="dl-note" style="margin-top:8px"></div></div>' +
