@@ -162,6 +162,9 @@ class CSPAgent:
         # もっと積極的にするか、相手の担当を前後関係から外す必要がある。
         # そこを詰めるまでは切っておく。デバッグ画面から True にできる。
         self.two_agent_assignment = True
+        # 直前にどの作業をやっていたか(エージェントごと)。注文番号だけが
+        # 違う同じ作業へ付け替わるのを止めるために使う。
+        self._last_action_tid = {}
         self.deadline_frames = int(75 * self.fps) if deadline_seconds is None else int(deadline_seconds * self.fps)
         # skip_budget: 指示タスク前に同エージェントが実行してよい他タスクの上限個数 (None=使用しない)
         # 秒数ベースの deadline_seconds / deadline_frames は当面未使用だが削除しない
@@ -2607,6 +2610,31 @@ class CSPAgent:
     OSCILLATION_WINDOW_S = 2.0
     OSCILLATION_PIN_S = 4.0
 
+    def _keep_same_action(self, agent_idx, task, schedule):
+        """注文番号だけが違う同じ作業なら、前回のものを使い続ける。
+
+        (動作, 対象) が同じなら、実際にやることは同じ。注文番号が変わる
+        だけで行き先(合流台)が変わってしまうので、そこは動かさない。
+        前回の作業がもう計画に無いとき(やり終えた・注文が消えた)は、
+        素直に新しいほうへ移る。
+        """
+        if task is None:
+            return task
+        prev = self._last_action_tid.get(agent_idx)
+        tid = task.get('id')
+        if (prev and tid and prev != tid and prev[:2] == tid[:2]
+                and prev not in self.completed_task_ids):
+            # 前の分は、立て直しで相手の担当へ移っていることがある。
+            # 自分の計画だけを見ていると見つからず、付け替えを止められない。
+            for lst in ((schedule or []),
+                        *( (getattr(self, 'schedule_per_agent', None) or {}).values() )):
+                for cand in lst:
+                    if cand.get('id') == prev:
+                        return cand
+        if tid:
+            self._last_action_tid[agent_idx] = tid
+        return task
+
     def _steady_task(self, env, agent_idx, task, schedule):
         """作業が行き来して進まなくなるのを止める。
 
@@ -2628,9 +2656,12 @@ class CSPAgent:
         del hist[:-8]
         recent = [t for t, at in hist if now - at <= self.OSCILLATION_WINDOW_S]
         uniq = {t for t in recent}
-        # 直近に2種類しか出ておらず、切り替わりが3回以上なら行き来とみなす
+        # 切り替わりが3回以上あれば行き来とみなす。
+        # 以前は「2種類のあいだ」に限っていたが、3種類以上を回る形でも
+        # 参加者には同じに見える(実測: 玉ねぎ・レタス・トマトのあいだを
+        # 12.6 秒で 10 回。注文が3件とも同じ材料を使うと起きる)。
         flips = sum(1 for a, b in zip(recent, recent[1:]) if a != b)
-        if len(uniq) == 2 and flips >= 3:
+        if 2 <= len(uniq) and flips >= 3:
             self._pinned_task[agent_idx] = (tid, now + self.OSCILLATION_PIN_S, task)
             self._emit_counter_debug(
                 f'[揺れ止め] AI{agent_idx} が {uniq} を行き来したので '
@@ -3463,6 +3494,17 @@ class CSPAgent:
                         task = ready_serve
                         tid = task['id']
                         verb, obj, order_uid = tid
+
+                # 注文番号だけが違う同じ作業へ付け替わったのなら、いまの
+                # ままで続ける。
+                #
+                # 「玉ねぎを切る」は、どの注文のためでも同じ行為。3件とも
+                # 玉ねぎを使う注文が並ぶと、CSP から見てどれを先にやっても
+                # 同じ値になり、立て直すたびに別の注文の分が返る。注文が
+                # 変われば合流台も変わるので、運んでいる途中で行き先が
+                # 変わり、参加者には「止めてまた再開した」ように見える
+                # (報告 20260928_212502: 12.6 秒で 10 回入れ替わった)。
+                task = self._keep_same_action(agent_idx, task, sc)
 
                 # ここまでで実際に行う作業が決まる。行き来して進まなくなる
                 # ときは、この時点で片方に固定する。
