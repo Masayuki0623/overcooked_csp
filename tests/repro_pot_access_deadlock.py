@@ -112,7 +112,7 @@ def main():
     while env.current_time < INSTRUCT_AT:
         step()
 
-    # 煮込み中のスープを「出して」と、猶予なしで指示する。
+    # 煮込み中のスープを「出して」と、割り込み許容数0で指示する。
     # 指示の選択画面には出さないようにしたので(いま実行できないため)、
     # ここでは工程の一覧から直接そのタスクを組み立てる。
     # 確かめたいのは、そういう指示を受けたときに実行側が固まらないこと。
@@ -136,7 +136,7 @@ def main():
     driver.skip_budget = 0
     driver._pending_instructions = [pending]
     driver._mark_reschedule_needed('instruction_accepted')
-    print(f'指示: {verb} {obj} (猶予0) を {INSTRUCT_AT:.0f}秒時点で出した')
+    print(f'指示: {verb} {obj} (割り込み許容数0) を {INSTRUCT_AT:.0f}秒時点で出した')
 
     cooked_seen_at = None
     blocked_frames = 0

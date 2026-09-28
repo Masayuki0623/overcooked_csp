@@ -601,7 +601,7 @@ class CSPAgent:
                     # --- 指示を受けてから AI が片づけた分を、毎回引き直す ---
                     # 完了通知に頼ると、chop や提供は別経路で完了扱いになるため
                     # 一度も引かれず、再計画のたびに初期値で縛り直すことになる
-                    # (実質的に猶予が無制限に延びる)。計画から消えたかどうかで
+                    # (実質的に割り込み許容数が無制限に延びる)。計画から消えたかどうかで
                     # 数えれば、どの経路で終わっても取りこぼさない。
                     current_ids = {t.get('id') for t in tasks}
                     watched = pending.get('_watched_ai_task_ids')
@@ -673,7 +673,7 @@ class CSPAgent:
                         model.Add(sum(counts_vars) <= budget_bound).OnlyEnforceIf(ok_k)
                         # 指示は AI 宛て(target_idx=0)。相手に振られると AI は
                         # 永久に着手せず、参加者から見れば完全な無視になる。
-                        # 猶予を満たす担当者は AI 側であることを課す。
+                        # 割り込み許容数を満たす担当者は AI 側であることを課す。
                         # ただし、物理的に AI が行けない作業(仕切りの向こうの
                         # ミキサー等)まで縛ると解が無くなるので、その場合は課さない。
                         if (self.force_instruction_to_ai
@@ -779,7 +779,7 @@ class CSPAgent:
     def _dependency_ids_of(self, tasks, group_indices):
         """指示対象の前提になっているタスクの id 集合。
 
-        前提工程は「横入りされた他の作業」ではないので、猶予の消費に数えない。
+        前提工程は「横入りされた他の作業」ではないので、割り込み許容数の消費に数えない。
         """
         out = set()
         for idx in group_indices:
@@ -7771,7 +7771,7 @@ class CSPAgent:
                         if _tid and (str(_tid[0]), str(_tid[1])) == _act:
                             _pos = _n
                             break
-                    # 判定は最初に与えた猶予で見る。残り(remaining)はこなした
+                    # 判定は最初に与えた割り込み許容数で見る。残り(remaining)はこなした
                     # ぶん減って負にもなるので、それで見ると常に警告になる。
                     _budget = _pend.get('skip_budget')
                     if not isinstance(_budget, int):
@@ -7779,7 +7779,7 @@ class CSPAgent:
                     _limit = (_budget + 1) if isinstance(_budget, int) else None
                     if _pos is None or (_limit is not None and _pos > _limit):
                         print(f'[指示] 縛りが効いていません: 指示={_act} '
-                              f'計画の{_pos}番目 (猶予{_budget} なら{_limit}番目まで) '
+                              f'計画の{_pos}番目 (割り込み許容数{_budget} なら{_limit}番目まで) '
                               f'自分の計画={[t.get("id") for t in _own]}', flush=True)
                 schedule = schedule_per_agent[0] + schedule_per_agent[1]
                 schedule.sort(key=lambda x: x['start'])
@@ -7882,7 +7882,7 @@ class CSPAgent:
                 # 縛りの強さは、指示そのものが持っている skip_budget を見て
                 # 決まる(_apply_instruction_skip_budget_constraints)。
                 # エージェント側だけ差し替えても、その回の条件のまま解いて
-                # しまう。猶予を変えて解き比べるなら、こちらも必ず揃える。
+                # しまう。割り込み許容数を変えて解き比べるなら、こちらも必ず揃える。
                 for _holder in (probe, env_probe):
                     for _p in (getattr(_holder, '_pending_instructions', None) or []):
                         _p['skip_budget'] = budget

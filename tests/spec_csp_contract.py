@@ -82,9 +82,9 @@ check('占有は AddNoOverlap で表す(数を数える形にしない)',
 
 print('--- 3. skip_budget の意味 ---')
 SKIP = inspect.getsource(CSPAgent._apply_instruction_skip_budget_constraints)
-check('「指示の作業より前に走る、前提でない作業の数は、猶予まで」',
+check('「指示の作業より前に走る、前提でない作業の数は、割り込み許容数まで」',
       'budget_bound' in SKIP and 'OnlyEnforceIf' in SKIP)
-check('前提の工程は猶予に数えない',
+check('前提の工程は割り込み許容数に数えない',
       '_dependency_ids_of' in SKIP or '依存' in SKIP)
 check('同じ (動作,対象) が複数あるなら、どれか1つが守れればよい',
       '_find_group_task_indices' in SKIP)

@@ -59,7 +59,7 @@ FIELDS = [
 ]
 
 
-# 猶予(skip_budget)は「前提でない作業を何個まで挟んでよいか」なので、
+# 割り込み許容数(skip_budget)は「前提でない作業を何個まで挟んでよいか」なので、
 # 指示対象の前提工程は数えない。CSPAgent._get_dep_indices_for_target と
 # 同じ規則(同じ注文で、動詞の優先度が対象より低いもの)を使う。
 VERB_PRIORITY = {'carry': -1, 'chop': 0, 'cook': 1, 'mix': 1, 'serve': 2,

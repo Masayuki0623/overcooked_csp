@@ -1,7 +1,7 @@
 """即時実行の効率損失量 L(0) の検証。
 
 なぜ要るか:
-    効率損失量 L = f'(d) - f は、その回の猶予 d に依存する。d=1 や 2 の
+    効率損失量 L = f'(d) - f は、その回の割り込み許容数 d に依存する。d=1 や 2 の
     回では、最適計画でもともと指示した作業が d 個以内に来ていることが
     多く、縛りが何も効かずに L=0 になる(実測: 出せた7件のうち6件が 0.0)。
     対照条件(inf)に至っては縛り自体が無いので、L は空欄になる。
@@ -12,11 +12,11 @@
 ここで確かめること:
     1. どの条件でも L(0) が出る(対照条件 inf でも出る)
     2. L(0) は条件によって変わらない(指示と盤面だけで決まる)
-    3. 猶予=0 の回では L と L(0) が一致する
-    4. 猶予が緩い回では L=0 でも L(0) は 0 でないことがある
+    3. 割り込み許容数=0 の回では L と L(0) が一致する
+    4. 割り込み許容数が大きい回では L=0 でも L(0) は 0 でないことがある
     5. 指示ごとに L(0) は変わる(区別できる量になっている)
-    6. 解き比べるときは、指示が持っている猶予も差し替える
-       (ここを忘れると、猶予を変えたつもりで元の条件のまま解いてしまう)
+    6. 解き比べるときは、指示が持っている割り込み許容数も差し替える
+       (ここを忘れると、割り込み許容数を変えたつもりで元の条件のまま解いてしまう)
 
 実行方法:
     python tests/repro_immediate_loss.py
@@ -112,16 +112,16 @@ vals = {out[b]['immediate_loss_seconds'] for b in out}
 check('L(0) は条件によって変わらない', len(vals) == 1, str(vals))
 
 # 3
-check('猶予=0 の回では L と L(0) が一致',
+check('割り込み許容数=0 の回では L と L(0) が一致',
       out[0]['loss_seconds'] == out[0]['immediate_loss_seconds'],
       f"L={out[0]['loss_seconds']} L0={out[0]['immediate_loss_seconds']}")
 
 # 4
 l0 = out[0]['immediate_loss_seconds']
 check('この指示は、いますぐやらせると損が出る', l0 and l0 > 0, f'L(0)={l0}')
-check('猶予が緩いと L は 0 になる(L(0) は 0 でない)',
+check('割り込み許容数が大きいと L は 0 になる(L(0) は 0 でない)',
       out[1]['loss_seconds'] == 0.0 and out[1]['immediate_loss_seconds'] > 0,
-      f"猶予1: L={out[1]['loss_seconds']} L0={out[1]['immediate_loss_seconds']}")
+      f"割り込み許容数1: L={out[1]['loss_seconds']} L0={out[1]['immediate_loss_seconds']}")
 
 # 5
 env, ai = make(None)
@@ -138,7 +138,7 @@ check('指示ごとに L(0) は変わる(区別できる)', len(set(seen.values(
 
 # 6
 SRC = inspect.getsource(CSPAgent.estimate_instruction_time_loss)
-check('解き比べるとき、指示が持つ猶予も差し替えている',
+check('解き比べるとき、指示が持つ割り込み許容数も差し替えている',
       "_p['skip_budget'] = budget" in SRC
       and "_p['remaining_skip_budget'] = budget" in SRC,
       '差し替えていない: 元の条件のまま解いてしまう')
