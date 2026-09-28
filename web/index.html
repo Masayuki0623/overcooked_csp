@@ -1486,8 +1486,10 @@
       if (pidEl) saveParticipant(pidEl.value);
       const d = pick.debug || {};
       send({ type: 'start', map: pick.map, preset: pick.preset,
-             // デバッグの回だけ、CSP の計画を送ってもらう。
-             show_plan: custom, two_agent: custom && !!pick.two_agent,
+             // 当面は実験セッションでも計画を出す(AI と人が何をして
+             // いるかを見たいという依頼)。チュートリアルはここを通らない
+             // ので出ない。参加者に見せない形へ戻すときは custom に直す。
+             show_plan: true, two_agent: custom && !!pick.two_agent,
              case: pick.case === '' ? null : Number(pick.case),
              instruction: pick.instruction,
              skip_budget: Number(pick.skip_budget) || 0,

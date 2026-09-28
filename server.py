@@ -1117,7 +1117,10 @@ class WebGamePlay:
             if self.player is not token or self.state != 'waiting':
                 return
             self.selection = self._resolve_choice(choice or {})
-            # 計画をブラウザへ送るのは、デバッグの回だけ。
+            # 計画をブラウザへ送るか。画面側が送ってきたときだけ出す。
+            # チュートリアルは送ってこないので出ない(操作を覚える段階で
+            # 計画表を出しても読めない)。実験セッション・練習・デバッグは
+            # 送ってくる。
             self.show_plan = bool((choice or {}).get('show_plan'))
             # 2人ぶんの割り当て。既定で有効。デバッグ画面からだけ切れる。
             _ta = (choice or {}).get('two_agent')
