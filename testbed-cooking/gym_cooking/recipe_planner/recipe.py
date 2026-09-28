@@ -67,7 +67,7 @@ class OnionLettuceSalad(Recipe):
 
 class FullSalad(Recipe):
     def __init__(self):
-        Recipe.__init__(self, 'FullSalad', 45, 20)
+        Recipe.__init__(self, 'FullSalad', 60, 20)
         self.add_ingredient(Tomato(state_index=2))
         self.add_ingredient(Lettuce(state_index=2))
         self.add_ingredient(Onion(state_index=2))
