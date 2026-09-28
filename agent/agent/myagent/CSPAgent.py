@@ -5464,6 +5464,22 @@ class CSPAgent:
             # コップを取る + 注ぐ + 提供する の3インタラクト
             return int(d1 + d2 + INTERACT_FRAMES * 3)
 
+        elif verb == 'handover' and dish_kind_of(obj) == KIND_SALAD:
+            # サラダの受け渡しは「皿を取る -> 山のところで盛る -> 受け渡し台」。
+            # 鍋を経由しないので、鍋までの距離で見積もると実態と合わない。
+            counter = assigned_counter or self._find_shared_counter(
+                env, resources['cutboards'][0] if resources['cutboards'] else None)
+            if counter is None: return None
+            needed = {p.lower() for p in dish_ingredients(obj)}
+            piles = [pos for pos, wobj in env.pos_obj.items()
+                     if wobj is not None and chopped_base_name(wobj)
+                     and chopped_base_name(wobj).lower() in needed]
+            pile = get_nearest_reachable(counter, piles) if piles else counter
+            plate_pos = self._pick_plate(env, resources, pile)
+            d1 = self.astar_distance(env, plate_pos, pile)
+            d2 = self.astar_distance(env, pile, counter)
+            if d1 is None or d2 is None: return None
+            return int(d1 + d2 + INTERACT_FRAMES * 3)
         elif verb == 'handover':
             # 仕切りの向こうへ渡すための工程。皿を取り、鍋から盛り、受け渡し台に置く。
             pot_pos_list = resources['pots']

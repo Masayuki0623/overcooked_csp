@@ -1044,9 +1044,15 @@ class TaskAgent:
                 dynamic_obstacles=dynamic_obstacles)
 
         if dish_kind == 'salad':
+            # 受け渡しは必ず「皿を先に取る」回り方にする。材料を先に取ると、
+            # 山を持って皿の場所まで行き、盛ってから受け渡し台へ戻ることに
+            # なり、参加者から見て「持って行って戻す」不可解な動きになる
+            # (報告: 4/6 の回)。皿を持って山のところへ行けば、盛った皿を
+            # そのまま受け渡し台へ置ける。
             return self.process_serve_salad_task(
                 env, ingredients, assigned_counter=assigned_counter,
-                assigned_serve_loc=assigned_counter, dynamic_obstacles=dynamic_obstacles)
+                assigned_serve_loc=assigned_counter, dynamic_obstacles=dynamic_obstacles,
+                route='plate')
 
         return self.process_serve_task(
             env, ingredients, assigned_plate=assigned_plate,
