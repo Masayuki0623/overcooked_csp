@@ -61,7 +61,9 @@ def make_ai():
 
 
 def build(pile):
-    env = OvercookedEnvironment(MapSetting(level='exp_partition',
+    # リングで見る。仕切りは AI と人間の開始位置を入れ替えたので
+    # (2026-09-28)、提供口のある左側が人間の側になり、AI は提供できない。
+    env = OvercookedEnvironment(MapSetting(level='exp_ring',
                                            order_recipes=('OnionTomatoSalad',)))
     env.reset()
     obj = Object(location=pile, contents=[chopped(Onion), chopped(Tomato)])
@@ -135,8 +137,12 @@ def run_case(label, pile):
     return got
 
 
-def find_ingredient_first_counter():
-    """材料を先に取るほうが確実に早くなる置き場を1つ探す。"""
+def find_counter_where(want_route):
+    """指定の回り方(plate / ingredient)が確実に早くなる置き場を1つ探す。
+
+    どちらが早いかは地図と立ち位置で決まる。座標を決め打ちすると、地図や
+    開始位置を変えたときにテストのほうが壊れるので、その場で探す。
+    """
     env = build((6, 5))
     ai = make_ai()
     st = state_of(env)
@@ -149,23 +155,28 @@ def find_ingredient_first_counter():
             want, totals, _plate = faster_route(ai, st, pos, ai_pos)
         except Exception:
             continue
-        if want == 'ingredient' and totals['ingredient'] < totals['plate']:
+        other = 'plate' if want_route == 'ingredient' else 'ingredient'
+        if want == want_route and totals[want_route] < totals[other]:
             return pos
     return None
 
 
 def main():
-    # 共有台(提供口から遠く、皿タイルは AI の目の前)。皿を先に取るほうが早い。
-    a = run_case('共有台に置いてある', (6, 5))
-    # 材料を先に取るほうが早くなる置き場。選ぶ答えが入れ替わることを見る。
-    pos = find_ingredient_first_counter()
-    if pos is None:
-        check('材料先取りが早くなる置き場がある', False, 'この地図では見つからず')
-        b = None
+    # 皿を先に取るほうが早くなる置き場と、材料を先に取るほうが早くなる
+    # 置き場を1つずつ探し、選ぶ答えが入れ替わることを見る。
+    a = b = None
+    pos_a = find_counter_where('plate')
+    if pos_a is None:
+        check('皿先取りが早くなる置き場がある', False, 'この地図では見つからず')
     else:
-        b = run_case('材料のほうが近い台', pos)
-    check('置き場によって選び方が変わる', a != b,
-          f'共有台={a} / 材料のほうが近い台={b}')
+        a = run_case('皿のほうが近い台', pos_a)
+    pos_b = find_counter_where('ingredient')
+    if pos_b is None:
+        check('材料先取りが早くなる置き場がある', False, 'この地図では見つからず')
+    else:
+        b = run_case('材料のほうが近い台', pos_b)
+    check('置き場によって選び方が変わる', a is not None and b is not None and a != b,
+          f'皿のほうが近い台={a} / 材料のほうが近い台={b}')
 
     print(f"[{'SUCCESS' if all(results) else 'FAIL'}] "
           f"{results.count(True)}/{len(results)} 件が期待どおり")

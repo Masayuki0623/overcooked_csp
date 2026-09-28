@@ -64,9 +64,11 @@ def new_ai():
     return ai
 
 
-def fresh(orders=('AppleOrangeJuice', 'OnionTomatoSoup')):
-    env = OvercookedEnvironment(MapSetting(level='exp_partition',
-                                           order_recipes=orders))
+def fresh(orders=('AppleOrangeJuice', 'OnionTomatoSoup'), level='exp_ring'):
+    # リングで見る。仕切りは AI と人間の開始位置を入れ替えたので
+    # (2026-09-28)、ミキサー・提供口のある左側が人間の側になり、AI には
+    # ジュースの工程を指示できない(最後にそれも確かめる)。
+    env = OvercookedEnvironment(MapSetting(level=level, order_recipes=orders))
     env.reset()
     return env
 
@@ -80,10 +82,11 @@ def put(env, loc, *foods):
     return obj
 
 
-def ai_side_counters(env):
+def ai_side_counters(env, side='left'):
     st = state_of(env)
+    keep = (lambda x: x < 6) if side == 'left' else (lambda x: x > 6)
     return [tuple(l) for l in st.get_pos_by_obj_gs(gs='Counter')
-            if tuple(l)[0] < 6 and st.pos_obj.get(tuple(l)) is None]
+            if keep(tuple(l)[0]) and st.pos_obj.get(tuple(l)) is None]
 
 
 def verbs_of(env):
@@ -134,6 +137,19 @@ remaining = ai.get_remaining_tids(st, ai._build_order_tasks(st))
 check('切った玉ねぎも、これまでどおり数えられる',
       not any(t[0] == 'chop' and t[1] == 'onion' for t in remaining),
       str({t for t in remaining if t[0] == 'chop'}))
+# 仕切り: AI は右側(レタス・トマト・オレンジ・バナナ・まな板)にいて、
+# ミキサーとコップは左側(人間の側)。切った果物を AI の側に置いても、
+# 「混ぜて」は指示の候補に出ない(AI が物理的にできないため)。
+env_p = fresh(level='exp_partition')
+spots_p = ai_side_counters(env_p, side='right')
+a2, o2 = Apple(), Orange()
+a2.set_state(FoodState.CHOPPED)
+o2.set_state(FoodState.CHOPPED)
+put(env_p, spots_p[0], a2, o2)
+got_p = verbs_of(env_p)
+check('仕切りでは AI にジュースの工程を指示できない(右側にミキサーが無い)',
+      'mix' not in got_p and 'serve_juice' not in got_p, f'候補: {got_p}')
+
 check('野菜の注文にジュースの工程は混ざらない',
       not any(t[0] in ('mix', 'serve_juice') for t in remaining),
       str(remaining))
