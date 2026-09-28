@@ -4391,7 +4391,30 @@ class CSPAgent:
         if resources is None:
             resources = self._get_resources(env)
         # 手に持っている材料を、この呼び出しの中で1工程にだけ充てる。
+        # 前回の呼び出しで付いた held_by は捨てて、今の持ち物で決め直す
+        # (計画の写しに残った held_by を見て位置の計算を飛ばすと、出発点の
+        #  無い工程ができて距離が引けなくなる。実測: TypeError で計画が落ちた)。
         held_used = set()
+        for t in tasks:
+            t.pop('held_by', None)
+
+        def _order_idx_of(t):
+            oi = t.get('slot_idx')
+            if oi is None:
+                oi = t.get('order')
+            if oi is None:
+                tid = t.get('id')
+                oi = tid[2] if tid and isinstance(tid[2], int) and tid[2] >= 0 else 0
+            return oi
+
+        # 先に、待ち時間のある工程(煮る・混ぜる)から手持ちを充てる。
+        # 同じ材料の組み合わせを使う注文が2つある(オニオントマトのサラダと
+        # スープ等)と、並び順で先に来たサラダに手持ちの山が充てられ、
+        # 煮るは「また刻む」から始まっていた(実測: 山を持っているのに
+        # 煮るが相手に回った)。煮るのほうを先に見る。
+        for t in tasks:
+            if t.get('id', (None,))[0] in ('cook', 'mix'):
+                self._plan_from_hand(env, t, resources, _order_idx_of(t), held_used)
 
         def raw_base_name(item):
             """まだ切り終えていない材料の名前。切りかけ(Chopping)も含む。
@@ -4464,7 +4487,9 @@ class CSPAgent:
             if order_idx is None:
                 order_idx = (tid[2] if tid and isinstance(tid[2], int) and tid[2] >= 0 else 0)
 
-            if verb in ('cook', 'serve', 'serve_salad', 'mix', 'serve_juice')                     and self._plan_from_hand(env, t, resources, order_idx, held_used):
+            if t.get('held_by') is not None:
+                pass                                    # 上で手持ちから見積もり済み
+            elif verb in ('cook', 'serve', 'serve_salad', 'mix', 'serve_juice')                     and self._plan_from_hand(env, t, resources, order_idx, held_used):
                 pass
             elif verb == 'chop' and t.get('carry_from'):
                 # 切らずに運ぶだけ。出発点はもう切ってある物が乗っている台。
@@ -6336,14 +6361,20 @@ class CSPAgent:
             except Exception as err:
                 self._emit_counter_debug(f"[StockClaim] 案 {cand} の評価に失敗: {err}")
                 continue
-            makespan = (getattr(self, '_last_solve_metrics', {}) or {}).get('makespan_frames')
+            metrics = getattr(self, '_last_solve_metrics', {}) or {}
+            makespan = metrics.get('makespan_frames')
             if makespan is None:
                 continue
-            self._emit_counter_debug(f"[StockClaim] 案 {cand}: makespan={makespan}")
-            # 同点なら先頭(現状の案)のまま。取り合いの裁き方が毎回入れ替わると、
-            # 同じ材料を置いたり拾ったりを繰り返すことになる。
-            if best is None or makespan < best[0]:
-                best = (makespan, cand)
+            # makespan が同点なら、煮る・混ぜるが早く始まる案を採る。
+            # (実測: 刻んだ玉ねぎ＋トマトが台にあるのに、常にサラダが取り、
+            #  スープは切り直しから始まっていた。最後の1品の時刻は同じでも、
+            #  煮るを先に始めるほうが参加者には自然に見える)
+            key = (makespan, int(metrics.get('wait_start_frames') or 0))
+            self._emit_counter_debug(f"[StockClaim] 案 {cand}: makespan={makespan} 待ち工程の開始和={key[1]}")
+            # 完全に同点なら先頭(現状の案)のまま。取り合いの裁き方が毎回
+            # 入れ替わると、同じ材料を置いたり拾ったりを繰り返すことになる。
+            if best is None or key < best[0]:
+                best = (key, cand)
 
         self._claim_trial_restore(snapshot)
         if best is None:
@@ -6356,7 +6387,7 @@ class CSPAgent:
         schedule = self.solve_csp_scheduling(env, orders=orders)
         self._claim_decision_key = self._contest_signature()
         self._emit_counter_debug(
-            f"[StockClaim] 採用: 確保順={best[1]} makespan={best[0]} "
+            f"[StockClaim] 採用: 確保順={best[1]} (makespan, 待ち工程の開始和)={best[0]} "
             f"取り合い={self._stock_contest}")
         return schedule, orders
 
@@ -6706,10 +6737,16 @@ class CSPAgent:
                         if 'Cooked' in full or 'Charred' in full:
                             cooked_dish_states.append(
                                 {'names': plated_names, 'obj': obj, 'used': False})
-                    # 切った材料の在庫からは、まな板の上の物を外す。数えると
-                    # 「切る」工程が消え、切った人が置き場へ運ぶ段取りが無くなる。
-                    if obj.location not in cutboard_locs:
-                        register_chopped_item(obj, obj.location)
+                    # まな板の上に残された刻み済みの材料も在庫に数える。
+                    # 以前は外していた(数えると「切る」工程が消え、運ぶ段取りが
+                    # 無くなる、という理由)が、いまは置き場に無い在庫は
+                    # 「切り直さず取りに行って運ぶ」工程(carry_from)になるので
+                    # 運ぶ段取りは残る。外したままだと、人がまな板に置いた
+                    # 刻んだ玉ねぎを誰も数えず、スープもサラダも玉ねぎを
+                    # 切り直していた(実測: 玉ねぎとトマトが台にそろっているのに
+                    # 煮るが 15 秒以上始まらなかった)。
+                    # 刻みかけ(Chopping)は register 側で数えない。
+                    register_chopped_item(obj, obj.location)
 
         # 手に持っている完成品も数える。上の走査は持ち物を飛ばしているので、
         # 皿に盛ったスープや注いだジュースを人が運んでいる間、「まだ煮て
@@ -8183,6 +8220,11 @@ class CSPAgent:
         if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
             actual_makespan = solver.Value(makespan)
             self._last_solve_metrics['makespan_frames'] = int(actual_makespan)
+            # 待ち時間のある工程(煮る・混ぜる)の開始時刻の和。在庫の取り合いを
+            # 裁くとき、makespan が同点ならこれの小さい案(煮るが早く始まる案)
+            # を採る。
+            self._last_solve_metrics['wait_start_frames'] = int(
+                sum(solver.Value(v) for v in wait_starts)) if wait_starts else 0
             # 残り時間に間に合う品数。L は時間の差だけで測るので、ここが
             # 変わった指示は「時間では比べられない回」として印を残す。
             self._last_solve_metrics['served_count'] = (
