@@ -510,17 +510,21 @@ EXPERIMENT_PATTERNS = {
         'orders_active': None,
     },
     2: {
+        # 以前は「90秒エンドレス・3工程ごとに指示」だった。エンドレスだと
+        # 注文が補充されるたびに計画が組み直され、makespan を最小にする
+        # 目的関数と噛み合わない(終盤に挙動が変わる)。固定の注文3品を
+        # 出し切る形に戻し、指示は開始時の1回だけにした(2026-09-28)。
         'pots': 1,
         'label': 'パターン2',
-        'desc': '90秒。注文は片づくたびに補充。指示は3工程ごと。'
-                '仕切りはジュースも出る。',
-        'endless': True,
+        'desc': '注文3品を出し切るまで。指示は開始時に1回。'
+                'リングは野菜だけ、仕切りはジュースも出る。',
+        'endless': False,
         # リングは野菜だけ。仕切りはジュースも出す。
         'presets': {'exp_ring': 'experiment1', 'exp_partition': 'experiment2'},
-        'instruction': INSTRUCTION_TIMING_EVERY_N_TASKS,
-        'instruct_every': 3,
-        'seconds': 90,
-        'orders_active': 3,
+        'instruction': INSTRUCTION_TIMING_ONCE_AT_START,
+        'instruct_every': None,
+        'seconds': None,
+        'orders_active': None,
     },
     3: {
         # パターン2と同じ進み方で、鍋だけ2つにした版。既存の鍋のすぐ下に
@@ -538,9 +542,9 @@ EXPERIMENT_PATTERNS = {
     },
 }
 DEFAULT_PATTERN = 1
-# 本実験で使うパターン。エンドレス90秒・鍋2つ・3工程ごとに指示。
+# 本実験で使うパターン。固定の注文3品・鍋1つ・指示は開始時に1回。
 # 参加者ごとに進み方が変わらないよう、ここで固定する。
-EXPERIMENT_PATTERN = 3
+EXPERIMENT_PATTERN = 2
 
 
 def pattern_of(value):
@@ -1387,7 +1391,7 @@ class WebGamePlay:
 
         participant = str(choice.get('participant') or '').strip()
         if participant:
-            # 実験のセッションはパターン3で固定する。画面側でも選ばせて
+            # 実験のセッションは EXPERIMENT_PATTERN で固定する。画面側でも選ばせて
             # いないが、ここでも押さえておく。参加者ごとに進み方が違うと
             # 比べられなくなるので、送られてきた値は当てにしない。
             pattern = EXPERIMENT_PATTERN
