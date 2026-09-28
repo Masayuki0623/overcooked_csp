@@ -175,7 +175,7 @@ def order_sets_for(preset):
 # 構成で出る順位の上限は 仕切り=3 / リング=6。4 だと6番目以降でないと
 # 縛らず、手元の記録でも skip=2 の6回・skip=4 の4回はすべて L=0 だった
 # (＝指示なしと同じ動きしかしない条件になっていた)。
-SKIP_BUDGETS = (0, 1, 2)
+SKIP_BUDGETS = (0, 1)
 def endless_pool_for(preset):
     """エンドレスの補充元。選んだレシピに出てくる料理だけを使う。
 
