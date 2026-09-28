@@ -40,8 +40,10 @@ from agent.myagent.CSPAgent import CSPAgent
 MAP = 'exp_ring'
 RECIPES = ['TomatoLettuceSoup', 'OnionLettuceSoup', 'BananaOrangeJuice']
 COOK_SECONDS = 25
-INSTRUCT_AT = 10.0
-DEADLINE = 50.0          # ここまでに鍋から取り出せていれば合格
+# リングの地図はまな板が中央に移ったぶん、鍋に入るまでが少し遅い。
+# 指示を出す時点では煮込みが始まっている必要があるので、そこまで待つ。
+INSTRUCT_AT = 20.0
+DEADLINE = 70.0          # ここまでに鍋から取り出せていれば合格
 
 
 def set_cook_time(sec):

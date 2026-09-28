@@ -7250,10 +7250,13 @@ class CSPAgent:
                     # 再スケジューリングでタスク一覧から消えるため自動的に補正される。
                     own_is_a1 = 1 if self.own_agent_idx == 1 else 0
                     human_is_a1 = 1 - own_is_a1
-                    human_task = (
-                        self._predict_human_current_task(env, tasks, human_real_pos)
-                        if self.use_predicted_human_model else None
-                    )
+                    # 相手の行動を予測して、その作業を相手へ固定するのは
+                    # やめた。外れると、こちらは動かない相手を待つ計画を
+                    # 立てることになる(実測: スープの中身を持ったまま
+                    # 10.6 秒停止。調理が人間スロットに固定されていた)。
+                    # 2人ぶんの割り当ては、予測ではなく位置と移動時間で
+                    # 決める。
+                    human_task = None
                     human_task_idx = None
                     if human_task is not None:
                         for i in range(num_tasks):
