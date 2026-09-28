@@ -286,6 +286,8 @@
     border: 1px solid var(--btn-line); border-radius: 10px; cursor: pointer;
   }
   .modes button:hover { background: #333c48; }
+  .modes button[disabled] { opacity: .45; cursor: default; }
+  .modes button[disabled]:hover { background: var(--btn-bg); }
   .modes .name { font-size: 16px; font-weight: 600; }
   .modes .why { font-size: 13px; color: var(--muted); margin-top: 4px; line-height: 1.6; }
   /* ---- レシピ表 ---- */
@@ -1769,9 +1771,7 @@
 
   let consentInfo = null;
 
-  // 実験セッションの入口。前の人の番号が端末に残っていると、そのまま
-  // 続きが始まってしまい、次の人が最初から始められない。どちらなのかを
-  // 必ず選ばせる。
+  // 使っていない(最初の画面に4つ並べる形にした)。戻り先として残す。
   function renderExperimentEntry() {
     const item = (id, name, why) =>
       `<button type="button" data-go="${id}">` +
@@ -1822,7 +1822,9 @@
       '<div class="err" id="rs-err"></div>' +
       '<div class="go"><button class="primary" id="rs-go">続きから始める</button> ' +
       '<button id="rs-back">戻る</button></div></div>');
-    document.getElementById('rs-back').addEventListener('click', renderExperimentEntry);
+    document.getElementById('rs-back').addEventListener('click', () => {
+      setMode(''); renderModePick();
+    });
     document.getElementById('rs-go').addEventListener('click', () => {
       const err = document.getElementById('rs-err');
       const v = (document.getElementById('rs-id').value || '').trim();
@@ -1933,8 +1935,8 @@
   }
 
   function renderModePick() {
-    const item = (id, name, why) =>
-      `<button type="button" data-mode="${id}">` +
+    const item = (id, name, why, off) =>
+      `<button type="button" data-mode="${id}"${off ? ' disabled' : ''}>` +
       `<div class="name">${name}</div><div class="why">${why}</div></button>`;
     showOverlay(
       '<div class="stage-pick">' +
@@ -1943,8 +1945,16 @@
       item('tutorial', 'チュートリアル（約5分）',
            'はじめての人はこちら。サラダ → スープ → ジュースの順に<br>' +
            '1人で作り方を覚えてから、AI と一緒に遊びます。') +
-      item('experiment', '実験セッション（約30分）',
-           'ゲーム8回とアンケート8回。はじめに説明と同意があります。') +
+      // 「新たに始める」は、チュートリアルを終えた端末でだけ選べる。
+      // 操作を覚えないまま本番に入ると、条件の差ではなく不慣れの差が出る。
+      item('exp_new', '実験セッションを新たに始める（約30分）',
+           tutorialDone()
+             ? 'ゲーム8回とアンケート8回。はじめに説明と同意があります。'
+             : '先にチュートリアルを終えてください。',
+           !tutorialDone()) +
+      item('exp_resume', '実験セッションを続きから',
+           '前に参加した方はこちら。参加者番号を入れると、<br>' +
+           '続きのセッションから始まります。') +
       item('custom', 'デバッグ',
            '地図・注文・指示の効き方などを自分で決めて遊べます。<br>' +
            '画面の端に、CSP が立てた AI と人の計画を出します。記録は残りません。') +
@@ -1957,6 +1967,9 @@
       '</div></div>');
     el.overlayText.querySelectorAll('.modes button').forEach((b) => {
       b.addEventListener('click', () => {
+        // 選べないものは何もしない。disabled でも押せる環境があるので、
+        // ここでも止める。
+        if (b.disabled) return;
         setMode(b.dataset.mode);
         if (b.dataset.mode === 'tutorial') { setStep(0); showTutorialCard(); }
         else if (b.dataset.mode === 'practice') startPractice();
@@ -1965,13 +1978,19 @@
           pick.debug = Object.assign({}, pick.debug || DEBUG_DEFAULT, { on: true });
           savePick();
           showStart();
-        } else if (b.dataset.mode === 'experiment') {
-          // 端末に前の人の番号が残っていることがある。そのまま続きを
-          // 始めてしまうと、次の人が最初から参加できない。
-          // 「はじめて」か「続きから」かを必ず選ばせる。
+        } else if (b.dataset.mode === 'exp_new') {
+          // 端末に前の人の番号が残っていることがある。捨ててから始める。
+          setMode('experiment');
           pick.pattern = 3;
           savePick();
-          renderExperimentEntry();
+          saveParticipant('');
+          assignment = null;
+          showConsent();
+        } else if (b.dataset.mode === 'exp_resume') {
+          setMode('experiment');
+          pick.pattern = 3;
+          savePick();
+          renderResume();
         } else showStart();
       });
     });
@@ -2053,7 +2072,7 @@
     }
     // 実験セッションで参加者番号がまだ無い = 同意がまだ。説明から始める。
     // 番号は自動で採番するので、手で入れる画面は出さない。
-    if (mode === 'experiment' && !participantId) { renderExperimentEntry(); return; }
+    if (mode === 'experiment' && !participantId) { renderModePick(); return; }
     if (participantId && !assignment) { loadAssignment(); }
     if (options) { renderPick(); return; }
     showOverlay('<div class="big">読み込み中...</div>');
