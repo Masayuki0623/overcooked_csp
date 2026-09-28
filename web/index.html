@@ -2060,7 +2060,8 @@
         participant_id: exp.participant_id, session: exp.session,
         pattern: exp.pattern || (lastSelection && lastSelection.pattern) || null,
         map: exp.map, skip_budget: exp.skip_budget, case: exp.case,
-        served: result.served, makespan_s: result.makespan_s,
+        served: result.served, failed: result.failed,
+        makespan_s: result.makespan_s,
       };
       const missing = [];
       const read = (name) => {

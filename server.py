@@ -258,6 +258,97 @@ SESSION_LOG_PATH = ROOT / 'results' / 'web_sessions.csv'
 # (web_sessions.csv)には最初の1回ぶんしか入らない。実測ではエンドレスの
 # 90秒で5回出ていて、4回ぶんが分析に残らなかった。
 INSTRUCTION_LOG_PATH = ROOT / 'results' / 'web_instructions.csv'
+
+# ------------------------------------------------------------------
+# 実験用の記録。見出しは日本語、そのすぐ下に説明の行を置く。
+# 読むときは1行目を飛ばす(pandas なら skiprows=[1])。
+#
+# 定性 exp_qualitative.csv  : アンケート1回1行 + その回のスコア
+# 定量 exp_quantitative.csv : 指示1回1行 + L + その回のスコア
+#                             指示が1回も出なかった回も、スコアだけ1行残す
+#
+# ファイル名を英字にしてあるのは、Windows と git のあいだで日本語の
+# ファイル名が化けることがあるため。中身の見出しは日本語。
+# ------------------------------------------------------------------
+QUAL_PATH = ROOT / 'results' / 'exp_qualitative.csv'
+QUANT_PATH = ROOT / 'results' / 'exp_quantitative.csv'
+
+# 条件の欄は両方のファイルで同じにしてある(参加者IDとセッション番号で
+# 突き合わせられるが、片方だけ見ても条件が分かるようにしておく)。
+_COND_COLUMNS = [
+    ('記録時刻', 'この行を書いた日時'),
+    ('参加者ID', ''),
+    ('パターン', '1=注文3品を出し切る / 2=エンドレス / 3=エンドレス+鍋2つ'),
+    ('セッション番号', 'その参加者の何回目のセッションか'),
+    ('地図', 'exp_ring=リング / exp_partition=仕切り'),
+    ('猶予', '指示の前に挟んでよい他の作業の数(skip_budget)。inf=指示を聞かない'),
+    ('注文の組み合わせ番号', ''),
+]
+_SCORE_COLUMNS = [
+    ('提供数', 'その回に出せた品数(ゲーム内スコア)'),
+    ('失敗数', 'その回に時間切れになった注文の数'),
+    ('プレイ時間_秒', 'その回の長さ'),
+]
+
+QUAL_COLUMNS = (
+    _COND_COLUMNS
+    + [(f'つながり{i}', t) for i, t in enumerate(
+        ['つながりを感じた', '打ち解けられた', '気持ちが通じ合った',
+         'おたがいのやり方を大事にしていた'], 1)]
+    + [(f'協調{i}', t) for i, t in enumerate(
+        ['息が合っていた', 'おたがいに積極的だった', 'やりとりがスムーズだった',
+         'おたがいに気を配っていた'], 1)]
+    + [('つながり平均', 'つながり1〜4の平均'),
+       ('協調平均', '協調1〜4の平均'),
+       ('ラポール', 'つながり平均と協調平均の平均(CCR 短縮版の出し方)')]
+    + [(f'指示{i}', t) for i, t in enumerate(
+        ['指示どおりに動いてくれた', '指示にすぐ反応してくれた',
+         '指示した作業にすぐ取りかかってくれた', '指示が伝わっている気がした',
+         '指示と違う動きにも、理由がありそうだった', '指示を出した甲斐があった'], 1)]
+    + [('指示平均', '指示1〜6の平均'),
+       ('うまく噛み合ったところ', '自由記述(任意)'),
+       ('気になったところ', '自由記述(任意)'),
+       ('指示に対するAIの動き', '自由記述(任意)')]
+    + _SCORE_COLUMNS)
+QUAL_FIELDS = [c for c, _ in QUAL_COLUMNS]
+QUAL_NOTES = dict(QUAL_COLUMNS)
+
+QUANT_COLUMNS = (
+    _COND_COLUMNS
+    + [('ゲーム番号', 'サーバー内の通し番号'),
+       ('指示の回数目', 'この回で何回目に出した指示か(1から)。0=指示が1回も出なかった回'),
+       ('指示の総回数', 'この回で出た指示の数'),
+       ('指示した時刻_秒', '指示を受け取ったときのゲーム内時刻'),
+       ('指示の動作', 'chop=切る / cook=煮る / mix=混ぜる / serve系=提供'),
+       ('指示の対象', '料理名または材料名'),
+       ('料理の種類', 'salad / soup / juice'),
+       ('指示の結末',
+        'done=やり終えた / started=取りかかった'
+        ' / canceled=途中で実行できなくなり棄却 / pending=最後まで取りかからなかった'),
+       ('効率損失量L_秒',
+        "指示したせいで伸びた見込み時間。f'(猶予) - f。猶予=inf の回は縛りが無いので空欄"),
+       ('制約なしの見込み_秒', 'f = 指示しなければ全部出し終える見込みだった時刻'),
+       ('制約ありの見込み_秒', "f'= その指示を守ったときの見込み"),
+       ('L算出の可否',
+        'ok=出せた / no_constraint=縛りが掛からなかった'
+        ' / dish_count_changed=出せる品数が変わったので時間では比べられない / それ以外は理由'),
+       ('即時実行の効率損失量L0_秒',
+        "その回の猶予に関係なく、猶予=0(いますぐやらせる)として出した損失。"
+        " f'(0) - f。全部の回で出るので、条件をまたいで比べられる"),
+       ('即時実行の見込み_秒', "f'(0) = いますぐやらせたときに全部出し終える見込み"),
+       ('L0算出の可否', 'ok=出せた / それ以外は理由'),
+       ('割り込まれた作業数',
+        '指示した作業に取りかかるまでに、AI が先に片づけた他の作業の数'),
+       ('実際の実行順位', 'AI が何番目にその作業をやったか(割り込まれた作業数+1)'),
+       ('指示なしの実行順位', '指示しなかったら何番目になるはずだったか'),
+       ('繰り上がった順位', '指示なしの実行順位 - 実際の実行順位'),
+       ('着手した時刻_秒', 'AI がその作業に手を付けたゲーム内時刻'),
+       ('着手までの秒数', '指示してから、実際に取りかかるまでの秒数'),
+       ('着手せず終了', '1=最後まで取りかからなかった(待ち時間が測れていない)')]
+    + _SCORE_COLUMNS
+    + [('正式な回か', '1=正式に数える回 / 0=バグ報告や途中離脱でやり直しになる回')])
+QUANT_FIELDS = [c for c, _ in QUANT_COLUMNS]
+QUANT_NOTES = dict(QUANT_COLUMNS)
 # 列の名前は日本語にして、見出しのすぐ下に説明の行を置く。
 # あとから自分で見返すとき、列名だけでは何の数字か思い出せない。
 #   pandas で読むときは pd.read_csv(path, skiprows=[1]) で説明行を飛ばす。
@@ -1131,11 +1222,21 @@ class WebGamePlay:
             return
         env = self.env
         pend = list(getattr(env, '_pending_instructions', []) or []) if env else []
-        if not pend:
-            return
         res = self.result or {}
         slots = list(getattr(self, 'instruction_slots', []) or [])
         now = datetime.now().isoformat(timespec='seconds')
+        cond = {
+            '記録時刻': now,
+            '参加者ID': sel['participant'],
+            'パターン': sel.get('pattern', DEFAULT_PATTERN),
+            'セッション番号': sel.get('session'),
+            '地図': sel.get('map'), '猶予': sel.get('skip_budget'),
+            '注文の組み合わせ番号': sel.get('case'),
+        }
+        score = {
+            '提供数': res.get('served'), '失敗数': res.get('failed'),
+            'プレイ時間_秒': res.get('makespan_s'),
+        }
         for n, p in enumerate(pend, 1):
             payload = p.get('task')
             if isinstance(payload, (list, tuple)) and len(payload) >= 2:
@@ -1194,6 +1295,45 @@ class WebGamePlay:
                 'プレイ時間_秒': res.get('makespan_s'),
                 '正式な回か': int(not reason),
             }, notes=INSTRUCTION_NOTES)
+            # 実験用の定量ファイルにも同じ行を残す。条件の欄は定性ファイルと
+            # 同じ並びにしてあるので、参加者IDとセッション番号で繋げられる。
+            append_csv(QUANT_PATH, QUANT_FIELDS, {
+                **cond, 'ゲーム番号': self.game_id,
+                '指示の回数目': n, '指示の総回数': len(pend),
+                '指示した時刻_秒': (round(float(accepted), 1)
+                                    if accepted is not None else None),
+                '指示の動作': verb or '', '指示の対象': obj or '',
+                '料理の種類': slot.get('quality', ''),
+                '指示の結末': p.get('status', ''),
+                '効率損失量L_秒': loss.get('loss_seconds'),
+                '制約なしの見込み_秒': loss.get('baseline_seconds'),
+                '制約ありの見込み_秒': loss.get('constrained_seconds'),
+                'L算出の可否': loss.get('status', ''),
+                '即時実行の効率損失量L0_秒': loss.get('immediate_loss_seconds'),
+                '即時実行の見込み_秒': loss.get('immediate_seconds'),
+                'L0算出の可否': loss.get('immediate_status', ''),
+                '割り込まれた作業数': tasks_before,
+                '実際の実行順位': exec_rank,
+                '指示なしの実行順位': natural,
+                '繰り上がった順位': ((natural - exec_rank)
+                                     if (natural and exec_rank) else None),
+                '着手した時刻_秒': started,
+                '着手までの秒数': (
+                    round(max(0.0, float(started) - float(accepted)), 1)
+                    if started is not None and accepted is not None else None),
+                '着手せず終了': int(started is None),
+                **score,
+                '正式な回か': int(not reason),
+            }, notes=QUANT_NOTES)
+        if not pend:
+            # 指示が1回も出なかった回。スコアだけでも残しておかないと、
+            # 「その条件で何品出せたか」が定量ファイルから抜け落ちる。
+            append_csv(QUANT_PATH, QUANT_FIELDS, {
+                **cond, 'ゲーム番号': self.game_id,
+                '指示の回数目': 0, '指示の総回数': 0,
+                **score, '正式な回か': int(not reason),
+            }, notes=QUANT_NOTES)
+            return
         print(f"[server] 指示の記録を {len(pend)} 件残しました "
               f"({sel['participant']} session={sel.get('session')})", flush=True)
 
@@ -2384,6 +2524,36 @@ async def survey(req: Request):
     for name, v in zip(INSTR_FIELDS, instr):
         row[name] = v
     append_csv(SURVEY_PATH, SURVEY_FIELDS, row)
+
+    # 実験用の定性ファイル。見出しは日本語、説明の行つき。
+    # 条件の欄は定量ファイルと同じ並びにしてあるので、参加者IDと
+    # セッション番号で突き合わせられる。
+    qual = {
+        '記録時刻': row['timestamp'],
+        '参加者ID': pid,
+        'パターン': body.get('pattern'),
+        'セッション番号': body.get('session'),
+        '地図': body.get('map'),
+        '猶予': body.get('skip_budget'),
+        '注文の組み合わせ番号': body.get('case'),
+        'つながり平均': connection_mean,
+        '協調平均': coordination_mean,
+        'ラポール': row['rapport'],
+        '指示平均': row['instr_mean'],
+        'うまく噛み合ったところ': free.get('free_good', ''),
+        '気になったところ': free.get('free_bad', ''),
+        '指示に対するAIの動き': free.get('free_instruction', ''),
+        '提供数': body.get('served'),
+        '失敗数': body.get('failed'),
+        'プレイ時間_秒': body.get('makespan_s'),
+    }
+    for i, v in enumerate(conn, 1):
+        qual[f'つながり{i}'] = v
+    for i, v in enumerate(coord, 1):
+        qual[f'協調{i}'] = v
+    for i, v in enumerate(instr, 1):
+        qual[f'指示{i}'] = v
+    append_csv(QUAL_PATH, QUAL_FIELDS, qual, notes=QUAL_NOTES)
     print(f"[server] アンケートを保存しました: {pid} session={row['session']} "
           f"ラポール {row['rapport']} (つながり {connection_mean} / "
           f"連携 {coordination_mean}) 指示 {row['instr_mean']}")
