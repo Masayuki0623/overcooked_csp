@@ -1542,8 +1542,10 @@
   let lastSelection = null;
   function selectionNote() {
     // 何を選んだかは、始まる前(カウントダウン中)にだけ見せる。
-    // 始まってから出すと盤面が隠れる。
-    if (!lastSelection) return '';
+    // ただし実験の参加者には見せない。地図の名前・レシピ束・注文の一覧は
+    // 動作確認のための情報で、数えている間ずっと盤面の上に薄く重なる。
+    // 注文そのものは画面の下に絵で出ているので、字で重ねる必要がない。
+    if (!lastSelection || !DEV) return '';
     return `<div class="sub" style="margin-top:14px">${esc(lastSelection.map)} / ${esc(lastSelection.preset)}` +
            `<br>${lastSelection.orders.map(esc).join('<br>')}</div>`;
   }
