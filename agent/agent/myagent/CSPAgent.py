@@ -146,6 +146,22 @@ class CSPAgent:
         # このゲームの制限時間(秒)。None なら時間制限なしとして扱い、
         # これまでどおり makespan だけを最小化する。
         self.time_limit_seconds = None
+        # 2人ぶんの割り当てをソルバーに決めさせるか。
+        # True にすると、どちらがどの作業をやると速いかを、それぞれの
+        # 位置と移動時間から計算して割り振る。相手が人間でも同じ。
+        # 相手が計画どおり動かないことは、実行側の引き取り
+        # (_take_over_partner_task)で吸収する。
+        #
+        # いまは既定で False。True にすると、これまで直してきた挙動が
+        # 4件崩れる(実測: repro が 44 -> 40 本):
+        #   ・運ぶだけの工程が相手の担当になり、鍋に材料が入らない
+        #   ・持っている材料を切りに行かなくなる
+        #   ・間違った鍋を空ける工程が計画から消える
+        #   ・L の値が変わる(割り当てが変われば makespan も変わるため)
+        # 相手が人間のときは「渡した仕事は返ってこない」ので、引き取りを
+        # もっと積極的にするか、相手の担当を前後関係から外す必要がある。
+        # そこを詰めるまでは切っておく。デバッグ画面から True にできる。
+        self.two_agent_assignment = False
         self.deadline_frames = int(75 * self.fps) if deadline_seconds is None else int(deadline_seconds * self.fps)
         # skip_budget: 指示タスク前に同エージェントが実行してよい他タスクの上限個数 (None=使用しない)
         # 秒数ベースの deadline_seconds / deadline_frames は当面未使用だが削除しない
@@ -2498,6 +2514,41 @@ class CSPAgent:
             return False
         return False
 
+    def _take_over_partner_task(self, env, agent_idx):
+        """相手の担当のうち、いま自分が手をつけられる作業を引き取る。
+
+        2人ぶんの割り当てをソルバーに決めさせると、相手にも作業が回る。
+        相手が人間のときは計画どおりに動く保証がないので、渡したきり
+        だと、こちらは材料を持ったまま永久に待つ
+        (報告 20260928_164520: スープの中身を持ったまま 10.6 秒停止。
+         調理が人間スロットに入っていた)。
+
+        自分の担当で手をつけられるものが1つも無いときにだけ呼ぶ。
+        計画どおりに進んでいる間は、相手の分を横取りしない。
+        """
+        other = 1 - agent_idx
+        sched = (getattr(self, 'schedule_per_agent', None) or {}).get(other) or []
+        blocked = self.blocked_tasks.get(agent_idx, {})
+        for cand in sched:
+            tid = cand.get('id')
+            if not tid or tid in self.completed_task_ids or tid in blocked:
+                continue
+            # 自分が物理的に行ける作業だけ(仕切りの向こうは引き取れない)。
+            try:
+                if agent_idx not in self._assignable_agents(env, cand):
+                    continue
+            except Exception:
+                pass
+            verb, obj, _uid = tid
+            if verb in ('chop', 'carry'):
+                return cand
+            if verb in ('cook', 'mix', 'serve_salad'):
+                if self._cook_dependency_ready_from_world(env, obj):
+                    return cand
+            if verb in self.SERVE_VERBS:
+                return cand
+        return None
+
     def _find_startable_other_task(self, env, agent_idx, skip_tid, schedule):
         """いま着手できる別の作業を、自分の計画から探す。
 
@@ -3377,6 +3428,21 @@ class CSPAgent:
                     alt = self._find_startable_other_task(env, agent_idx, tid, sc)
                     if alt is not None:
                         task = alt
+                        tid = task['id']
+                        verb, obj, order_uid = tid
+                # 自分の担当では手をつけられるものが無い。相手の担当から
+                # 引き取る。相手が人間だと計画どおりに動く保証が無いので、
+                # 渡したきりだと材料を持ったまま永久に待つことになる。
+                if (getattr(self, 'two_agent_assignment', False)
+                        and not self._cook_dependency_ready_from_world(env, obj)
+                        and self._find_startable_other_task(
+                            env, agent_idx, tid, sc) is None):
+                    taken = self._take_over_partner_task(env, agent_idx)
+                    if taken is not None and taken.get('id') != tid:
+                        print(f'[CSPAgent] AI{agent_idx} 相手の担当 '
+                              f'{taken.get("id")} を引き取ります '
+                              f'(自分の {tid} は進められない)', flush=True)
+                        task = taken
                         tid = task['id']
                         verb, obj, order_uid = tid
 
@@ -7187,16 +7253,28 @@ class CSPAgent:
                                 human_task_idx = i
                                 break
                     partitioned = self._map_is_partitioned(env)
+                    two_agent = getattr(self, 'two_agent_assignment', False)
                     for i in range(num_tasks):
                         forced = human_is_a1 if i == human_task_idx else own_is_a1
+                        pinned = True
                         if partitioned:
                             # 仕切りのあるマップでは、AI が物理的に行けないタスクがある。
                             # それを AI に割り当てると永久に実行できず全体が止まるので、
                             # 到達できる側のエージェントへ回す。
+                            # この上書きは、相手がやっていると見た1つにも効かせる
+                            # (行けない側へ固定すると、そこで全体が止まる)。
                             allowed = self._assignable_agents(env, tasks[i])
                             if len(allowed) == 1:
                                 forced = next(iter(allowed))
-                        model.Add(is_a1[i] == forced)
+                            elif two_agent and i != human_task_idx:
+                                pinned = False
+                        elif two_agent and i != human_task_idx:
+                            # 2人ぶんの割り当てをソルバーに決めさせる。
+                            # いま相手が手をつけていると見た1つだけは固定する
+                            # (目の前でやっている作業を横取りしないように)。
+                            pinned = False
+                        if pinned:
+                            model.Add(is_a1[i] == forced)
                     self.predicted_human_tasks = (
                         [{'id': human_task['id'], 'task': human_task}]
                         if human_task_idx is not None else []
