@@ -154,7 +154,7 @@ check('サーバーが順序統制の並びを使っている',
       'design.plan_for(participant)' in SRC, 'くじ引きのまま')
 SRC2 = inspect.getsource(srv)
 check('注文構成がくじ引きでなく位置で決まる',
-      'design.case_for(cases, position)' in SRC2,
+      'design.case_for(cases, (int(position) - 1) * gpb + game_in_block)' in SRC2,
       'くじ引きのまま(random.choice)')
 check('本番の注文構成が random.choice でなくなった',
       "cases = experiment_case_indices(preset) or list(range(len(sets)))"

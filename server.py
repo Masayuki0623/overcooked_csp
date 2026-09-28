@@ -322,7 +322,9 @@ _COND_COLUMNS = [
     ('参加者ID', ''),
     ('パターン', '1=注文3品を出し切る / 2=エンドレス / 3=エンドレス+鍋2つ'),
     ('グループ', 'G1〜G8。順序統制の割り当て。地図の順序とラテン方格の行が決まる'),
-    ('セッション番号', 'その参加者の何回目のセッションか'),
+    ('セッション番号', 'その参加者の何回目のゲームか(通し番号)'),
+    ('エージェント', '参加者に見せた相方の名前。地図×割り込み許容数の条件ごとに別の名前(パターン4)'),
+    ('ブロック内の回', '同じ相方との何ゲーム目か(1〜3)。パターン4以外は1'),
     ('地図', 'exp_ring=リング / exp_partition=仕切り'),
     ('割り込み許容数',
      '指示した作業より先に、AI が他の作業を何個まで割り込ませてよいか'
@@ -540,11 +542,49 @@ EXPERIMENT_PATTERNS = {
         'seconds': 90,
         'orders_active': 3,
     },
+    4: {
+        # 固定の注文3品・鍋1つ・指示は開始時に1回。ここまではパターン2と
+        # 同じ。違いは進み方で、1つの条件(地図 × 割り込み許容数)を
+        # 3ゲーム続けて遊び、そのあとにアンケートを1回答える。
+        # 6条件 × 3ゲーム = 18ゲーム、アンケートは6回。
+        # 参加者には条件ごとに別の相方(エージェント A〜F)として見せる。
+        # 同じ割り込み許容数でも地図が違えば別の名前にする。
+        'pots': 1,
+        'label': 'パターン4',
+        'desc': '注文3品を出し切るまで。指示は開始時に1回。'
+                '同じ相方と3ゲーム遊んでからアンケート。',
+        'endless': False,
+        'presets': {'exp_ring': 'experiment1', 'exp_partition': 'experiment2'},
+        'instruction': INSTRUCTION_TIMING_ONCE_AT_START,
+        'instruct_every': None,
+        'seconds': None,
+        'orders_active': None,
+        'games_per_block': 3,
+    },
 }
 DEFAULT_PATTERN = 1
-# 本実験で使うパターン。固定の注文3品・鍋1つ・指示は開始時に1回。
+# 本実験で使うパターン。固定の注文3品・鍋1つ・指示は開始時に1回、
+# 同じ相方と3ゲーム遊んでからアンケート(パターン4)。
 # 参加者ごとに進み方が変わらないよう、ここで固定する。
-EXPERIMENT_PATTERN = 2
+EXPERIMENT_PATTERN = 4
+
+
+def games_per_block_of(pattern):
+    """1つの条件を何ゲーム続けるか。パターン4だけ3、それ以外は1。"""
+    return int(EXPERIMENT_PATTERNS.get(pattern_of(pattern), {}).get('games_per_block') or 1)
+
+
+def total_games_of(rec, pattern):
+    """その割り当てで遊ぶゲームの総数(条件の数 × 1条件あたりのゲーム数)。"""
+    return len(rec.get('order') or []) * games_per_block_of(pattern)
+
+
+def agent_label(cond_idx):
+    """参加者に見せる相方の名前。条件の何番目か(0始まり)で A, B, C... と振る。
+
+    同じ割り込み許容数でも地図が違えば別の条件なので、別の名前になる。
+    """
+    return f'エージェント {chr(ord("A") + int(cond_idx))}'
 
 
 def pattern_of(value):
@@ -1403,7 +1443,11 @@ class WebGamePlay:
             rec = assignment_for(participant, pattern)
             done = int(rec.get('done', 0))
             order = rec['order']
-            cond = order[min(done, len(order) - 1)]
+            # 1つの条件を何ゲーム続けるか。done はゲーム数で数える。
+            gpb = games_per_block_of(pattern)
+            cond_idx = min(done // gpb, len(order) - 1)
+            game_in_block = done % gpb + 1
+            cond = order[cond_idx]
             preset = spec['presets'][cond['map']]
             sets = order_sets_for(preset)
             cases = experiment_case_indices(preset) or list(range(len(sets)))
@@ -1414,8 +1458,11 @@ class WebGamePlay:
             # (skip_budget x 注文構成) がちょうど1回ずつ現れる。
             position = cond.get('position')
             if position is None:
-                position = (done % len(cases)) + 1
-            case = design.case_for(cases, position)
+                position = (cond_idx % len(cases)) + 1
+            # 同じ相方と3ゲーム遊ぶときは、3ゲームで注文の構成を変える。
+            # 「何番目の条件か × 何ゲーム目か」で決めるので、参加者を
+            # またいで同じ並びになる。
+            case = design.case_for(cases, (int(position) - 1) * gpb + game_in_block)
             g = design.group_of(participant)
             return {'map': cond['map'], 'preset': preset, 'case': case,
                     'recipes': list(sets[case]), 'picked_by': 'experiment',
@@ -1425,11 +1472,17 @@ class WebGamePlay:
                     'age': rec.get('age'),
                     'game_experience': rec.get('game_experience', ''),
                     'pattern': pattern,
+                    # 同じ相方と続けて遊ぶ設計のための欄。1条件1ゲームの
+                    # パターンでは block=session、回=1、毎回アンケート。
+                    'block': cond_idx + 1, 'game_in_block': game_in_block,
+                    'games_per_block': gpb,
+                    'agent': agent_label(cond_idx) if gpb > 1 else None,
+                    'survey_due': game_in_block == gpb,
                     'endless': spec['endless'], 'seconds': spec['seconds'],
                     'pots': spec.get('pots', 1),
                     'orders_active': spec['orders_active'],
                     'instruct_every': spec['instruct_every'],
-                    'sessions_total': len(order), 'skip_budget': cond['skip_budget'],
+                    'sessions_total': len(order) * gpb, 'skip_budget': cond['skip_budget'],
                     # 実験では指示を開始直後に1回だけ受け取る(build() も同じ)。
                     # ここに入れておかないと画面側が「この回は指示がある」と
                     # 分からず、指示を待たずに 3・2・1 を始めてしまい、
@@ -1575,14 +1628,21 @@ class WebGamePlay:
             # 全部終わったら名簿に印を付ける。参加状況の管理のためだけに使う。
             _rec = assignment_for(sel['participant'],
                                   sel.get('pattern', DEFAULT_PATTERN))
-            if int(_rec.get('done', 0)) >= len(_rec.get('order') or []):
+            _pat = sel.get('pattern', DEFAULT_PATTERN)
+            if int(_rec.get('done', 0)) >= total_games_of(_rec, _pat):
                 _update_roster(sel['participant'], **{'完了したか': 1})
-            self._safe('アンケート待ちの記録', note_survey_owed,
+            # アンケートは、その相方との最後のゲームのあとだけ。
+            if sel.get('survey_due', True):
+                self._safe('アンケート待ちの記録', note_survey_owed,
                        sel['participant'],
                        {'exp': {'participant_id': sel['participant'],
-                                'pattern': sel.get('pattern', DEFAULT_PATTERN),
+                                'pattern': _pat,
                                 'session': sel.get('session'),
-                                'sessions_total': len(_rec.get('order') or []),
+                                'sessions_total': total_games_of(_rec, _pat),
+                                'block': sel.get('block'),
+                                'game_in_block': sel.get('game_in_block'),
+                                'games_per_block': sel.get('games_per_block'),
+                                'agent': sel.get('agent'),
                                 'map': sel.get('map'),
                                 'skip_budget': sel.get('skip_budget'),
                                 'case': sel.get('case'),
@@ -1615,6 +1675,8 @@ class WebGamePlay:
             'パターン': sel.get('pattern', DEFAULT_PATTERN),
             'グループ': sel.get('group', ''),
             'セッション番号': sel.get('session'),
+            'エージェント': sel.get('agent') or '',
+            'ブロック内の回': sel.get('game_in_block') or 1,
             '地図': sel.get('map'), '割り込み許容数': sel.get('skip_budget'),
             '注文の組み合わせ番号': sel.get('case'),
             '年齢': sel.get('age'),
@@ -1833,6 +1895,10 @@ class WebGamePlay:
             'participant_id': sel.get('participant'),
             'session': sel.get('session'),
             'sessions_total': sel.get('sessions_total'),
+            'block': sel.get('block'), 'game_in_block': sel.get('game_in_block'),
+            'games_per_block': sel.get('games_per_block'),
+            'agent': sel.get('agent'), 'survey_due': sel.get('survey_due', True),
+            'group': sel.get('group', ''),
             # アンケートに添える条件(画面には出さない)
             'map': sel.get('map'), 'case': sel.get('case'),
             'skip_budget': sel.get('skip_budget'),
@@ -2293,6 +2359,8 @@ class WebGamePlay:
         self._other_range = None
         # 指示はブラウザ側に出す(ゲーム画面を隠さないため)
         game.instruction_chooser = self.ask_instruction
+        # 指示画面に出す相方の名前(パターン4では条件ごとに別の名前)
+        game.ai_display_name = (self.selection or {}).get('agent') or None
         self._install_agent_hook(game)
 
         # pygame の初期化後に pygame.mouse / display を差し替えたいので、フックしておく。
@@ -2919,7 +2987,8 @@ SURVEY_FIELDS = (['participant_id', 'session', 'pattern', 'timestamp']
                  + ['connection_mean', 'coordination_mean', 'rapport']
                  + INSTR_FIELDS + ['instr_mean']
                  + FREE_TEXT_FIELDS
-                 + ['map', 'skip_budget', 'case', 'served', 'makespan_s'])
+                 + ['map', 'skip_budget', 'case', 'served', 'makespan_s',
+                    'agent', 'block'])
 
 
 @app.post('/api/survey')
@@ -2979,6 +3048,7 @@ async def survey(req: Request):
         'map': body.get('map'), 'skip_budget': body.get('skip_budget'),
         'case': body.get('case'), 'served': body.get('served'),
         'makespan_s': body.get('makespan_s'),
+        'agent': body.get('agent') or '', 'block': body.get('block'),
     }
     for name, v in zip(CCR_CONNECTION_FIELDS, conn):
         row[name] = v
@@ -2999,6 +3069,8 @@ async def survey(req: Request):
         'パターン': body.get('pattern'),
         'グループ': body.get('group', ''),
         'セッション番号': body.get('session'),
+        'エージェント': body.get('agent') or '',
+        'ブロック内の回': body.get('game_in_block') or 1,
         '地図': body.get('map'),
         '割り込み許容数': body.get('skip_budget'),
         '注文の組み合わせ番号': body.get('case'),
@@ -3174,9 +3246,12 @@ async def resume(participant: str = ''):
     pid = str(row.get('参加者番号', '')).strip()
     rec = assignment_for(pid, EXPERIMENT_PATTERN)
     done = int(rec.get('done', 0))
-    total = len(rec.get('order') or [])
+    total = total_games_of(rec, EXPERIMENT_PATTERN)
+    gpb = games_per_block_of(EXPERIMENT_PATTERN)
     return JSONResponse({'ok': True, 'participant_id': pid,
                          'session': min(done + 1, total), 'total': total,
+                         'agent': (agent_label(min(done // gpb, len(rec['order']) - 1))
+                                   if gpb > 1 else None),
                          'finished': done >= total})
 
 
@@ -3199,12 +3274,16 @@ async def assignment(participant: str = '', pattern: int = DEFAULT_PATTERN):
     pat = pattern_of(pattern)
     rec = assignment_for(pid, pat)
     done = int(rec.get('done', 0))
-    total = len(rec['order'])
-    nxt = rec['order'][min(done, total - 1)]
+    gpb = games_per_block_of(pat)
+    total = total_games_of(rec, pat)
+    cond_idx = min(done // gpb, len(rec['order']) - 1)
+    nxt = rec['order'][cond_idx]
     label = dict((m, l) for m, l, _ in MAP_CHOICES).get(nxt['map'], nxt['map'])
     return JSONResponse({'ok': True, 'participant_id': pid, 'pattern': pat,
                          'done': done,
                          'total': total, 'session': min(done + 1, total),
+                         'agent': agent_label(cond_idx) if gpb > 1 else None,
+                         'game_in_block': done % gpb + 1, 'games_per_block': gpb,
                          'finished': done >= total, 'next_map_label': label})
 
 

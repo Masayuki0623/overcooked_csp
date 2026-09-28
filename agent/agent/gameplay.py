@@ -259,7 +259,8 @@ class GamePlay(Game):
             for idx, agent in enumerate(self.sim_agents):
                 color = getattr(agent, 'color', None)
                 players.append({
-                    'name': 'あなた' if idx == self.idx_human else 'AI',
+                    'name': ('あなた' if idx == self.idx_human
+                             else (getattr(self, 'ai_display_name', None) or 'AI')),
                     # ゲーム画面と同じキャラ画像を使う (misc/game/graphics/agent-<色>.png)
                     'sprite': f'agent-{color}' if color else None,
                 })
