@@ -46,28 +46,28 @@ class SimpleOnion(Recipe):
 
 class TomatoLettuceSalad(Recipe):
     def __init__(self):
-        Recipe.__init__(self, 'TomatoLettuceSalad', 30, 15)
+        Recipe.__init__(self, 'TomatoLettuceSalad', 45, 15)
         self.add_ingredient(Tomato(state_index=2))
         self.add_ingredient(Lettuce(state_index=2))
         self.add_goal()
 
 class OnionTomatoSalad(Recipe):
     def __init__(self):
-        Recipe.__init__(self, 'OnionTomatoSalad', 30, 15)
+        Recipe.__init__(self, 'OnionTomatoSalad', 45, 15)
         self.add_ingredient(Onion(state_index=2))
         self.add_ingredient(Tomato(state_index=2))
         self.add_goal()
 
 class OnionLettuceSalad(Recipe):
     def __init__(self):
-        Recipe.__init__(self, 'OnionLettuceSalad', 30, 15)
+        Recipe.__init__(self, 'OnionLettuceSalad', 45, 15)
         self.add_ingredient(Onion(state_index=2))
         self.add_ingredient(Lettuce(state_index=2))
         self.add_goal()
 
 class FullSalad(Recipe):
     def __init__(self):
-        Recipe.__init__(self, 'FullSalad', 40, 20)
+        Recipe.__init__(self, 'FullSalad', 45, 20)
         self.add_ingredient(Tomato(state_index=2))
         self.add_ingredient(Lettuce(state_index=2))
         self.add_ingredient(Onion(state_index=2))
