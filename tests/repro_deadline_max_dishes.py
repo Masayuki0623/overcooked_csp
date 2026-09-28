@@ -57,6 +57,7 @@ def new_ai(limit=None):
     ai.gui_constraint_input = ''
     ai.active_constraints = []
     ai.time_limit_seconds = limit
+    ai.fixed_objective = False   # この式そのものを試すテストなので有効にする
     return ai
 
 

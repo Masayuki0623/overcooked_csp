@@ -67,6 +67,7 @@ def make(budget):
     ai.gui_constraint_input = ''
     ai.active_constraints = []
     ai.time_limit_seconds = 200
+    ai.fixed_objective = False   # 残り時間の式そのものを試すので有効にする
     return env, ai
 
 

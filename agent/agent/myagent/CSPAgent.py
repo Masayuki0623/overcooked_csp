@@ -146,6 +146,10 @@ class CSPAgent:
         # このゲームの制限時間(秒)。None なら時間制限なしとして扱い、
         # これまでどおり makespan だけを最小化する。
         self.time_limit_seconds = None
+        # 目的関数は固定(makespan だけ)。残り時間で「出せる品数」へ切り替える
+        # 式も残してあるが、終盤に計画が入れ替わって挙動がおかしくなるので
+        # 使わない。使うのは、それ自体を試すテストだけ(False にして呼ぶ)。
+        self.fixed_objective = True
         # 2人ぶんの割り当てをソルバーに決めさせるか。
         # True にすると、どちらがどの作業をやると速いかを、それぞれの
         # 位置と移動時間から計算して割り振る。相手が人間でも同じ。
@@ -7151,6 +7155,9 @@ class CSPAgent:
         盤面の時刻から引いて求める。実時間の時計は見ない
         (docs/layers.md 決まり3)。
         """
+        if getattr(self, 'fixed_objective', True):
+            # 目的関数は固定。残り時間は見ない(__init__ の注記)。
+            return None
         limit = getattr(self, 'time_limit_seconds', None)
         if limit is None:
             _al = getattr(env, 'arglist', None)
