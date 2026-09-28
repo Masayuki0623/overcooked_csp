@@ -238,6 +238,25 @@
   #overlay button:disabled { opacity: .55; }
   #overlay .big { font-size: 20px; font-weight: 600; margin-bottom: 10px; }
   /* ---- 最初の選択(チュートリアル/練習/実験) ---- */
+  /* 同意と参加者情報。長い文を読ませるので、行間を広めに取る。 */
+  .consent { text-align: left; max-width: 560px; margin: 0 auto; }
+  .consent .big { text-align: center; }
+  .consent .c-sec { margin: 14px 0; }
+  .consent .c-h { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+  .consent .c-t { font-size: 14px; line-height: 1.9; color: var(--text); }
+  .consent input[type="text"], .consent input[type="number"] {
+    width: 100%; margin-top: 6px; padding: 10px 12px; font-size: 16px;
+    background: var(--btn-bg); color: var(--text);
+    border: 1px solid var(--btn-line); border-radius: 8px;
+  }
+  .consent .c-checks { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
+  .consent .c-chk {
+    display: flex; align-items: flex-start; gap: 10px; font-size: 14px;
+    line-height: 1.7; padding: 10px 12px; background: var(--btn-bg);
+    border: 1px solid var(--btn-line); border-radius: 8px; cursor: pointer;
+  }
+  .consent .c-chk input { margin-top: 3px; width: 18px; height: 18px; flex: 0 0 auto; }
+  .consent .go { margin-top: 16px; text-align: center; }
   .modes { display: flex; flex-direction: column; gap: 10px; margin: 14px 0 4px; }
   .modes button {
     display: block; width: 100%; text-align: left; padding: 12px 14px;
@@ -1621,6 +1640,139 @@
       ] },
   ];
 
+  // ---- 同意と参加者情報 ---------------------------------------------
+  // 同意する前は、いかなるデータも記録しない。同意を飛ばす隠し口は作らない。
+  // 動作確認のときは ?test=1 を付ける。その回は「テスト実行」として
+  // 名簿に印が付き、分析から外せる。
+  // 行は配列で持つ。文字列の中に改行の記号を書くと、書き出しのときに
+  // 実際の改行に化けて JS が壊れることがある(実際に一度壊した)。
+  const CONSENT_TEXT = [
+    ['■ この実験について', [
+      'AIと協力して料理を作るゲームをプレイしていただき、',
+      '協力のしやすさについてお伺いします。']],
+    ['■ 所要時間', [
+      '約35分',
+      '・操作説明と練習：約10分',
+      '・本番のプレイ：ゲーム8回（各90秒）とアンケート8回',
+      '・終了後の説明：約5分']],
+    ['■ データの取り扱い', [
+      '・回答は参加者番号で管理し、お名前は分析に使用しません',
+      '・研究発表や論文において、個人が特定される形で公表することはありません',
+      '・お名前と参加者番号の対応表は、分析終了後に破棄します',
+      '・記録するのは、ゲーム中の操作履歴とアンケートの回答のみです']],
+    ['■ 参加は任意です', [
+      '・途中でやめたいと思われた場合、いつでも中断できます',
+      '・中断・辞退によって不利益を受けることは一切ありません',
+      '・中断された場合、それまでのデータは破棄します']],
+  ];
+  const CONSENT_CHECKS = [
+    '上記の説明を読み、内容を理解しました',
+    '参加は任意であり、いつでも中断できることを理解しました',
+    'データの取り扱いについて理解し、同意します',
+    '上記に同意し、実験に参加します',
+  ];
+  const DEBRIEF_TEXT = [
+    'この実験では、AIが指示にどれだけ早く応じるかを',
+    '4段階で変えていました。',
+    '',
+    '指示がすぐ反映される回と、なかなか反映されない回が',
+    'あったはずです。その違いによって、AIとの協力の感じ方が',
+    'どう変わるかを調べています。',
+    '',
+    '事前にお伝えしなかったのは、意識して違いを探してしまうと',
+    '自然な感想が得られなくなるためです。ご理解いただければ幸いです。',
+    '',
+    'ご質問があれば、いつでもお尋ねください。',
+  ];
+
+  let consentInfo = null;
+
+  function showConsent() {
+    fetch('/api/consent').then(r => r.json()).then((info) => {
+      consentInfo = info;
+      renderConsent();
+    }).catch(() => { consentInfo = { contact: {}, experience: [] }; renderConsent(); });
+  }
+
+  function renderConsent() {
+    const c = (consentInfo && consentInfo.contact) || {};
+    const lines = (a) => a.map(esc).join('<br>');
+    const body = CONSENT_TEXT.map(([head, ls]) =>
+      `<div class="c-sec"><div class="c-h">${esc(head)}</div>` +
+      `<div class="c-t">${lines(ls)}</div></div>`).join('');
+    const contact =
+      '<div class="c-sec"><div class="c-h">■ 連絡先</div><div class="c-t">' +
+      [c.name, c.affiliation, c.email].filter(Boolean).map(esc).join('<br>') +
+      '</div></div>';
+    const checks = CONSENT_CHECKS.map((t, i) =>
+      `<label class="c-chk"><input type="checkbox" data-i="${i}">` +
+      `<span>${esc(t)}</span></label>`).join('');
+    showOverlay(
+      '<div class="consent">' +
+      '<div class="big">実験へのご協力のお願い</div>' +
+      body + contact +
+      '<div class="c-t">ご不明な点がありましたら、いつでもお尋ねください。</div>' +
+      `<div class="c-checks">${checks}</div>` +
+      '<div class="err" id="c-err"></div>' +
+      '<div class="go"><button class="primary" id="c-go" disabled>同意して開始する</button> ' +
+      '<button id="c-no">同意しない（終了）</button></div>' +
+      '</div>');
+    const boxes = [...el.overlayText.querySelectorAll('.c-chk input')];
+    const go = document.getElementById('c-go');
+    const sync = () => { go.disabled = !boxes.every(b => b.checked); };
+    boxes.forEach(b => b.addEventListener('change', sync));
+    go.addEventListener('click', () => renderProfile(boxes.map(b => b.checked)));
+    document.getElementById('c-no').addEventListener('click', () => {
+      // 何も記録せずに終わる。
+      showOverlay('<div class="big">ありがとうございました</div>' +
+        '<div class="sub">このまま画面を閉じてください。<br>' +
+        'データは記録していません。</div>');
+    });
+  }
+
+  function renderProfile(agreed) {
+    const exps = ((consentInfo && consentInfo.experience) || []).map((x, i) =>
+      `<label class="c-chk"><input type="radio" name="exp" value="${esc(x.id)}">` +
+      `<span>${esc(x.label)}</span></label>`).join('');
+    showOverlay(
+      '<div class="consent">' +
+      '<div class="big">参加者情報の入力</div>' +
+      '<div class="c-sec"><div class="c-h">お名前（必須）</div>' +
+      '<div class="c-t">名簿にのみ記録し、分析には使用しません。</div>' +
+      '<input type="text" id="pf-name" autocomplete="off" spellcheck="false"></div>' +
+      '<div class="c-sec"><div class="c-h">年齢（任意）</div>' +
+      '<input type="number" id="pf-age" min="1" max="119" inputmode="numeric"></div>' +
+      '<div class="c-sec"><div class="c-h">料理ゲームの経験（必須）</div>' +
+      '<div class="c-t">Overcooked などの協力型料理ゲームを' +
+      'プレイしたことがありますか。</div>' +
+      `<div class="c-checks">${exps}</div></div>` +
+      '<div class="err" id="c-err"></div>' +
+      '<div class="go"><button class="primary" id="pf-go">この内容で始める</button></div>' +
+      '</div>');
+    document.getElementById('pf-go').addEventListener('click', () => {
+      const err = document.getElementById('c-err');
+      const name = (document.getElementById('pf-name').value || '').trim();
+      const age = (document.getElementById('pf-age').value || '').trim();
+      const exp = el.overlayText.querySelector('input[name="exp"]:checked');
+      if (!name) { err.textContent = 'お名前を入れてください'; return; }
+      if (!exp) { err.textContent = 'ゲーム経験を選んでください'; return; }
+      err.textContent = '登録しています...';
+      const isTest = new URLSearchParams(location.search).has('test');
+      fetch('/api/consent', { method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agreed, name, age, game_experience: exp.value,
+                               pattern: 3, test: isTest }) })
+        .then(r => r.json())
+        .then((r) => {
+          if (!r.ok) throw new Error(r.error || '登録できませんでした');
+          saveParticipant(r.participant_id);
+          loadAssignment();
+          showStart();
+        })
+        .catch((e) => { err.textContent = String(e.message || e); });
+    });
+  }
+
   function renderModePick() {
     const item = (id, name, why) =>
       `<button type="button" data-mode="${id}">` +
@@ -1629,18 +1781,21 @@
       '<div class="stage-pick">' +
       '<div class="big">どれをやりますか</div>' +
       '<div class="modes">' +
-      item('tutorial', 'チュートリアル',
+      item('tutorial', 'チュートリアル（約5分）',
            'はじめての人はこちら。サラダ → スープ → ジュースの順に<br>' +
            '1人で作り方を覚えてから、AI と一緒に遊びます。') +
-      item('practice', '練習',
-           '本番と同じ条件で、好きなだけ練習できます。<br>' +
-           '地図も注文も毎回くじ引きです。記録は残りません。') +
-      item('custom', '条件を指定して練習',
-           '地図・注文・指示の効き方に加えて、煮込み時間や切る回数、<br>' +
-           'エンドレス注文なども自分で決めて遊べます。記録は残りません。') +
-      item('experiment', '実験に参加',
-           '参加者IDを入れて、決められた順番で遊びます。<br>' +
-           '1回ごとにアンケートがあります。') +
+      item('experiment', '実験セッション（約30分）',
+           'ゲーム8回とアンケート8回。はじめに説明と同意があります。') +
+      // 練習と「条件を指定して練習」は、最初の画面には出さない。
+      // 参加者が本番前にどれだけ練習したかがばらつくと、条件の比較に
+      // 混ざる。練習は実験の流れの中で1回だけ行う。
+      // 動作確認のときは ?dev=1 で出す。
+      (DEV
+        ? item('practice', '練習（確認用）',
+               '本番と同じ条件で遊びます。記録は残りません。') +
+          item('custom', '条件を指定して練習（確認用）',
+               '地図・注文・指示の効き方などを自分で決めて遊べます。')
+        : '') +
       '</div></div>');
     el.overlayText.querySelectorAll('.modes button').forEach((b) => {
       b.addEventListener('click', () => {
@@ -1652,6 +1807,13 @@
           pick.debug = Object.assign({}, pick.debug || DEBUG_DEFAULT, { on: true });
           savePick();
           showStart();
+        } else if (b.dataset.mode === 'experiment') {
+          // 参加者番号がまだ無い = はじめての人。説明と同意から始める。
+          // 番号があるなら同意済みなので、続きのセッションから。
+          pick.pattern = 3;
+          savePick();
+          if (participantId) { loadAssignment(); showStart(); }
+          else showConsent();
         } else showStart();
       });
     });
@@ -1731,6 +1893,9 @@
       });
       return;
     }
+    // 実験セッションで参加者番号がまだ無い = 同意がまだ。説明から始める。
+    // 番号は自動で採番するので、手で入れる画面は出さない。
+    if (mode === 'experiment' && !participantId) { showConsent(); return; }
     if (participantId && !assignment) { loadAssignment(); }
     if (options) { renderPick(); return; }
     showOverlay('<div class="big">読み込み中...</div>');
@@ -1786,7 +1951,11 @@
         const sel = msg.selection;
         lastSelection = sel;
         needInstruction = sel.instruction === 'once_at_start';
-        el.cfg.textContent = `${sel.map} / ${sel.preset} / ${sel.orders.join('、')}`;
+        // 地図の名前・レシピ束・注文の一覧は、動作確認のための情報。
+        // 参加者の画面では上の帯を押し広げるだけで、スマホでは折り返して
+        // 「バグを報告」の位置までずれる。?dev=1 のときだけ出す。
+        el.cfg.textContent = DEV
+          ? `${sel.map} / ${sel.preset} / ${sel.orders.join('、')}` : '';
       }
       // 実験のセッションかどうかは、始まった時点で決まっている。終わりの
       // 知らせに条件が載っているかで判断すると、載っていない経路を通った
@@ -2097,8 +2266,13 @@
           document.body.classList.remove('survey');
           el.overlay.classList.remove('solid');
           if (last) {
-            showOverlay('<div class="big">ありがとうございました</div>' +
-              '<div class="sub">全セッションが終わりました。</div>');
+            // 終了後の説明(デブリーフィング)。何を変えていたのかを明かす。
+            showOverlay(
+              '<div class="consent">' +
+              '<div class="big">ご協力ありがとうございました</div>' +
+              '<div class="c-t">' +
+              DEBRIEF_TEXT.map(esc).join('<br>') +
+              '</div></div>');
             return;
           }
           // 続きは自動で始める。ボタンを押させると、押し忘れたまま

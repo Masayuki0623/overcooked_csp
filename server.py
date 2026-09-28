@@ -271,6 +271,43 @@ INSTRUCTION_LOG_PATH = ROOT / 'results' / 'web_instructions.csv'
 # ファイル名を英字にしてあるのは、Windows と git のあいだで日本語の
 # ファイル名が化けることがあるため。中身の見出しは日本語。
 # ------------------------------------------------------------------
+# ------------------------------------------------------------------
+# 同意と参加者の名簿。
+#
+# 名前は実験データと同じファイルに書かない。名簿だけに残し、分析には
+# 使わない。分析が終わったらこのファイルごと捨てられるようにしてある。
+# ------------------------------------------------------------------
+CONTACT_PATH = ROOT / 'config' / 'contact.json'
+ROSTER_PATH = ROOT / 'results' / 'participant_roster.csv'
+ROSTER_COLUMNS = [
+    ('参加者番号', 'p01 など。自動で採番する'),
+    ('お名前', '名簿だけに残す。実験データには書かない'),
+    ('同意した日時', ''),
+    ('完了したか', '1=8セッション全部終わった / 0=まだ、または中断'),
+    ('中断したか', '1=途中でやめた'),
+    ('テスト実行か', '1=動作確認。分析からは外す'),
+]
+ROSTER_FIELDS = [c for c, _ in ROSTER_COLUMNS]
+ROSTER_NOTES = dict(ROSTER_COLUMNS)
+
+# 料理ゲームの経験。操作の習熟度に効くので、共変量として残す。
+GAME_EXPERIENCE_CHOICES = [
+    ('none', 'まったくない'),
+    ('few', '少しある(数回程度)'),
+    ('some', 'ある程度ある(何度も遊んだことがある)'),
+    ('often', 'よくプレイする'),
+]
+
+
+def contact_info():
+    """連絡先。コードに直書きせず、config/contact.json から読む。"""
+    try:
+        return json.loads(CONTACT_PATH.read_text(encoding='utf-8'))
+    except Exception as e:
+        print(f'[server] 連絡先を読めません({CONTACT_PATH.name}): {e}', flush=True)
+        return {'name': '', 'affiliation': '', 'email': ''}
+
+
 QUAL_PATH = ROOT / 'results' / 'exp_qualitative.csv'
 QUANT_PATH = ROOT / 'results' / 'exp_quantitative.csv'
 
@@ -287,6 +324,11 @@ _COND_COLUMNS = [
      '指示した作業より先に、AI が他の作業を何個まで割り込ませてよいか'
      '(skip_budget)。0=すぐやる / inf=指示を聞かない'),
     ('注文の組み合わせ番号', ''),
+    # 名前は絶対に入れない。名簿(participant_roster.csv)にだけ残す。
+    ('年齢', '任意回答。記述統計に使う'),
+    ('ゲーム経験',
+     'none=まったくない / few=少しある / some=ある程度ある / often=よくプレイする。'
+     '操作の習熟度に効くので共変量として使う'),
 ]
 _SCORE_COLUMNS = [
     ('提供数', 'その回に出せた品数(ゲーム内スコア)'),
@@ -420,6 +462,8 @@ INSTRUCTION_COLUMNS = [
 INSTRUCTION_FIELDS = [name for name, _ in INSTRUCTION_COLUMNS]
 INSTRUCTION_NOTES = {name: note for name, note in INSTRUCTION_COLUMNS}
 _assign_lock = threading.Lock()
+# 参加者番号の採番。番号が重なると別人の記録が混ざるので、1人ずつにする。
+_roster_lock = threading.Lock()
 
 
 # 実験のパターン。条件の組み合わせ(地図2種 × 指示の効き方3種 = 6通り)は
@@ -644,6 +688,68 @@ def note_session_done(participant, pattern=DEFAULT_PATTERN):
             return
         rec['done'] = min(len(rec['order']), int(rec.get('done', 0)) + 1)
         _save_assignments(data)
+
+
+def _read_roster():
+    """名簿を読む。無ければ空。"""
+    if not ROSTER_PATH.exists():
+        return []
+    try:
+        with ROSTER_PATH.open('r', encoding='utf-8-sig', newline='') as f:
+            rows = list(csv.DictReader(f))
+    except OSError as e:
+        print(f'[server] 名簿を読めません: {e}', flush=True)
+        return []
+    # 見出しのすぐ下の説明行は、参加者ではない。
+    return [r for r in rows
+            if str(r.get('参加者番号', '')).strip().lower().startswith('p')
+            and str(r.get('参加者番号', '')).strip()[1:].isdigit()]
+
+
+def next_participant_id():
+    """次の参加者番号。名簿の最大値の次を使う。
+
+    番号は絶対に重ならないようにする。重なると、別人の記録が同じIDで
+    混ざってしまい、あとから分けられない。
+    """
+    top = 0
+    for r in _read_roster():
+        try:
+            top = max(top, int(str(r.get('参加者番号', '')).strip()[1:]))
+        except (ValueError, IndexError):
+            continue
+    return f'p{top + 1:02d}'
+
+
+def _update_roster(participant, **changes):
+    """名簿の1行を書き換える。名前は触らない。"""
+    rows = []
+    if ROSTER_PATH.exists():
+        try:
+            with ROSTER_PATH.open('r', encoding='utf-8-sig', newline='') as f:
+                rows = list(csv.DictReader(f))
+        except OSError:
+            return False
+    hit = False
+    for r in rows:
+        if str(r.get('参加者番号', '')).strip() == participant:
+            r.update({k: v for k, v in changes.items()})
+            hit = True
+    if not hit:
+        return False
+    try:
+        with CrossProcessLock(ROSTER_PATH):
+            with ROSTER_PATH.open('w', encoding='utf-8', newline='') as f:
+                f.write('﻿')
+                w = csv.DictWriter(f, fieldnames=ROSTER_FIELDS,
+                                   extrasaction='ignore')
+                w.writeheader()
+                for r in rows:
+                    w.writerow(r)
+    except OSError as e:
+        print(f'[server] 名簿を更新できません: {e}', flush=True)
+        return False
+    return True
 
 
 def append_csv(path, fields, row, notes=None):
@@ -1116,6 +1222,9 @@ class WebGamePlay:
                     'recipes': list(sets[case]), 'picked_by': 'experiment',
                     'participant': participant, 'session': done + 1,
                     'group': g['name'], 'row': g['row'],
+                    # 同意のときに受け取った分。名前は入れない。
+                    'age': rec.get('age'),
+                    'game_experience': rec.get('game_experience', ''),
                     'pattern': pattern,
                     'endless': spec['endless'], 'seconds': spec['seconds'],
                     'pots': spec.get('pots', 1),
@@ -1264,6 +1373,11 @@ class WebGamePlay:
             # 同じ条件でやり直しになり、やり直した回が正式な1回になる。
             note_session_done(sel['participant'],
                               sel.get('pattern', DEFAULT_PATTERN))
+            # 全部終わったら名簿に印を付ける。参加状況の管理のためだけに使う。
+            _rec = assignment_for(sel['participant'],
+                                  sel.get('pattern', DEFAULT_PATTERN))
+            if int(_rec.get('done', 0)) >= len(_rec.get('order') or []):
+                _update_roster(sel['participant'], **{'完了したか': 1})
 
     def _log_instructions(self, reason):
         """この回に出した指示を、1回1行で残す。
@@ -1288,6 +1402,8 @@ class WebGamePlay:
             'セッション番号': sel.get('session'),
             '地図': sel.get('map'), '割り込み許容数': sel.get('skip_budget'),
             '注文の組み合わせ番号': sel.get('case'),
+            '年齢': sel.get('age'),
+            'ゲーム経験': sel.get('game_experience', ''),
         }
         score = {
             '提供数': res.get('served'), '失敗数': res.get('failed'),
@@ -1931,12 +2047,15 @@ class WebGamePlay:
         original_request = game._request_instruction
 
         def request_instruction(trigger='space', allow_text_fallback=True):
-            # 指示できるのは「AI がいま着手できる作業」だけ。選べる作業が
-            # そろっていないときに何も起きないと、ボタンが壊れているように
-            # 見えるので知らせる。1つしか無いときも出さない(選択肢が1枚
-            # だけの画面は「選ぶ」ことにならない)。
+            # 指示できるのは「AI がいま着手できる作業」だけ。そろっていない
+            # ときは、何も出さずに見送る。
+            #
+            # 以前は「いま指示できる作業がそろっていません」と知らせていた。
+            # だが実験の本番では、この知らせ自体が邪魔になる。指示は3工程
+            # ごとに自動で出るので、参加者は待っているだけでよく、出ない
+            # ことを気にする必要がない。知らせると「何かしそこねた」と
+            # 思わせてしまう。
             if len(game._get_unexecuted_task_candidates()) < MIN_INSTRUCTION_CHOICES:
-                self.notify('いま AI に指示できる作業がそろっていません')
                 return None
             return original_request(trigger=trigger, allow_text_fallback=False)
 
@@ -2617,6 +2736,8 @@ async def survey(req: Request):
         '地図': body.get('map'),
         '割り込み許容数': body.get('skip_budget'),
         '注文の組み合わせ番号': body.get('case'),
+        '年齢': body.get('age'),
+        'ゲーム経験': body.get('game_experience', ''),
         'つながり平均': connection_mean,
         '協調平均': coordination_mean,
         'ラポール': row['rapport'],
@@ -2638,6 +2759,100 @@ async def survey(req: Request):
     print(f"[server] アンケートを保存しました: {pid} session={row['session']} "
           f"ラポール {row['rapport']} (つながり {connection_mean} / "
           f"連携 {coordination_mean}) 指示 {row['instr_mean']}")
+    return JSONResponse({'ok': True})
+
+
+@app.get('/api/consent')
+async def consent_text():
+    """説明文に差し込む連絡先と、ゲーム経験の選択肢。
+
+    本文そのものは画面側に置く(読み上げや文字の大きさを画面側で
+    整えるため)。ここから渡すのは、コードに直書きしたくない連絡先だけ。
+    """
+    return JSONResponse({
+        'contact': contact_info(),
+        'experience': [{'id': i, 'label': t} for i, t in GAME_EXPERIENCE_CHOICES],
+    })
+
+
+@app.post('/api/consent')
+async def consent(req: Request):
+    """同意を受け取って、参加者番号を採番する。
+
+    ここで初めて記録が始まる。同意する前は、何も残さない。
+    名前は名簿(participant_roster.csv)にだけ書き、実験データには
+    書かない。年齢とゲーム経験は分析に使うので、割り当てと一緒に残す。
+    """
+    body = await req.json()
+    agreed = body.get('agreed') or []
+    if not isinstance(agreed, list) or len(agreed) < 4 or not all(agreed):
+        return JSONResponse({'ok': False, 'error': '同意の項目が足りません'},
+                            status_code=400)
+    name = str(body.get('name') or '').strip()[:100]
+    if not name:
+        return JSONResponse({'ok': False, 'error': 'お名前を入れてください'},
+                            status_code=400)
+    exp = str(body.get('game_experience') or '').strip()
+    if exp not in {i for i, _ in GAME_EXPERIENCE_CHOICES}:
+        return JSONResponse({'ok': False, 'error': 'ゲーム経験を選んでください'},
+                            status_code=400)
+    age = body.get('age')
+    try:
+        age = int(age) if str(age).strip() != '' else None
+    except (TypeError, ValueError):
+        age = None
+    if age is not None and not (0 < age < 120):
+        age = None
+    is_test = bool(body.get('test'))
+
+    # 錠は1つだけ。append_csv は自分でファイル錠を取るので、ここで
+    # 同じファイルの錠を先に取ると自分自身を待ち続けて止まる(実測)。
+    # assignment_for も中で _assign_lock を取るので、外では取らない。
+    with _roster_lock:
+        pid = next_participant_id()
+        append_csv(ROSTER_PATH, ROSTER_FIELDS, {
+            '参加者番号': pid,
+            'お名前': name,
+            '同意した日時': datetime.now().isoformat(timespec='seconds'),
+            '完了したか': 0,
+            '中断したか': 0,
+            'テスト実行か': int(is_test),
+        }, notes=ROSTER_NOTES)
+
+    # 年齢とゲーム経験、そして8セッションぶんの割り当てをここで確定する。
+    pattern = pattern_of(body.get('pattern') or 3)
+    rec = assignment_for(pid, pattern)
+    with _assign_lock, CrossProcessLock(ASSIGN_PATH):
+        data = _load_assignments()
+        key = assignment_key(pid, pattern)
+        if key in data:
+            data[key]['age'] = age
+            data[key]['game_experience'] = exp
+            data[key]['test'] = int(is_test)
+            _save_assignments(data)
+    g = design.group_of(pid)
+    print(f'[server] 同意を受け取りました: {pid} ({g["name"]}) '
+          f'年齢={age} 経験={exp}' + (' [テスト実行]' if is_test else ''), flush=True)
+    # 割り当ての中身は参加者に見せない。
+    return JSONResponse({'ok': True, 'participant_id': pid,
+                         'total': len(rec.get('order') or [])})
+
+
+@app.post('/api/withdraw')
+async def withdraw(req: Request):
+    """途中でやめた。名簿に印を付ける。
+
+    そのセッション以降は記録しない。既に残っている分には、あとから
+    分けられるように印だけ付ける(消すかどうかは人が決める)。
+    """
+    body = await req.json()
+    pid = str(body.get('participant_id') or '').strip()
+    if not pid:
+        return JSONResponse({'ok': False, 'error': '参加者番号がありません'},
+                            status_code=400)
+    ok = _update_roster(pid, **{'中断したか': 1})
+    print(f'[server] 中断の申し出: {pid} (名簿の更新 {"成功" if ok else "失敗"})',
+          flush=True)
     return JSONResponse({'ok': True})
 
 
