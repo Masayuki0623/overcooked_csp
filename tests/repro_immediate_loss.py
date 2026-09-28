@@ -136,8 +136,34 @@ for d, p in ai.get_instruction_candidates(state_of(env)):
     seen[p['verb'] + ' ' + p['obj']] = r['immediate_loss_seconds']
 check('指示ごとに L(0) は変わる(区別できる)', len(set(seen.values())) > 1, str(seen))
 
+# 残り時間に左右されないこと。L は「指示で段取りがどれだけ悪くなったか」で、
+# ゲームがあと何秒あるかとは別の話。入れたままだと終盤で壊れる
+# (実測: 残り30秒で L=-11.4、残り1秒で目的関数の時間項が 0 に潰れる)。
+by_remaining = {}
+for remaining in (None, 120, 30, 1):
+    env, ai = make(0)
+    ai.time_limit_seconds = remaining
+    cands = {p['verb'] + ' ' + p['obj']: (d, p)
+             for d, p in ai.get_instruction_candidates(state_of(env))}
+    d, p = cands[TARGET]
+    r = ai.estimate_instruction_time_loss(
+        state_of(env),
+        {'task': (d, p), 'status': 'pending',
+         'skip_budget': 0, 'remaining_skip_budget': 0},
+        skip_budget=0)
+    by_remaining[remaining] = (r['loss_seconds'], r['status'])
+check('残り時間に関係なく L は同じ',
+      len({v[0] for v in by_remaining.values()}) == 1, str(by_remaining))
+check('残り1秒でも L は負にならない',
+      (by_remaining[1][0] or 0) >= 0, str(by_remaining[1]))
+check('残り時間のせいで品数が変わった扱いにならない',
+      all(v[1] == 'ok' for v in by_remaining.values()), str(by_remaining))
+
 # 6
 SRC = inspect.getsource(CSPAgent.estimate_instruction_time_loss)
+check('L の計測では、残り時間の制約も外している',
+      'probe.time_limit_seconds = None' in SRC,
+      '残したままだと終盤で L が壊れる')
 check('解き比べるとき、指示が持つ割り込み許容数も差し替えている',
       "_p['skip_budget'] = budget" in SRC
       and "_p['remaining_skip_budget'] = budget" in SRC,

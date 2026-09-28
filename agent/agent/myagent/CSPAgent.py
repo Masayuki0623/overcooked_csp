@@ -423,6 +423,21 @@ class CSPAgent:
             return str(fixed_task_id[1]), str(fixed_task_id[2])
         return None
 
+    @staticmethod
+    def _instruction_outcome_when_gone(pending):
+        """計画から消えた指示を、何として残すか。
+
+        作業が計画から消える理由は2つある。誰かがやり終えたか、その注文
+        自体が期限切れで消えたか。後者は誰もやっていないので done にすると
+        記録が嘘になる(追従性を測る実験なので、ここを混ぜると結果の意味が
+        変わる)。AI も人も一度も手を付けていなければ、注文が消えたほうと
+        みなして vanished とする。
+        """
+        did_ai = (pending.get('execution_logged')
+                  or pending.get('started_env_time') is not None)
+        did_human = pending.get('human_done_env_time') is not None
+        return 'done' if (did_ai or did_human) else 'vanished'
+
     def _find_group_task_indices(self, tasks, action):
         """指示された行動 (動詞, 対象) に一致するタスクを全部探す。
 
@@ -552,7 +567,7 @@ class CSPAgent:
 
             for pending in list(pending_instr):
                 try:
-                    if pending.get('status') in {'done', 'canceled'}:
+                    if pending.get('status') in {'done', 'canceled', 'vanished'}:
                         continue
                     init_budget = pending.get('skip_budget')
                     if init_budget is None:
@@ -578,7 +593,7 @@ class CSPAgent:
                                   f'action={action} fixed_id={fixed_task_id} '
                                   f'計画にある作業={sorted({(t.get("verb"), t.get("obj")) for t in tasks})}',
                                   flush=True)
-                            pending['status'] = 'done'
+                            pending['status'] = self._instruction_outcome_when_gone(pending)
                             continue
                         group_indices = [matched_idx]
 
@@ -593,7 +608,7 @@ class CSPAgent:
                               f'action={action} '
                               f'対象={[tasks[i].get("id") for i in before_filter]}',
                               flush=True)
-                        pending['status'] = 'done'
+                        pending['status'] = self._instruction_outcome_when_gone(pending)
                         continue
 
                     target_ids = {tasks[idx].get('id') for idx in group_indices}
@@ -793,7 +808,7 @@ class CSPAgent:
         """タスク完了時に pending_instructions の remaining_skip_budget を更新しログする。"""
         pending_instr = list(getattr(self, '_pending_instructions', []))
         for pending in pending_instr:
-            if pending.get('status') in {'done', 'canceled'}:
+            if pending.get('status') in {'done', 'canceled', 'vanished'}:
                 continue
             if pending.get('skip_budget') is None:
                 continue
@@ -6817,7 +6832,7 @@ class CSPAgent:
             for pending in list(pending_instr):
                 try:
                     status = pending.get('status', 'pending')
-                    if status in {'done', 'canceled'}:
+                    if status in {'done', 'canceled', 'vanished'}:
                         continue
 
                     selected_task = pending.get('task')
@@ -7559,7 +7574,7 @@ class CSPAgent:
             # 縛った結果、計画の何番目に来たかを後で照合するために控える
             for _p in (list(getattr(env, '_pending_instructions', []) or [])
                        + list(getattr(self, '_pending_instructions', []) or [])):
-                if _p.get('status') in {'done', 'canceled'}:
+                if _p.get('status') in {'done', 'canceled', 'vanished'}:
                     continue
                 _a = self._extract_instruction_action(_p)
                 if _a:
@@ -7865,6 +7880,16 @@ class CSPAgent:
             # L の計測は f と f'(d) の両方が最適解でないと意味がない。
             # 別スレッドで解いていてゲームを止めないので、上限は外す。
             probe.solve_deterministic_limit = None
+            # 残り時間の制約も外す。L は「指示によって段取りがどれだけ
+            # 悪くなったか」で、ゲームがあと何秒あるかとは別の話。
+            # 入れたままだと、終盤に2つの壊れ方をする。
+            #   ・品数が変わると makespan の比較が成立せず、L が負になる
+            #     (実測: 残り30秒で L=-11.4)
+            #   ・残り時間内に1品も出せない場面では、目的関数の時間項が
+            #     0 に潰れて何も測らなくなる(実測: 残り1秒)
+            # 外せば L は盤面と指示だけで決まり、セッションのどの時点でも
+            # 同じ意味になる。
+            probe.time_limit_seconds = None
 
             env_probe = _dcopy(env)
             # 対象の指示だけが載った状態にする(A3: 指示は同時に1つだけ)。
