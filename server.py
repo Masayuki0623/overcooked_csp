@@ -812,6 +812,50 @@ def survey_owed_for(participant):
     return _load_survey_owed().get(pid)
 
 
+def map_rank(map_name, participant, makespan, completed):
+    """同じ地図で、これまでの参加者の中で何番目に速かったか。
+
+    ゲームのあとに見せて、次の回への張り合いにする(参加者の意欲が
+    落ちるという相談から)。比べる条件:
+      - 同じ地図。注文の組み合わせ・割り込み許容数・パターンは問わない
+      - 3品を出し切った回だけ。エンドレスの回(90秒固定)は外す
+    人ごとに一番速い時間で数える。今の回はまだ記録に無いので、ここで
+    足してから数える。
+
+    戻り値: {'total': 人数, 'rank': 順位(未完了なら None), 'time': 自分の秒,
+             'best': 最速の秒}
+    """
+    best = {}
+    try:
+        with SESSION_LOG_PATH.open('r', encoding='utf-8-sig', newline='') as f:
+            for r in csv.DictReader(f):
+                pid = str(r.get('participant_id') or '').strip()
+                if not pid or pid.lower().startswith('zz'):
+                    continue                     # 動作確認の番号は数えない
+                if (r.get('map') != map_name
+                        or r.get('accepted') != '1' or r.get('completed') != '1'):
+                    continue
+                try:
+                    t = float(r.get('makespan_s') or '')
+                except ValueError:
+                    continue
+                if t >= 90.0:
+                    continue                     # エンドレスの回(時間切れ)は比べない
+                best[pid] = min(best.get(pid, float('inf')), t)
+    except OSError:
+        pass
+    pid = str(participant or '').strip()
+    if completed and pid:
+        best[pid] = min(best.get(pid, float('inf')), float(makespan))
+    total = len(best)
+    if not completed or pid not in best:
+        return {'total': total, 'rank': None}
+    mine = best[pid]
+    rank = 1 + sum(1 for p, t in best.items() if p != pid and t < mine)
+    return {'total': total, 'rank': rank, 'time': round(mine, 1),
+            'best': round(min(best.values()), 1)}
+
+
 def _read_roster():
     """名簿を読む。無ければ空。"""
     if not ROSTER_PATH.exists():
@@ -1657,6 +1701,7 @@ class WebGamePlay:
                         'result': {'served': res.get('served'),
                                    'failed': res.get('failed'),
                                    'reward': res.get('reward'),
+                                   'rank': res.get('rank'),
                                    'makespan_s': round(float(
                                        getattr(env, 'current_time', 0.0) or 0.0), 1)},
                         'ts': datetime.now().isoformat(timespec='seconds')})
@@ -2482,6 +2527,13 @@ class WebGamePlay:
                         'aborted': bool(self._aborted),
                         'makespan_s': round(float(getattr(self.env, 'current_time', 0.0) or 0.0), 1),
                     }
+                    # 同じ地図での順位。結果と一緒に見せる。
+                    _sel = self.selection or {}
+                    if _sel.get('participant') and _sel.get('map'):
+                        self.result['rank'] = self._safe(
+                            '順位の計算', map_rank, _sel['map'],
+                            _sel['participant'], self.result['makespan_s'],
+                            bool(success) and not self._aborted)
                     self.finished_meta[self.game_id] = {
                         'experiment': self.experiment_info(),
                         'selection': self.selection_info(),

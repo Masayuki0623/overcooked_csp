@@ -1641,6 +1641,19 @@
     return surveyGate;
   }
 
+  // 同じ地図での順位。次の回への張り合いに出す。
+  function rankLine(res) {
+    const r = res && res.rank;
+    if (!r || !r.total) return '';
+    if (r.rank == null) {
+      return `<div class="sub rank">この地図は、これまで ${r.total} 人が完了しています</div>`;
+    }
+    const top = r.rank === 1 ? ' 🏆 最速です！' :
+      (r.best != null && r.time != null ? ` (最速 ${r.best} 秒)` : '');
+    return `<div class="sub rank">この地図での順位 <b>${r.rank}/${r.total}</b>` +
+           `${r.time != null ? ` (${r.time} 秒)` : ''}${top}</div>`;
+  }
+
   // 出し忘れがあれば、それを先に片付ける。出したら true。
   function showOwedSurvey(owed) {
     if (!owed || !owed.exp) return false;
@@ -1649,7 +1662,7 @@
     settled = true;              // 切断の案内で上書きしない
     showSurvey(owed.exp, res, owed.summary ||
       `<div class="sub">提供 ${res.served} 件 / 失敗 ${res.failed} 件` +
-      `<br>スコア ${res.reward}</div>`, owed.answers || null);
+      `<br>スコア ${res.reward}</div>` + rankLine(res), owed.answers || null);
     return true;
   }
 
@@ -2309,7 +2322,7 @@
         settled = true;
         const summary =
           `<div class="sub">提供 ${msg.result.served} 件 / 失敗 ${msg.result.failed} 件` +
-          `<br>スコア ${msg.result.reward}</div>`;
+          `<br>スコア ${msg.result.reward}</div>` + rankLine(msg.result);
         // 実験のセッション と 自由に遊ぶとき で、終わったあとの進み方が違う。
         //   セッション  : アンケート -> 出し終えたら次のセッションへ
         //   自由に遊ぶ  : 「もう一度遊ぶ」で選び直し
