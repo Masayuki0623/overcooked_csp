@@ -1092,6 +1092,8 @@ class WebGamePlay:
         # ゲーム側のスレッドが積み、WebSocket 側が取り出して送る。
         self._notices = []
         self._notices_lock = threading.Lock()
+        # デバッグの回だけ、CSP の計画をブラウザへ送る。
+        self.show_plan = False
 
     def try_acquire(self, token):
         """空いていれば、この接続を操作する人にする。
@@ -1111,6 +1113,9 @@ class WebGamePlay:
             if self.player is not token or self.state != 'waiting':
                 return
             self.selection = self._resolve_choice(choice or {})
+            # 計画をブラウザへ送るのは、デバッグの回だけ。
+            self.show_plan = bool((choice or {}).get('show_plan'))
+            self._two_agent = bool((choice or {}).get('two_agent'))
             self.client_connected.set()
 
     def go(self, token):
@@ -1897,6 +1902,48 @@ class WebGamePlay:
             self._instruction_done.set()
             return True
 
+    def plan_snapshot(self):
+        """CSP が立てたいまの計画。デバッグ画面に出す。
+
+        AI と相手(人間スロット)それぞれについて、やる順番・作業・長さ・
+        開始と終了の見込みを返す。時刻はゲーム内の秒。
+        返せないときは None(始まる前や、計画がまだ無いとき)。
+        """
+        game = self.game
+        ai = getattr(game, 'ai', None) if game is not None else None
+        sched = getattr(ai, 'schedule_per_agent', None)
+        if not sched:
+            return None
+        fps = float(getattr(ai, 'fps', 5) or 5)
+        own = int(getattr(ai, 'own_agent_idx', 0) or 0)
+        done = set(getattr(ai, 'completed_task_ids', None) or ())
+        cur = getattr(ai, 'current_task_idx', None) or {}
+        out = {'now': round(float(getattr(self.env, 'current_time', 0.0) or 0.0), 1),
+               'agents': []}
+        for idx in (own, 1 - own):
+            rows = []
+            lst = sched.get(idx) or []
+            here = cur.get(idx, 0) if isinstance(cur, dict) else 0
+            for k, t in enumerate(lst):
+                tid = t.get('id') or ('', '', '')
+                st = t.get('start')
+                en = t.get('end')
+                rows.append({
+                    'n': k + 1,
+                    'verb': str(tid[0]), 'obj': str(tid[1]),
+                    'start': round(float(st) / fps, 1) if st is not None else None,
+                    'end': round(float(en) / fps, 1) if en is not None else None,
+                    'dur': (round((float(en) - float(st)) / fps, 1)
+                            if st is not None and en is not None else None),
+                    'done': tuple(tid) in done,
+                    'now': k == here,
+                })
+            out['agents'].append({
+                'who': 'AI' if idx == own else 'あなた',
+                'tasks': rows,
+            })
+        return out
+
     def notify(self, text):
         with self._notices_lock:
             self._notices.append(text)
@@ -2027,6 +2074,9 @@ class WebGamePlay:
             if ai is not None:
                 ai.skip_budget = agent_skip_budget(sel['skip_budget'])
                 ai.deadline_seconds = None
+                # デバッグ画面からの切り替え。実験の回では常に切り。
+                if hasattr(ai, 'two_agent_assignment'):
+                    ai.two_agent_assignment = bool(getattr(self, '_two_agent', False))
         return self.game
 
     def prepare(self):
@@ -3233,6 +3283,12 @@ async def ws(sock: WebSocket):
             await send_text({'type': 'instruct_close'})
         for text in session.take_notices():
             await send_text({'type': 'notice', 'text': text})
+        # デバッグの回だけ、CSP が立てた計画を送る。実験の回では送らない
+        # (参加者に見せる情報ではないうえ、毎回作ると重い)。
+        if session.show_plan and session.state == 'running':
+            plan = session._safe('計画の取り出し', session.plan_snapshot)
+            if plan:
+                await send_text({'type': 'plan', **plan})
         if session.state != last_state:
             last_state = session.state
             await send_text({'type': 'status', 'state': session.state,

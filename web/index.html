@@ -257,6 +257,23 @@
   }
   .consent .c-chk input { margin-top: 3px; width: 18px; height: 18px; flex: 0 0 auto; }
   .consent .go { margin-top: 16px; text-align: center; }
+  /* デバッグの計画表。画面の端に出す。盤面に重ならないよう右端へ。 */
+  #plan {
+    display: none; position: fixed; right: 8px; top: 44px; z-index: 40;
+    width: 330px; max-height: calc(100vh - 60px); overflow-y: auto;
+    background: rgba(20,23,28,.94); border: 1px solid var(--btn-line);
+    border-radius: 8px; padding: 8px 10px; font-size: 11px; line-height: 1.5;
+  }
+  #plan.show { display: block; }
+  #plan h4 { margin: 6px 0 3px; font-size: 12px; color: var(--muted); }
+  #plan table { width: 100%; border-collapse: collapse; }
+  #plan th { color: var(--muted); font-weight: 400; text-align: right; padding: 0 3px; }
+  #plan td { padding: 1px 3px; text-align: right; white-space: nowrap; }
+  #plan td.task { text-align: left; }
+  #plan tr.done td { color: #5d6774; text-decoration: line-through; }
+  #plan tr.now td { color: #8fd3a8; font-weight: 600; }
+  #plan .now-t { color: var(--muted); }
+
   /* 参加者番号は書き換えさせない。入力欄ではなく、ただの表示にする。 */
   .fixed-id {
     font-size: 20px; font-weight: 600; letter-spacing: 0.08em;
@@ -442,6 +459,7 @@
   <div><kbd>Enter</kbd> AIへの指示<br><kbd>Esc</kbd> 閉じる</div>
 </div>
 
+<div id="plan"></div>
 <div id="overlay"><div id="overlay-text"></div></div>
 <div id="toast" role="status" aria-live="polite"></div>
 
@@ -1410,6 +1428,14 @@
       // デバッグ設定(煮込み時間・切る回数・エンドレスなど)は、実験
       // セッションでは出さない。触られると条件が変わってしまう。
       (experiment ? '' : debugBlock()) +
+      (custom
+        ? '<div class="pick"><div class="lab">割り当ての決め方</div><div class="opts">' +
+          `<button type="button" data-key="two_agent" data-val="0" class="${pick.two_agent ? '' : 'on'}">AIが全部やる前提</button>` +
+          `<button type="button" data-key="two_agent" data-val="1" class="${pick.two_agent ? 'on' : ''}">2人で分担して最適化</button>` +
+          '</div><div class="hint">2人で分担すると、どちらがどの作業をやると' +
+          '速いかを位置と移動時間から計算します。相手が計画どおり動かないと' +
+          '止まることがあります</div></div>'
+        : '') +
       '<div class="go"><button class="primary" id="start" disabled>スタート</button> ' +
       '<button id="pick-back">最初に戻る</button>' +
       '<div class="sub" id="dl-note" style="margin-top:8px"></div></div>' +
@@ -1431,7 +1457,8 @@
 
     el.overlayText.querySelectorAll('.opts button').forEach((b) => b.addEventListener('click', () => {
       pick[b.dataset.key] = (b.dataset.key === 'skip_budget'
-                             || b.dataset.key === 'pattern')
+                             || b.dataset.key === 'pattern'
+                             || b.dataset.key === 'two_agent')
         ? Number(b.dataset.val) : b.dataset.val;
       if (b.dataset.key === 'pattern') { assignment = null; loadAssignment(); }
       if (b.dataset.key === 'preset') pick.case = '';
@@ -1457,6 +1484,8 @@
       if (pidEl) saveParticipant(pidEl.value);
       const d = pick.debug || {};
       send({ type: 'start', map: pick.map, preset: pick.preset,
+             // デバッグの回だけ、CSP の計画を送ってもらう。
+             show_plan: custom, two_agent: custom && !!pick.two_agent,
              case: pick.case === '' ? null : Number(pick.case),
              instruction: pick.instruction,
              skip_budget: Number(pick.skip_budget) || 0,
@@ -1540,6 +1569,28 @@
   let sessionExp = null;         // 実験のセッションなら、その条件(参加者ID等)
   let reporting = false;         // バグを報告して、やり直しを待っている最中
   let lastSelection = null;
+  // CSP が立てた計画を画面の端に出す(デバッグの回だけ送られてくる)。
+  // 見たいのは「誰が・何を・何番目に・いつからいつまで」。
+  function renderPlan(msg) {
+    const box = document.getElementById('plan');
+    if (!box) return;
+    const rows = (a) => (a.tasks || []).map((t) => {
+      const cls = t.done ? 'done' : (t.now ? 'now' : '');
+      const f = (v) => (v === null || v === undefined ? '-' : v.toFixed(1));
+      return `<tr class="${cls}"><td>${t.n}</td>` +
+             `<td class="task">${esc(t.verb)} ${esc(t.obj)}</td>` +
+             `<td>${f(t.start)}</td><td>${f(t.end)}</td><td>${f(t.dur)}</td></tr>`;
+    }).join('') || '<tr><td colspan="5">（無し）</td></tr>';
+    box.innerHTML =
+      `<div class="now-t">いま ${Number(msg.now).toFixed(1)} 秒</div>` +
+      (msg.agents || []).map((a) =>
+        `<h4>${esc(a.who)}</h4><table>` +
+        '<tr><th>順</th><th style="text-align:left">作業</th>' +
+        '<th>開始</th><th>終了</th><th>長さ</th></tr>' +
+        rows(a) + '</table>').join('');
+    box.classList.add('show');
+  }
+
   function selectionNote() {
     // 何を選んだかは、始まる前(カウントダウン中)にだけ見せる。
     // ただし実験の参加者には見せない。地図の名前・レシピ束・注文の一覧は
@@ -1807,15 +1858,14 @@
            '1人で作り方を覚えてから、AI と一緒に遊びます。') +
       item('experiment', '実験セッション（約30分）',
            'ゲーム8回とアンケート8回。はじめに説明と同意があります。') +
-      // 練習と「条件を指定して練習」は、最初の画面には出さない。
-      // 参加者が本番前にどれだけ練習したかがばらつくと、条件の比較に
-      // 混ざる。練習は実験の流れの中で1回だけ行う。
-      // 動作確認のときは ?dev=1 で出す。
+      item('custom', 'デバッグ',
+           '地図・注文・指示の効き方などを自分で決めて遊べます。<br>' +
+           '画面の端に、CSP が立てた AI と人の計画を出します。記録は残りません。') +
+      // 練習だけは最初の画面に出さない。本番前にどれだけ練習したかが
+      // ばらつくと、条件の比較に混ざる。練習は実験の流れの中で1回だけ。
       (DEV
         ? item('practice', '練習（確認用）',
-               '本番と同じ条件で遊びます。記録は残りません。') +
-          item('custom', '条件を指定して練習（確認用）',
-               '地図・注文・指示の効き方などを自分で決めて遊べます。')
+               '本番と同じ条件で遊びます。記録は残りません。')
         : '') +
       '</div></div>');
     el.overlayText.querySelectorAll('.modes button').forEach((b) => {
@@ -1959,6 +2009,8 @@
       showInstruct(msg);
     } else if (msg.type === 'instruct_close') {
       hideInstruct();
+    } else if (msg.type === 'plan') {
+      renderPlan(msg);
     } else if (msg.type === 'notice') {
       showToast(msg.text);
     } else if (msg.type === 'pong') {
