@@ -8096,7 +8096,20 @@ class CSPAgent:
         else:
             model.Add(makespan == 0)
         end_sum = sum(task_ends) if task_ends else 0
-        weight_makespan = num_tasks * 1000
+        # 同点なら、待ち時間のある工程(煮る・混ぜる)を早く始める。
+        # 煮るを早めても最後の1品が出る時刻が変わらない局面では、以前は
+        # 「トマトを刻む > 煮る」のような並びが返ることがあった(実測: 10.6秒の
+        # 局面で L(0)=0)。所要時間の最適性は変えず、同点のときだけ効くよう、
+        # 重みを (時間 > 待ち工程の開始 > 終了時刻の和) の順に厳密に積む。
+        #   end_sum   <= num_tasks * horizon
+        #   wait_term <= n_wait * horizon
+        wait_starts = [starts[i] for i in range(num_tasks)
+                       if tasks[i]['verb'] in ('cook', 'mix')]
+        wait_term = sum(wait_starts) if wait_starts else 0
+        end_sum_max = num_tasks * horizon
+        weight_wait = end_sum_max + 1
+        wait_max = len(wait_starts) * horizon * weight_wait
+        weight_makespan = wait_max + end_sum_max + 1
         # 焦がすのは所要時間の悪化とは比べものにならない損失なので、
         # 所要時間より上の優先度で避ける。
         if burn_terms:
@@ -8107,7 +8120,7 @@ class CSPAgent:
         # 一番遅い終わり」のほう。全体の makespan を縮めにいくと、どうせ
         # 間に合わない注文まで急いで進める計画が選ばれてしまう。
         time_term = served_makespan if served_makespan is not None else makespan
-        objective = time_term * weight_makespan + end_sum
+        objective = time_term * weight_makespan + wait_term * weight_wait + end_sum
         if missed_terms:
             # weight_missed は時間の項が取り得る最大値より大きくする。
             # こうすると「1品多く出せる計画」は、どれだけ遅くても
