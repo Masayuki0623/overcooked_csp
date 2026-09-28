@@ -759,6 +759,102 @@ def _update_roster(participant, **changes):
     return True
 
 
+# 見出しが合わず、自動では戻せないと分かっているもの。
+# 30秒ごとに同じ知らせを出し続けないための覚え書き。
+_drain_told = set()
+
+
+def _drain_pending(path):
+    """-pending へ逃がしてあった記録を、本体へ戻す。
+
+    Excel で開いている間は本体へ書けないので、その場は隣のファイルへ
+    逃がしている。ただ、閉じたあとに誰かが手で戻さないと、そのまま
+    埋もれる(実際に埋もれていた)。書けるようになっていたら、ここで
+    自動的に戻す。
+
+    戻したら True。何も無い・まだ書けない場合は False。
+    """
+    spare = path.with_name(f'{path.stem}-pending{path.suffix}')
+    if not spare.exists():
+        return False
+    # 席の数だけサーバーが動いている。読んでから書くまでのあいだに
+    # 別のサーバーが同じ分を戻すと、同じ記録が二度入る。読み・書き・
+    # 消しをまとめて錠の中でやる。
+    mismatch = False
+    moved = 0
+    try:
+        with CrossProcessLock(path):
+            if not spare.exists() or spare.stat().st_size == 0:
+                return False
+            with spare.open('r', encoding='utf-8-sig', newline='') as f:
+                rows = list(csv.reader(f))
+            if not rows:
+                return False
+            head = rows[0]
+            body = [r for r in rows[1:] if any(v.strip() for v in r)]
+            if not body:
+                spare.unlink()
+                return False
+            try:
+                with path.open('r', encoding='utf-8-sig', newline='') as f:
+                    cur = next(csv.reader(f), [])
+            except OSError:
+                cur = []
+            if cur and cur != head:
+                # 項目が変わったあとに逃がした分。列の並びが違うので
+                # 機械的には戻せない。消さずに残しておく。
+                mismatch = True
+            else:
+                new_file = not path.exists() or path.stat().st_size == 0
+                with path.open('a', newline='', encoding='utf-8') as f:
+                    w = csv.writer(f)
+                    if new_file:
+                        f.write('﻿')
+                        w.writerow(head)
+                    for r in body:
+                        w.writerow(r)
+                moved = len(body)
+                spare.unlink()
+    except Exception:
+        # まだ開かれている。次の機会に回す。中身は消さない。
+        return False
+    if mismatch:
+        if path.name not in _drain_told:
+            _drain_told.add(path.name)
+            print(f'[server] {spare.name} は見出しが {path.name} と違うので'
+                  f'自動では戻せません。手で移してください。', flush=True)
+        return False
+    _drain_told.discard(path.name)
+    print(f'[server] {spare.name} の {moved} 行を {path.name} へ戻しました。',
+          flush=True)
+    return True
+
+
+def drain_all_pending():
+    """逃がしてある記録を探して、書けるようになっていたら戻す。"""
+    try:
+        spares = sorted((ROOT / 'results').glob('*-pending.csv'))
+    except OSError:
+        return
+    for spare in spares:
+        stem = spare.stem[:-len('-pending')]
+        _drain_pending(spare.with_name(f'{stem}{spare.suffix}'))
+
+
+def start_pending_drain_thread(interval=30.0):
+    """逃がした記録を、閉じられるまで定期的に戻しにいく。"""
+    def work():
+        while True:
+            try:
+                drain_all_pending()
+            except Exception as e:
+                print(f'[server] 逃がした記録を戻せませんでした: '
+                      f'{type(e).__name__} {e}', flush=True)
+            time.sleep(interval)
+
+    threading.Thread(target=work, daemon=True).start()
+
+
 def append_csv(path, fields, row, notes=None):
     """記録を1行足す。書けなくても、遊んでいる回は絶対に巻き添えにしない。
 
@@ -772,6 +868,9 @@ def append_csv(path, fields, row, notes=None):
     どちらにしても、呼んだ側へ例外は返さない。
     """
     path.parent.mkdir(parents=True, exist_ok=True)
+    # 先に逃がしてある分があれば戻す。今の行より前に書いた記録なので、
+    # 先に戻しておかないと並びが入れ替わる。
+    _drain_pending(path)
     last = None
     for wait in (0, 0.2, 0.5, 1.0):
         if wait:
@@ -788,11 +887,13 @@ def append_csv(path, fields, row, notes=None):
     # 本命へ書けない。中身を捨てるほうが困るので、隣へ置いておく。
     spare = path.with_name(f'{path.stem}-pending{path.suffix}')
     try:
-        _append_csv_locked(spare, fields, row, notes)
+        # 逃がす側に説明行は置かない。あとで戻すときに、説明行を
+        # 記録と見分けられなくなる。
+        _append_csv_locked(spare, fields, row, None)
         print(f'[server] {path.name} に書けないので {spare.name} へ逃がしました: '
               f'{type(last).__name__} {last}', flush=True)
         print(f'[server] {path.name} を Excel などで開いていませんか。'
-              f'閉じてから {spare.name} の中身を戻してください。', flush=True)
+              f'閉じれば、30秒ほどで自動的に戻します。', flush=True)
     except Exception as e2:
         print(f'[server] 記録を残せませんでした: {type(e2).__name__} {e2}', flush=True)
     return False
@@ -3408,6 +3509,9 @@ def start_server_thread(host, port):
 
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
+
+    # 前回 Excel で開いていて逃がした分を、ここで戻し始める。
+    start_pending_drain_thread()
 
     # 起動を待ってから URL を出す(押しても繋がらない案内を出さないため)。
     deadline = time.time() + 10
