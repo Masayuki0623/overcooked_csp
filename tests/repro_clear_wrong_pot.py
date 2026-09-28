@@ -74,13 +74,23 @@ def main():
     ai(state_of(env))
 
     sched = (ai.schedule_per_agent or {}).get(0) or []
-    verbs = [t['id'][0] for t in sched if t.get('id')]
+    # 2人で分担する計画になったので、相手に回ることがある。
+    # 誰かの計画に入っていればよい。
+    both = [t for who in (0, 1)
+            for t in ((ai.schedule_per_agent or {}).get(who) or [])]
+    verbs = [t['id'][0] for t in both if t.get('id')]
     print('  AI の計画:', [t.get('id') for t in sched])
+    print('  2人ぶん   :', [t.get('id') for t in both])
     check('鍋を空ける工程が計画に入る', 'clear_pot' in verbs, f'{verbs}')
-    if 'clear_pot' in verbs and 'cook' in verbs:
+    # 順番は時刻で見る。2人ぶんを繋げた並び順では、担当が分かれたときに
+    # 意味をなさない(AI の5件目より、相手の1件目のほうが早いこともある)。
+    _by = lambda v: [t for t in both if t.get('id') and t['id'][0] == v]
+    if _by('clear_pot') and _by('cook'):
+        _clear_end = min(t.get('end', 0) for t in _by('clear_pot'))
+        _cook_start = max(t.get('start', 0) for t in _by('cook'))
         check('鍋を空けてから入れる順番になっている',
-              verbs.index('clear_pot') < verbs.index('cook'),
-              f"clear_pot={verbs.index('clear_pot')} cook={verbs.index('cook')}")
+              _clear_end <= _cook_start,
+              f'空ける終わり={_clear_end} 入れる始まり={_cook_start}')
 
     # 煮上がるまで進めてから、実際に空けられるかを見る
     cook_s = game_config.COOKING_TIME_SECONDS

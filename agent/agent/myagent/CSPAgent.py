@@ -161,7 +161,7 @@ class CSPAgent:
         # 相手が人間のときは「渡した仕事は返ってこない」ので、引き取りを
         # もっと積極的にするか、相手の担当を前後関係から外す必要がある。
         # そこを詰めるまでは切っておく。デバッグ画面から True にできる。
-        self.two_agent_assignment = False
+        self.two_agent_assignment = True
         self.deadline_frames = int(75 * self.fps) if deadline_seconds is None else int(deadline_seconds * self.fps)
         # skip_budget: 指示タスク前に同エージェントが実行してよい他タスクの上限個数 (None=使用しない)
         # 秒数ベースの deadline_seconds / deadline_frames は当面未使用だが削除しない
@@ -3433,7 +3433,15 @@ class CSPAgent:
                 # 自分の担当では手をつけられるものが無い。相手の担当から
                 # 引き取る。相手が人間だと計画どおりに動く保証が無いので、
                 # 渡したきりだと材料を持ったまま永久に待つことになる。
+                # 引き取るのは「待つしかない作業」を抱えているときだけ。
+                # 刻む・運ぶは材料さえあれば始められるので、ここに入れると
+                # 自分でできる作業を手放して相手の分を取りに行ってしまう
+                # (実測: 運ばれてきたバナナを刻まず、相手のオレンジを
+                #  取りに行き続けた)。
                 if (getattr(self, 'two_agent_assignment', False)
+                        and verb in ('cook', 'mix', 'serve', 'serve_salad',
+                                     'serve_juice', 'handover',
+                                     'serve_from_counter')
                         and not self._cook_dependency_ready_from_world(env, obj)
                         and self._find_startable_other_task(
                             env, agent_idx, tid, sc) is None):

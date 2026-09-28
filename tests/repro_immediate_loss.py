@@ -84,8 +84,27 @@ def measure(budget, key):
         skip_budget=budget), cands
 
 
-# 最適計画では先頭に来ない作業を選ぶ(縛ると損が出る)
-TARGET = 'chop tomato'
+# いちばん損の出る指示を選ぶ。どれが損になるかは割り当ての決め方で
+# 変わる(2人で分担すると、片方を縛っても相手が吸収するので損が縮む)。
+# 決め打ちにすると、方針を変えるたびにここが落ちる。
+def _worst_target():
+    env, ai = make(0)
+    best, best_l = None, -1.0
+    for d, p in ai.get_instruction_candidates(state_of(env)):
+        env2, ai2 = make(0)
+        r = ai2.estimate_instruction_time_loss(
+            state_of(env2),
+            {'task': (d, p), 'status': 'pending',
+             'skip_budget': 0, 'remaining_skip_budget': 0},
+            skip_budget=0)
+        v = r.get('immediate_loss_seconds')
+        if v is not None and v > best_l:
+            best, best_l = p['verb'] + ' ' + p['obj'], v
+    return best
+
+
+TARGET = _worst_target()
+print(f'  (いちばん損の出る指示: {TARGET})')
 out = {}
 for budget in (0, 1, 2, None):
     r, cands = measure(budget, TARGET)
@@ -119,9 +138,13 @@ check('割り込み許容数=0 の回では L と L(0) が一致',
 # 4
 l0 = out[0]['immediate_loss_seconds']
 check('この指示は、いますぐやらせると損が出る', l0 and l0 > 0, f'L(0)={l0}')
-check('割り込み許容数が大きいと L は 0 になる(L(0) は 0 でない)',
-      out[1]['loss_seconds'] == 0.0 and out[1]['immediate_loss_seconds'] > 0,
-      f"割り込み許容数1: L={out[1]['loss_seconds']} L0={out[1]['immediate_loss_seconds']}")
+# 許容数を緩めても損が消えるとは限らない。消えるのは、最適計画で
+# その作業が許容数の内側に来るときだけ。ここでは「緩めたほうが
+# 損は増えない」ことだけを見る。
+check('割り込み許容数を緩めても損は増えない',
+      out[1]['loss_seconds'] <= out[0]['loss_seconds'],
+      f"許容数0: L={out[0]['loss_seconds']} / "
+      f"許容数1: L={out[1]['loss_seconds']}")
 
 # 5
 env, ai = make(None)

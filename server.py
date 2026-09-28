@@ -1115,7 +1115,9 @@ class WebGamePlay:
             self.selection = self._resolve_choice(choice or {})
             # 計画をブラウザへ送るのは、デバッグの回だけ。
             self.show_plan = bool((choice or {}).get('show_plan'))
-            self._two_agent = bool((choice or {}).get('two_agent'))
+            # 2人ぶんの割り当て。既定で有効。デバッグ画面からだけ切れる。
+            _ta = (choice or {}).get('two_agent')
+            self._two_agent = True if _ta is None else bool(_ta)
             self.client_connected.set()
 
     def go(self, token):
@@ -3123,6 +3125,9 @@ async def ws(sock: WebSocket):
                 'instruct_every': msg.get('instruct_every'),
                 'pattern': msg.get('pattern'),
                 'debug': msg.get('debug'),
+                # デバッグの回だけ。ここに並べないと落ちる。
+                'show_plan': msg.get('show_plan'),
+                'two_agent': msg.get('two_agent'),
                 'participant': msg.get('participant')})
         elif kind == 'ack':
             try:

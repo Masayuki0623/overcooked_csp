@@ -83,7 +83,11 @@ def main():
     mine, theirs = fetch_tasks(0), fetch_tasks(1)
     print('  AI の運搬工程:', [(t['id'], t['carry_from']) for t in mine])
     print('  人の運搬工程:', [(t['id'], t['carry_from']) for t in theirs])
-    check('運ぶだけの工程は AI の担当になる', bool(mine) and not theirs)
+    # 2人で分担する計画になったので、運搬が相手に回ることがある。
+    # 大事なのは「誰かの計画に入っていて、実際に運ばれる」こと。
+    # 相手が動かなければ AI が引き取る(_take_over_partner_task)。
+    check('運ぶだけの工程が計画に入る', bool(mine) or bool(theirs),
+          f'AI={len(mine)} 人={len(theirs)}')
 
     own = move.get('ai_0') if isinstance(move, dict) else move
     check('待たずに動き出す', bool(own) and tuple(own) != (0, 0),
