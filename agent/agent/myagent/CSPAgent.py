@@ -169,6 +169,8 @@ class CSPAgent:
         # 直前にどの作業をやっていたか(エージェントごと)。注文番号だけが
         # 違う同じ作業へ付け替わるのを止めるために使う。
         self._last_action_tid = {}
+        self._hold_hist = {}            # 拾い置きの往復を見るための持ち物の履歴
+        self._flicker_hold_until = {}   # 往復を止めている期限
         self.deadline_frames = int(75 * self.fps) if deadline_seconds is None else int(deadline_seconds * self.fps)
         # skip_budget: 指示タスク前に同エージェントが実行してよい他タスクの上限個数 (None=使用しない)
         # 秒数ベースの deadline_seconds / deadline_frames は当面未使用だが削除しない
@@ -2670,6 +2672,53 @@ class CSPAgent:
     OSCILLATION_WINDOW_S = 2.0
     OSCILLATION_PIN_S = 4.0
 
+    # 拾い置きの往復とみなす条件。この秒数のあいだに持ち物がこれだけ
+    # 変われば、同じ台で拾う/置くを繰り返している。止める長さも同じ。
+    FLICKER_WINDOW_S = 1.2
+    FLICKER_CHANGES = 3
+    FLICKER_HOLD_S = 1.0
+
+    def _stop_pick_put_flicker(self, e_agent, agent_idx, action, reason):
+        """同じ台で拾う/置くを毎フレーム繰り返すのを、実行の出口で止める。
+
+        原因は工程ごとに違う(置いた物を次の判断で取り上げる、2つの工程が
+        持ち物の要不要で食い違う、など)。実測: 切ったトマトを 0.2 秒ごとに
+        置いては拾い直すのが 3.6 秒続いた。参加者には「作業を中断している」
+        ように見える。ここでは原因を問わず、持ち物が短時間に何度も変わって
+        いて、次の一手がまた台への働きかけ(壁側へ進む=インタラクト)なら、
+        1 秒だけ手を止める。置いた物はそのまま台に残るので、相手が材料を
+        持ってくれば次の判断で普通に進む。
+        """
+        try:
+            now = float(getattr(e_agent, 'time', 0.0) or 0.0)
+            hold = getattr(getattr(e_agent, 'hold', None), 'full_name', None)
+            hist = self._hold_hist.setdefault(agent_idx, [])
+            if not hist or hist[-1][0] != hold:
+                hist.append((hold, now))
+                del hist[:-8]
+            until = self._flicker_hold_until.get(agent_idx, -1.0)
+            if now < until:
+                return (0, 0), '拾い置きが続くので少し待つ'
+            if action == (0, 0) or action is None:
+                return action, reason
+            changes = sum(1 for _h, t in hist if now - t <= self.FLICKER_WINDOW_S) - 1
+            if changes < self.FLICKER_CHANGES:
+                return action, reason
+            pos = tuple(e_agent.self_pos)
+            tx, ty = pos[0] + int(action[0]), pos[1] + int(action[1])
+            grid = getattr(e_agent, 'to_grid', None)
+            if grid is None or not (0 <= tx < len(grid) and 0 <= ty < len(grid[0])):
+                return action, reason
+            if grid[tx][ty] == 1:
+                return action, reason          # ただ歩くだけ。止めない
+            self._flicker_hold_until[agent_idx] = now + self.FLICKER_HOLD_S
+            self._emit_counter_debug(
+                f'[拾い置き止め] AI{agent_idx} 持ち物が {self.FLICKER_WINDOW_S}s に '
+                f'{changes} 回変わったので {self.FLICKER_HOLD_S}s 待つ (元: {reason})')
+            return (0, 0), '拾い置きが続くので少し待つ'
+        except Exception:
+            return action, reason
+
     def _keep_same_action(self, agent_idx, task, schedule):
         """注文番号だけが違う同じ作業なら、前回のものを使い続ける。
 
@@ -3664,6 +3713,7 @@ class CSPAgent:
                     
                     # 交互ターン待機は使わず、毎フレーム実行する。
                     action, reason = ta(e_agent, dynamic_obstacles=dynamic_obstacles)
+                    action, reason = self._stop_pick_put_flicker(e_agent, agent_idx, action, reason)
                     action, reason = self._wait_at_handover_counter(
                         e_agent, agent_idx, task, action, reason, dynamic_obstacles)
 

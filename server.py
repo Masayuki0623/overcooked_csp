@@ -124,9 +124,6 @@ RECIPE_CHOICES = [
 # チュートリアルの段取り。前から順に1つずつ遊んでもらう。
 #   最初の3つは1人用の小さい台所で、その回に使う材料と道具だけが置いてある。
 #   最後の1つだけ、本番と同じリングの地図で AI と一緒に遊ぶ(指示あり)。
-# チュートリアルの最後(AI と一緒に作る)の長さ。本番は90秒だが、
-# ここは練習なので短くする。
-TUTORIAL_AI_SECONDS = 30
 
 TUTORIAL_STEPS = [
     {'key': 'salad', 'map': 'tutorial_salad', 'solo': True,
@@ -1404,13 +1401,12 @@ class WebGamePlay:
                             'recipes': list(sets[case]),
                             'instruction': INSTRUCTION_TIMING_ONCE_AT_START,
                             'skip_budget': SKIP_BUDGETS[len(SKIP_BUDGETS) // 2],
-                            # 本番と同じ進み方を短く体験してもらう。
-                            # 30秒のエンドレスで、注文は片づくたびに補充。
-                            # 長さ以外は本番(パターン3)と揃える。
-                            'endless': True,
-                            'seconds': TUTORIAL_AI_SECONDS,
-                            'orders_active': spec['orders'],
-                            'pots': 2})
+                            # 本番(パターン4)と同じ進み方。固定の注文3品を
+                            # 出し切るまで、鍋は1つ、指示は開始時に1回。
+                            # 以前は30秒のエンドレスにしていたが、本番と
+                            # 進み方が違うと練習にならない。
+                            'endless': False,
+                            'pots': 1})
             return out
 
         if mode == 'practice':
@@ -3611,7 +3607,9 @@ async def ws(sock: WebSocket):
             await send_text({'type': 'notice', 'text': text})
         # デバッグの回だけ、CSP が立てた計画を送る。実験の回では送らない
         # (参加者に見せる情報ではないうえ、毎回作ると重い)。
-        if session.show_plan and session.state == 'running':
+        # 終わったあとも計画表を残す(デバッグで見返せるように)。次の回の
+        # 準備に入った時点で消える。
+        if session.show_plan and session.state in ('running', 'finished'):
             plan = session._safe('計画の取り出し', session.plan_snapshot)
             if plan:
                 await send_text({'type': 'plan', **plan})

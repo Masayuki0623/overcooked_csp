@@ -2271,7 +2271,8 @@
       if (msg.experiment && msg.experiment.participant_id) {
         sessionExp = msg.experiment;
       }
-      if (msg.state !== 'running') hidePlan();
+      // 終わった直後は残す(デバッグで見返せるように)。次の回の準備で消す。
+      if (msg.state !== 'running' && msg.state !== 'finished') hidePlan();
       if (msg.state === 'waiting' && !started) {
         if (!surveyChecked) {
           afterSurveyCheck(() => { if (!started) onWaiting(); });
