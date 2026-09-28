@@ -1489,7 +1489,11 @@
              // 当面は実験セッションでも計画を出す(AI と人が何をして
              // いるかを見たいという依頼)。チュートリアルはここを通らない
              // ので出ない。参加者に見せない形へ戻すときは custom に直す。
-             show_plan: true, two_agent: custom && !!pick.two_agent,
+             // デバッグでは切り替えの値を、それ以外(実験・練習)では
+             // 2人で分担する側を使う。ここで false を送っていたため、
+             // 実験セッションが AI 単独の計画のままだった。
+             show_plan: true,
+             two_agent: custom ? !!pick.two_agent : true,
              case: pick.case === '' ? null : Number(pick.case),
              instruction: pick.instruction,
              skip_budget: Number(pick.skip_budget) || 0,
