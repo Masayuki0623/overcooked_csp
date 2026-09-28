@@ -3536,11 +3536,21 @@ class CSPAgent:
                 # 自分でできる作業を手放して相手の分を取りに行ってしまう
                 # (実測: 運ばれてきたバナナを刻まず、相手のオレンジを
                 #  取りに行き続けた)。
+                # 提供系は「刻んだ材料」ではなく「出来上がった料理」で見る。
+                # 煮えた時点で材料は消えるので、材料で見ると必ず「進められ
+                # ない」になり、皿に載せたスープを持ったまま相手の刻む作業を
+                # 引き取って、皿ごと置いてしまった(報告 20260928_223402)。
+                # 何かを運んでいる途中(空の皿・コップ以外)も引き取らない。
+                if verb in ('serve', 'serve_juice', 'handover', 'serve_from_counter'):
+                    _own_stuck = not self._finished_dish_exists(env, obj)
+                else:
+                    _own_stuck = not self._cook_dependency_ready_from_world(env, obj)
                 if (getattr(self, 'two_agent_assignment', False)
                         and verb in ('cook', 'mix', 'serve', 'serve_salad',
                                      'serve_juice', 'handover',
                                      'serve_from_counter')
-                        and not self._cook_dependency_ready_from_world(env, obj)
+                        and me_hold in ('', 'Plate', 'Cup')
+                        and _own_stuck
                         and self._find_startable_other_task(
                             env, agent_idx, tid, sc) is None):
                     taken = self._take_over_partner_task(env, agent_idx)
@@ -5654,6 +5664,31 @@ class CSPAgent:
                 if has_token(getattr(child, 'full_name', '')):
                     return True
 
+        return False
+
+    def _finished_dish_exists(self, env, dish_name):
+        """出来上がった料理(煮えたスープ・混ざったジュース・盛れるサラダの
+        材料)が、鍋・ミキサー・台・誰かの手のどこかにあるか。
+
+        提供系の工程が進められるかは、これで見る。刻んだ材料の有無
+        (_cook_dependency_ready_from_world)で見ると、煮えた時点で材料は
+        消えているので「進められない」に化ける(実測: 皿に載せたスープを
+        持ったまま相手の刻む作業を引き取り、皿ごと台に置いて出さずに
+        終わった)。
+        """
+        parts = dish_ingredients(dish_name)
+        if not parts:
+            return False
+        kind = dish_kind_of(dish_name)
+        prefixes = ({'Cooked'} if kind == KIND_SOUP else
+                    {'Mixed'} if kind == KIND_JUICE else {'Chopped'})
+        for obj in self._iter_dependency_world_objects(env):
+            name = getattr(obj, 'full_name', '') or ''
+            if not name:
+                continue
+            for prefix in prefixes:
+                if all(f"{prefix}{part.capitalize()}" in name for part in parts):
+                    return True
         return False
 
     def _cook_dependency_ready_from_world(self, env, dish_name):
