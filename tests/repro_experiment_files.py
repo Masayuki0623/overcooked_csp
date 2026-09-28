@@ -83,8 +83,10 @@ miss = [c for c in need_quant if c not in srv.QUANT_FIELDS]
 check('定量: L・L0・スコアが入っている', not miss, f'足りない: {miss}')
 
 # 7. 条件の欄
-cond = ['記録時刻', '参加者ID', 'パターン', 'セッション番号', '地図', '猶予',
-        '注文の組み合わせ番号']
+# 順序統制のグループも条件の一部。どちらのファイルからも、その行が
+# どの割り当ての人のものか分かるようにしておく。
+cond = ['記録時刻', '参加者ID', 'パターン', 'グループ', 'セッション番号',
+        '地図', '猶予', '注文の組み合わせ番号']
 check('条件の欄が2つのファイルで同じ並び',
       srv.QUAL_FIELDS[:len(cond)] == cond
       and srv.QUANT_FIELDS[:len(cond)] == cond,

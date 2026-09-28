@@ -79,6 +79,7 @@ from agent.instruction_panel import (  # noqa: E402
 from gym_cooking.utils import config as game_config  # noqa: E402
 from gym_cooking.utils.order_preset import (  # noqa: E402
     enumerate_order_recipes, experiment_case_indices, preset_names)
+import experiment_design as design
 
 WEB_DIR = ROOT / 'web'
 # ゲームの絵(pygame が使うのと同じ PNG)。ブラウザ側で描くときに読み込む。
@@ -279,6 +280,7 @@ _COND_COLUMNS = [
     ('記録時刻', 'この行を書いた日時'),
     ('参加者ID', ''),
     ('パターン', '1=注文3品を出し切る / 2=エンドレス / 3=エンドレス+鍋2つ'),
+    ('グループ', 'G1〜G8。順序統制の割り当て。地図の順序とラテン方格の行が決まる'),
     ('セッション番号', 'その参加者の何回目のセッションか'),
     ('地図', 'exp_ring=リング / exp_partition=仕切り'),
     ('猶予', '指示の前に挟んでよい他の作業の数(skip_budget)。inf=指示を聞かない'),
@@ -363,6 +365,7 @@ INSTRUCTION_COLUMNS = [
     ('記録時刻', 'この行を書いた日時'),
     ('参加者ID', ''),
     ('パターン', '1=注文3品を出し切る / 2=エンドレス / 3=エンドレス+鍋2つ'),
+    ('グループ', 'G1〜G8。順序統制の割り当て'),
     ('セッション番号', 'その参加者の何回目のセッションか'),
     ('ゲーム番号', 'サーバー内の通し番号'),
     ('地図', 'exp_ring=リング / exp_partition=仕切り'),
@@ -572,7 +575,11 @@ def assignment_key(participant, pattern):
     やり直しにならないようにする。
     """
     pattern = pattern_of(pattern)
-    return participant if pattern == DEFAULT_PATTERN else f'{participant}#p{pattern}'
+    base = (participant if pattern == DEFAULT_PATTERN
+            else f'{participant}#p{pattern}')
+    # 割り当ての決まりを変えたら別の名前にする。古いくじ引きの並びを
+    # そのまま使い続けると、順序統制が効かない。
+    return f'{base}@{design.DESIGN_VERSION}'
 
 
 def assignment_for(participant, pattern=DEFAULT_PATTERN):
@@ -598,9 +605,22 @@ def assignment_for(participant, pattern=DEFAULT_PATTERN):
             return got == want
 
         if not rec or not _same(rec.get('order') or []):
-            order = all_conditions(pattern)
-            random.shuffle(order)
+            # 順序統制(カウンターバランス)に従って並べる。くじ引きにすると、
+            # ある条件だけたまたま後半に偏る参加者が出る。8セッションは
+            # 学習効果が強いので、少人数では打ち消されない。
+            plan = design.plan_for(participant)
+            order = [{'map': c['map'], 'skip_budget': c['skip_budget'],
+                      'position': c['position'], 'block': c['block']}
+                     for c in plan]
+            if not _same(order):
+                # パターン1のように条件の数が違うときは、これまでどおり
+                # くじ引きにする(順序統制はパターン3の8条件が前提)。
+                order = all_conditions(pattern)
+                random.shuffle(order)
+            g = design.group_of(participant)
             rec = {'order': order, 'done': 0, 'pattern': pattern_of(pattern),
+                   'group': g['name'], 'row': g['row'],
+                   'design': design.DESIGN_VERSION,
                    'created': datetime.now().isoformat(timespec='seconds')}
             data[key] = rec
             _save_assignments(data)
@@ -1045,17 +1065,23 @@ class WebGamePlay:
             return out
 
         if mode == 'practice':
-            # 本番と同じ条件を、毎回くじ引きで決める。設定は選ばせない。
-            map_name = random.choice([m for m, _, _ in MAP_CHOICES])
+            # 練習は本番の前に1回だけ。条件をくじ引きにすると、その回だけ
+            # 余分に経験した条件が参加者ごとに変わってしまう。
+            #   地図        本番の1つ目と同じ(先に触る地図で配置を覚える)
+            #   skip_budget 0 に固定(全員同じなら、条件間の差には効かない)
+            #   注文構成    本番で使わないもの(同じ並びを2回遊ばせない)
+            practice_pid = str(choice.get('participant') or '').strip()
+            pr = design.practice_condition(practice_pid)
+            map_name = pr['map']
             preset = EXPERIMENT_MAP_PRESETS[map_name]
             sets = order_sets_for(preset)
-            cases = experiment_case_indices(preset) or list(range(len(sets)))
-            case = random.choice(cases)
+            used = experiment_case_indices(preset) or []
+            case = design.practice_case(len(sets), used)
             return {'mode': 'practice', 'map': map_name, 'preset': preset,
                     'case': case, 'recipes': list(sets[case]),
-                    'picked_by': 'practice',
+                    'picked_by': 'practice', 'group': pr['group'],
                     'instruction': INSTRUCTION_TIMING_ONCE_AT_START,
-                    'skip_budget': random.choice(list(SKIP_BUDGETS))}
+                    'skip_budget': pr['skip_budget']}
 
         participant = str(choice.get('participant') or '').strip()
         if participant:
@@ -1068,10 +1094,20 @@ class WebGamePlay:
             preset = spec['presets'][cond['map']]
             sets = order_sets_for(preset)
             cases = experiment_case_indices(preset) or list(range(len(sets)))
-            case = random.choice(cases)
+            # 注文の構成は、かたまりの中の「何番目か」だけで決める。
+            # くじ引きにすると、条件の比較に注文の違いが混ざる。位置で
+            # 決めれば参加者をまたいで同じになり、しかも skip_budget の
+            # 並びはラテン方格で回っているので、4行そろえば
+            # (skip_budget x 注文構成) がちょうど1回ずつ現れる。
+            position = cond.get('position')
+            if position is None:
+                position = (done % len(cases)) + 1
+            case = design.case_for(cases, position)
+            g = design.group_of(participant)
             return {'map': cond['map'], 'preset': preset, 'case': case,
                     'recipes': list(sets[case]), 'picked_by': 'experiment',
                     'participant': participant, 'session': done + 1,
+                    'group': g['name'], 'row': g['row'],
                     'pattern': pattern,
                     'endless': spec['endless'], 'seconds': spec['seconds'],
                     'pots': spec.get('pots', 1),
@@ -1240,6 +1276,7 @@ class WebGamePlay:
             '記録時刻': now,
             '参加者ID': sel['participant'],
             'パターン': sel.get('pattern', DEFAULT_PATTERN),
+            'グループ': sel.get('group', ''),
             'セッション番号': sel.get('session'),
             '地図': sel.get('map'), '猶予': sel.get('skip_budget'),
             '注文の組み合わせ番号': sel.get('case'),
@@ -1291,6 +1328,7 @@ class WebGamePlay:
                 '記録時刻': now,
                 '参加者ID': sel['participant'],
                 'パターン': sel.get('pattern', DEFAULT_PATTERN),
+                'グループ': sel.get('group', ''),
                 'セッション番号': sel.get('session'),
                 'ゲーム番号': self.game_id,
                 '地図': sel.get('map'), '猶予': sel.get('skip_budget'),
@@ -2566,6 +2604,7 @@ async def survey(req: Request):
         '記録時刻': row['timestamp'],
         '参加者ID': pid,
         'パターン': body.get('pattern'),
+        'グループ': body.get('group', ''),
         'セッション番号': body.get('session'),
         '地図': body.get('map'),
         '猶予': body.get('skip_budget'),
