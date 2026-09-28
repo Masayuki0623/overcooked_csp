@@ -299,6 +299,18 @@ def interact(agent, world, current_time) -> Event:
                 needs_chopped = False
             if isinstance(gs, Cutboard) and needs_chopped:
                 obj.chop(current_time)
+                # 置いてある物を切り終えたときは、これまで何の記録も
+                # 残っていなかった。Chop_ が出るのは「持っている物を
+                # まな板に置いた瞬間」だけだったため、まな板の前で
+                # 押し続けて切り上げた分は、誰がやったのか追えなかった。
+                # 切り終わった1回だけ記録する(途中の一押しでは出さない)。
+                try:
+                    if not obj.needs_chopped():
+                        return Event(playerA=agent.name,
+                                     event=f'Chop_{obj.full_name}',
+                                     location=gs.location, time=current_time)
+                except AttributeError:
+                    pass
             else:
                 gs.release()
                 agent.acquire(obj)

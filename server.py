@@ -344,7 +344,14 @@ QUANT_COLUMNS = (
        ('繰り上がった順位', '指示なしの実行順位 - 実際の実行順位'),
        ('着手した時刻_秒', 'AI がその作業に手を付けたゲーム内時刻'),
        ('着手までの秒数', '指示してから、実際に取りかかるまでの秒数'),
-       ('着手せず終了', '1=最後まで取りかからなかった(待ち時間が測れていない)')]
+       ('着手せず終了', '1=最後まで取りかからなかった(待ち時間が測れていない)'),
+       ('人がやったか',
+        '1=指示した作業を参加者が自分でやってしまった / 0=やっていない。'
+        '指示は AI 宛てだが、待ちきれずに自分で片づけることがある'),
+       ('人がやった時刻_秒', '参加者がその作業をやり遂げたゲーム内時刻'),
+       ('人が触った時刻_秒', 'やり遂げていなくても、その材料に最初に触った時刻'),
+       ('先にやったのは',
+        'AI=AIが先 / 人=参加者が先 / 両方なし=どちらも手を付けずに終わった')]
     + _SCORE_COLUMNS
     + [('正式な回か', '1=正式に数える回 / 0=バグ報告や途中離脱でやり直しになる回')])
 QUANT_FIELDS = [c for c, _ in QUANT_COLUMNS]
@@ -390,6 +397,10 @@ INSTRUCTION_COLUMNS = [
     ('着手した時刻_秒', 'AI がその作業に手を付けたゲーム内時刻'),
     ('着手までの秒数', '指示してから、実際に取りかかるまでの秒数'),
     ('着手せず終了', '1=最後まで取りかからなかった(待ち時間が測れていない)'),
+    ('人がやったか', '1=指示した作業を参加者が自分でやってしまった / 0=やっていない'),
+    ('人がやった時刻_秒', '参加者がその作業をやり遂げたゲーム内時刻'),
+    ('人が触った時刻_秒', 'やり遂げていなくても、その材料に最初に触った時刻'),
+    ('先にやったのは', 'AI=AIが先 / 人=参加者が先 / 両方なし=どちらも手を付けずに終わった'),
     ('提供数', 'その回に出せた品数'),
     ('失敗数', 'その回に時間切れになった注文の数'),
     ('プレイ時間_秒', ''),
@@ -1255,6 +1266,27 @@ class WebGamePlay:
             accepted = p.get('accepted_env_time')
             started = p.get('started_env_time')
             loss = p.get('time_loss') or {}
+            # 指示は AI 宛てだが、待ちきれずに参加者が自分でやってしまう
+            # ことがある。どちらがやったのかを残さないと、「指示に従った」
+            # ように見える回と区別できない。
+            human_done = p.get('human_done_env_time')
+            human_touch = p.get('human_touch_env_time')
+            if started is not None and human_done is not None:
+                first = 'AI' if float(started) <= float(human_done) else '人'
+            elif started is not None:
+                first = 'AI'
+            elif human_done is not None:
+                first = '人'
+            else:
+                first = '両方なし'
+            who = {
+                '人がやったか': int(human_done is not None),
+                '人がやった時刻_秒': (round(float(human_done), 1)
+                                      if human_done is not None else None),
+                '人が触った時刻_秒': (round(float(human_touch), 1)
+                                      if human_touch is not None else None),
+                '先にやったのは': first,
+            }
             append_csv(INSTRUCTION_LOG_PATH, INSTRUCTION_FIELDS, {
                 '記録時刻': now,
                 '参加者ID': sel['participant'],
@@ -1291,6 +1323,7 @@ class WebGamePlay:
                     round(max(0.0, float(started) - float(accepted)), 1)
                     if started is not None and accepted is not None else None),
                 '着手せず終了': int(started is None),
+                **who,
                 '提供数': res.get('served'), '失敗数': res.get('failed'),
                 'プレイ時間_秒': res.get('makespan_s'),
                 '正式な回か': int(not reason),
@@ -1322,6 +1355,7 @@ class WebGamePlay:
                     round(max(0.0, float(started) - float(accepted)), 1)
                     if started is not None and accepted is not None else None),
                 '着手せず終了': int(started is None),
+                **who,
                 **score,
                 '正式な回か': int(not reason),
             }, notes=QUANT_NOTES)

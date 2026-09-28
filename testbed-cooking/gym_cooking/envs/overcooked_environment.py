@@ -49,6 +49,22 @@ class MapSetting:
 
     num_agents: int = 2  # fixed
 
+# その作業を「やり遂げた」ことを表す出来事。触っただけ(拾う・置く)と
+# 区別するために使う。指示された作業を参加者が自分でやってしまったのか、
+# 近くで触っただけなのかは、記録の上では別物にしておきたい。
+_INSTRUCTION_EVENT_BY_VERB = {
+    'chop': 'Chop_',
+    'cook': 'Cook_',
+    'mix': 'Mix_',
+    'serve': 'Deliver_',
+    'serve_salad': 'Deliver_',
+    'serve_juice': 'Deliver_',
+    'serve_from_counter': 'Deliver_',
+    'carry': 'Put_',
+    'handover': 'Put_',
+}
+
+
 class OvercookedEnvironment(gym.Env):
     """Environment object for Overcooked."""
 
@@ -573,6 +589,21 @@ class OvercookedEnvironment(gym.Env):
                                 _obj = (_payload.get('obj')
                                         if isinstance(_payload, dict) else None)
                                 if _obj and _obj.lower() not in str(result.event).lower():
+                                    continue
+                                # 指示は AI 宛てだが、待ちきれずに参加者が
+                                # 自分でやってしまうことがある。そのときも
+                                # 「指示した作業は済んだ」ように見えるので、
+                                # どちらがやったのかを残さないと区別できない。
+                                if pending.get('target_idx', None) != i:
+                                    _verb = (_payload.get('verb')
+                                             if isinstance(_payload, dict) else None)
+                                    _mark = _INSTRUCTION_EVENT_BY_VERB.get(_verb)
+                                    if (_mark
+                                            and str(result.event).startswith(_mark)
+                                            and pending.get('human_done_env_time') is None):
+                                        pending['human_done_env_time'] = self.current_time
+                                    if pending.get('human_touch_env_time') is None:
+                                        pending['human_touch_env_time'] = self.current_time
                                     continue
                                 if (not pending.get('execution_logged', False)) and pending.get('target_idx', None) == i:
                                     pending['execution_logged'] = True
