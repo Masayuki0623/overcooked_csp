@@ -1389,8 +1389,10 @@
       ? (assignment.finished
           ? `${assignment.total} セッション全部が終わっています`
           : (assignment.agent
-              ? `${assignment.agent} と ${assignment.game_in_block} 回目 ` +
-                `(全体 ${assignment.session} / ${assignment.total})`
+              ? ((assignment.games_per_block || 1) > 1
+                  ? `${assignment.agent} と ${assignment.game_in_block} 回目 ` +
+                    `(全体 ${assignment.session} / ${assignment.total})`
+                  : `${assignment.agent} とのゲーム (${assignment.session} / ${assignment.total})`)
               : `セッション ${assignment.session} / ${assignment.total}`))
       : '';
     const idBox = (DEV && !participantId) || (DEV && !experiment)
@@ -1844,9 +1846,9 @@
       'AIと協力して料理を作るゲームをプレイしていただき、',
       '協力のしやすさについてお伺いします。']],
     ['■ 所要時間', [
-      '約40分',
+      '約30分',
       '・操作説明と練習：約10分',
-      '・本番のプレイ：ゲーム18回（6人のAIと3回ずつ。注文3品を出し切るまで、1回あたり1〜2分）とアンケート6回',
+      '・本番のプレイ：ゲーム6回（6人のAIと1回ずつ。注文3品を出し切るまで、1回あたり1〜2分）とアンケート6回',
       '・終了後の説明：約5分']],
     ['■ データの取り扱い', [
       '・回答は参加者番号で管理し、お名前は分析に使用しません',
@@ -2529,8 +2531,9 @@
       '<div class="survey">' +
       '<div class="big">ゲーム終了</div>' + summary +
       (exp.agent
-        ? `<div class="sub">${esc(exp.agent)} との ${exp.games_per_block || 3} 回のゲームについてお答えください` +
-          `<br>(全体 ${exp.session} / ${exp.sessions_total})</div>`
+        ? `<div class="sub">${esc(exp.agent)} との` +
+          ((exp.games_per_block || 1) > 1 ? ` ${exp.games_per_block} 回のゲーム` : 'ゲーム') +
+          `についてお答えください<br>(${exp.session} / ${exp.sessions_total})</div>`
         : `<div class="sub">セッション ${exp.session} / ${exp.sessions_total}</div>`) +
       `<h3>${esc(exp.agent || 'AI')}とのやりとりは、どうでしたか</h3>` + rapportQs +
       `<h3>${esc(exp.agent || 'AI')}に出した指示について</h3>` + instrQs +

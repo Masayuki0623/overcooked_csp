@@ -544,27 +544,29 @@ EXPERIMENT_PATTERNS = {
     },
     4: {
         # 固定の注文3品・鍋1つ・指示は開始時に1回。ここまではパターン2と
-        # 同じ。違いは進み方で、1つの条件(地図 × 割り込み許容数)を
-        # 3ゲーム続けて遊び、そのあとにアンケートを1回答える。
-        # 6条件 × 3ゲーム = 18ゲーム、アンケートは6回。
-        # 参加者には条件ごとに別の相方(エージェント A〜F)として見せる。
-        # 同じ割り込み許容数でも地図が違えば別の名前にする。
+        # 同じ。違いは見せ方で、参加者には条件(地図 × 割り込み許容数)ごとに
+        # 別の相方「エージェント A〜F」として見せる。同じ割り込み許容数でも
+        # 地図が違えば別の名前にする。1条件1ゲームで、毎回アンケート
+        # (6条件 = 6ゲーム、アンケート6回)。
+        # games_per_block を 3 にすると「同じ相方と3ゲーム遊んでから
+        # アンケート」になる(一度そうしたが、1ゲームごとに戻した)。
         'pots': 1,
         'label': 'パターン4',
         'desc': '注文3品を出し切るまで。指示は開始時に1回。'
-                '同じ相方と3ゲーム遊んでからアンケート。',
+                '条件ごとに別の相方(エージェント A〜F)として見せ、毎回アンケート。',
         'endless': False,
         'presets': {'exp_ring': 'experiment1', 'exp_partition': 'experiment2'},
         'instruction': INSTRUCTION_TIMING_ONCE_AT_START,
         'instruct_every': None,
         'seconds': None,
         'orders_active': None,
-        'games_per_block': 3,
+        'games_per_block': 1,
+        'named_agents': True,
     },
 }
 DEFAULT_PATTERN = 1
 # 本実験で使うパターン。固定の注文3品・鍋1つ・指示は開始時に1回、
-# 同じ相方と3ゲーム遊んでからアンケート(パターン4)。
+# 条件ごとに別の相方として見せて毎回アンケート(パターン4)。
 # 参加者ごとに進み方が変わらないよう、ここで固定する。
 EXPERIMENT_PATTERN = 4
 
@@ -577,6 +579,12 @@ def games_per_block_of(pattern):
 def total_games_of(rec, pattern):
     """その割り当てで遊ぶゲームの総数(条件の数 × 1条件あたりのゲーム数)。"""
     return len(rec.get('order') or []) * games_per_block_of(pattern)
+
+
+def named_agents_of(pattern):
+    """条件ごとに別の相方の名前を見せるパターンか。"""
+    spec = EXPERIMENT_PATTERNS.get(pattern_of(pattern), {})
+    return bool(spec.get('named_agents')) or games_per_block_of(pattern) > 1
 
 
 def agent_label(cond_idx):
@@ -1475,7 +1483,7 @@ class WebGamePlay:
                     # パターンでは block=session、回=1、毎回アンケート。
                     'block': cond_idx + 1, 'game_in_block': game_in_block,
                     'games_per_block': gpb,
-                    'agent': agent_label(cond_idx) if gpb > 1 else None,
+                    'agent': agent_label(cond_idx) if named_agents_of(pattern) else None,
                     'survey_due': game_in_block == gpb,
                     'endless': spec['endless'], 'seconds': spec['seconds'],
                     'pots': spec.get('pots', 1),
@@ -3250,7 +3258,7 @@ async def resume(participant: str = ''):
     return JSONResponse({'ok': True, 'participant_id': pid,
                          'session': min(done + 1, total), 'total': total,
                          'agent': (agent_label(min(done // gpb, len(rec['order']) - 1))
-                                   if gpb > 1 else None),
+                                   if named_agents_of(EXPERIMENT_PATTERN) else None),
                          'finished': done >= total})
 
 
@@ -3281,7 +3289,7 @@ async def assignment(participant: str = '', pattern: int = DEFAULT_PATTERN):
     return JSONResponse({'ok': True, 'participant_id': pid, 'pattern': pat,
                          'done': done,
                          'total': total, 'session': min(done + 1, total),
-                         'agent': agent_label(cond_idx) if gpb > 1 else None,
+                         'agent': agent_label(cond_idx) if named_agents_of(pat) else None,
                          'game_in_block': done % gpb + 1, 'games_per_block': gpb,
                          'finished': done >= total, 'next_map_label': label})
 
