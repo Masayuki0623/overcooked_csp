@@ -124,6 +124,10 @@ RECIPE_CHOICES = [
 # チュートリアルの段取り。前から順に1つずつ遊んでもらう。
 #   最初の3つは1人用の小さい台所で、その回に使う材料と道具だけが置いてある。
 #   最後の1つだけ、本番と同じリングの地図で AI と一緒に遊ぶ(指示あり)。
+# チュートリアルの最後(AI と一緒に作る)の長さ。本番は90秒だが、
+# ここは練習なので短くする。
+TUTORIAL_AI_SECONDS = 30
+
 TUTORIAL_STEPS = [
     {'key': 'salad', 'map': 'tutorial_salad', 'solo': True,
      'title': 'サラダを作る', 'orders': 2},
@@ -1185,7 +1189,14 @@ class WebGamePlay:
                 out.update({'preset': preset, 'case': case,
                             'recipes': list(sets[case]),
                             'instruction': INSTRUCTION_TIMING_ONCE_AT_START,
-                            'skip_budget': SKIP_BUDGETS[len(SKIP_BUDGETS) // 2]})
+                            'skip_budget': SKIP_BUDGETS[len(SKIP_BUDGETS) // 2],
+                            # 本番と同じ進み方を短く体験してもらう。
+                            # 30秒のエンドレスで、注文は片づくたびに補充。
+                            # 長さ以外は本番(パターン3)と揃える。
+                            'endless': True,
+                            'seconds': TUTORIAL_AI_SECONDS,
+                            'orders_active': spec['orders'],
+                            'pots': 2})
             return out
 
         if mode == 'practice':
@@ -2946,6 +2957,34 @@ async def tutorial():
         {'key': s['key'], 'title': s['title'], 'solo': s['solo'],
          'orders': s['orders']}
         for s in TUTORIAL_STEPS]})
+
+
+@app.get('/api/resume')
+async def resume(participant: str = ''):
+    """続きから始めたい人の番号を確かめる。
+
+    名簿に載っている番号だけを通す。assignment_for は知らない番号でも
+    新しい割り当てを作ってしまうので、ここを通さないと、打ち間違いが
+    そのまま別人として登録される。
+    """
+    pid = str(participant or '').strip()
+    if not pid:
+        return JSONResponse({'ok': False, 'error': '参加者番号を入れてください'},
+                            status_code=400)
+    row = next((r for r in _read_roster()
+                if str(r.get('参加者番号', '')).strip().lower() == pid.lower()), None)
+    if row is None:
+        return JSONResponse({'ok': False,
+                             'error': f'{pid} は登録されていません。'
+                                      '番号をお確かめください'},
+                            status_code=404)
+    pid = str(row.get('参加者番号', '')).strip()
+    rec = assignment_for(pid, EXPERIMENT_PATTERN)
+    done = int(rec.get('done', 0))
+    total = len(rec.get('order') or [])
+    return JSONResponse({'ok': True, 'participant_id': pid,
+                         'session': min(done + 1, total), 'total': total,
+                         'finished': done >= total})
 
 
 @app.get('/api/assignment')
