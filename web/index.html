@@ -273,6 +273,8 @@
   #plan tr.done td { color: #5d6774; text-decoration: line-through; }
   #plan tr.now td { color: #8fd3a8; font-weight: 600; }
   #plan .now-t { color: var(--muted); }
+  #plan .now-t .ok { color: #8fd3a8; }
+  #plan .now-t .ng { color: var(--bad); }
 
   /* 参加者番号は書き換えさせない。入力欄ではなく、ただの表示にする。 */
   .fixed-id {
@@ -1337,8 +1339,14 @@
                           pots: 1 };
   let pick = { map: null, preset: null, case: '', instruction: 'once_at_start',
                skip_budget: 0, instruct_every: 3, pattern: 1,
+               // 既定は本番と同じ「2人で分担」。デバッグで見比べるときだけ
+               // 切り替える。ここが 0 だと、デバッグの計画表がいつも
+               // AI 単独になり、本番と違うものを見ることになる。
+               two_agent: 1,
                debug: Object.assign({}, DEBUG_DEFAULT) };
   try { Object.assign(pick, JSON.parse(localStorage.getItem(PICK_STORE) || '{}')); } catch (e) {}
+  // 前に保存した設定には two_agent が無い。その場合は既定(2人で分担)にする。
+  if (pick.two_agent === undefined || pick.two_agent === null) pick.two_agent = 1;
   // 前に保存した設定には、あとから足した項目が入っていない。既定で埋めて
   // おかないと、その欄が空のまま出る(実測: 鍋の数を足したとき、以前から
   // 使っている端末では空欄になった)。
@@ -1590,7 +1598,9 @@
              `<td>${f(t.start)}</td><td>${f(t.end)}</td><td>${f(t.dur)}</td></tr>`;
     }).join('') || '<tr><td colspan="5">（無し）</td></tr>';
     box.innerHTML =
-      `<div class="now-t">いま ${Number(msg.now).toFixed(1)} 秒</div>` +
+      `<div class="now-t">いま ${Number(msg.now).toFixed(1)} 秒　` +
+      `<span class="${msg.two_agent ? 'ok' : 'ng'}">` +
+      `割り当て: ${msg.two_agent ? '2人で分担' : 'AIが全部やる前提'}</span></div>` +
       (msg.agents || []).map((a) =>
         `<h4>${esc(a.who)}</h4><table>` +
         '<tr><th>順</th><th style="text-align:left">作業</th>' +

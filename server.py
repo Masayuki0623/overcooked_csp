@@ -1935,6 +1935,10 @@ class WebGamePlay:
         done = set(getattr(ai, 'completed_task_ids', None) or ())
         cur = getattr(ai, 'current_task_idx', None) or {}
         out = {'now': round(float(getattr(self.env, 'current_time', 0.0) or 0.0), 1),
+               # いま2人ぶんの割り当てで解いているかどうか。画面に出して
+               # おかないと、AI が全部抱えている計画を見たときに、それが
+               # 設定なのか結果なのか分からない。
+               'two_agent': bool(getattr(ai, 'two_agent_assignment', False)),
                'agents': []}
         for idx in (own, 1 - own):
             rows = []
