@@ -4248,11 +4248,150 @@ class CSPAgent:
                 best_dist = dist
         return best
 
+    def _held_raw_ingredient(self, env, obj):
+        """誰かが未加工の obj(Fresh/Chopping)を手に持っていれば (番号, 位置)。
+
+        手に持っている物は世界の一覧(pos_obj)には無いので、これまで計画から
+        見えていなかった。すると「切る」は必ず供給口から取りに行く前提に
+        なり、たとえば人間がレタスを持っていても、その工程の見積もりは
+        「供給口へ行って取る」ぶんだけ長くなる(報告あり)。
+        """
+        agents = getattr(env, 'agents', None) or getattr(env, 'sim_agents', None) or []
+        want = str(obj).lower()
+        for k, ag in enumerate(agents):
+            h = getattr(ag, 'holding', None)
+            name = getattr(h, 'full_name', '') or ''
+            if not name or '-' in name:
+                continue
+            for prefix in ('Fresh', 'Chopping'):
+                if name.startswith(prefix) and name[len(prefix):].lower() == want:
+                    return k, tuple(ag.location)
+        return None
+
+    def _chop_duration_from_hand(self, env, holder_pos, cutboard_pos, target):
+        """材料を手に持っている人が、その場から刻み終えて置き場に置くまで。
+
+        取りに行く分が無い: まな板へ行く + 置く + 刻む + 取る + 置き場に置く。
+        """
+        try:
+            width = env.world_width; height = env.world_height; grid = env.to_grid
+        except AttributeError:
+            return None
+
+        def adj(pos):
+            out = []
+            for dx, dy in ((0, 1), (0, -1), (1, 0), (-1, 0)):
+                nx, ny = pos[0] + dx, pos[1] + dy
+                if 0 <= nx < width and 0 <= ny < height and grid[nx][ny] == 1:
+                    out.append((nx, ny))
+            return out
+
+        best = None
+        for m in adj(tuple(cutboard_pos)):
+            d1 = self.astar_distance(env, tuple(holder_pos), m)
+            if d1 is None:
+                continue
+            for e in adj(tuple(target)):
+                d2 = self.astar_distance(env, m, e)
+                if d2 is None:
+                    continue
+                tot = d1 + d2
+                if best is None or tot < best:
+                    best = tot
+        if best is None:
+            return None
+        return int(best + INTERACT_FRAMES * 3 + game_config.chopping_steps())
+
+    def _plan_from_hand(self, env, t, resources, order_idx, held_used):
+        """手に持っている物で工程の途中まで済んでいるなら、そこから見積もる。
+
+        切る以外の工程(煮る・盛る・提供・混ぜる・注ぐ)も、手に持っている物は
+        世界の一覧に無いので計画から見えていなかった。皿を持っているのに
+        「皿を取りに行く」から数え、盛り付け済みの皿を持っているのに
+        「鍋から取る」から数えていた(切る工程と同じ報告)。
+        該当すれば t を書き換えて持っている人に固定し、True を返す。
+        """
+        verb, obj, _uid = t['id']
+        if verb not in ('cook', 'serve', 'serve_salad', 'mix', 'serve_juice'):
+            return False
+        agents = getattr(env, 'agents', None) or getattr(env, 'sim_agents', None) or []
+        parts = sorted(p.lower() for p in dish_ingredients(obj))
+        if not parts:
+            return False
+        delivery = resources.get('delivery')
+        pots = resources.get('pots') or []
+        blenders = resources.get('blenders') or []
+        pot = pots[order_idx % len(pots)] if pots else None
+        blender = blenders[order_idx % len(blenders)] if blenders else None
+
+        def dist(a, b):
+            if a is None or b is None:
+                return None
+            return self.astar_distance(env, tuple(a), tuple(b))
+
+        for k, ag in enumerate(agents):
+            if k in held_used:
+                continue
+            name = getattr(getattr(ag, 'holding', None), 'full_name', '') or ''
+            if not name:
+                continue
+            pieces = name.split('-')
+            has_plate = 'Plate' in pieces
+            has_cup = 'Cup' in pieces
+            foods = [x for x in pieces if x not in ('Plate', 'Cup')]
+            chopped = sorted(x[len('Chopped'):].lower() for x in foods if x.startswith('Chopped'))
+            cooked = sorted(x[len('Cooked'):].lower() for x in foods if x.startswith('Cooked'))
+            mixed = sorted(x[len('Mixed'):].lower() for x in foods if x.startswith('Mixed'))
+            if len(chopped) + len(cooked) + len(mixed) != len(foods):
+                continue                     # 生の物が混ざっている(別の工程の物)
+            hpos = tuple(ag.location)
+            plan = None                      # (end_pos, dur)
+            if verb == 'cook' and pot is not None and not has_plate and chopped == parts:
+                d = dist(hpos, pot)
+                plan = (pot, d, INTERACT_FRAMES * 1)
+            elif verb == 'serve' and delivery is not None:
+                if has_plate and cooked == parts:
+                    plan = (delivery, dist(hpos, delivery), INTERACT_FRAMES * 1)
+                elif has_plate and not foods and pot is not None:
+                    d1, d2 = dist(hpos, pot), dist(pot, delivery)
+                    plan = (delivery, None if d1 is None or d2 is None else d1 + d2,
+                            INTERACT_FRAMES * 2)
+            elif verb == 'serve_salad' and delivery is not None:
+                if has_plate and chopped == parts:
+                    plan = (delivery, dist(hpos, delivery), INTERACT_FRAMES * 1)
+                elif not has_plate and chopped == parts:
+                    plate = self._pick_plate(env, resources, delivery)
+                    d1, d2 = dist(hpos, plate), dist(plate, delivery)
+                    plan = (delivery, None if d1 is None or d2 is None else d1 + d2,
+                            INTERACT_FRAMES * 2)
+            elif verb == 'mix' and blender is not None and not has_cup and chopped == parts:
+                plan = (blender, dist(hpos, blender),
+                        INTERACT_FRAMES * 1 + game_config.blending_steps())
+            elif verb == 'serve_juice' and delivery is not None:
+                if has_cup and mixed == parts:
+                    plan = (delivery, dist(hpos, delivery), INTERACT_FRAMES * 1)
+                elif has_cup and not foods and blender is not None:
+                    d1, d2 = dist(hpos, blender), dist(blender, delivery)
+                    plan = (delivery, None if d1 is None or d2 is None else d1 + d2,
+                            INTERACT_FRAMES * 2)
+            if plan is None or plan[1] is None:
+                continue
+            end_pos, d, extra = plan
+            t['start_pos'] = hpos
+            t['end_pos'] = tuple(end_pos)
+            t['held_by'] = k
+            t['dur'] = int(d + extra)
+            held_used.add(k)
+            return True
+        return False
+
     def _annotate_task_geometry(self, env, tasks, default_start_pos, resources=None):
         # 資材の一覧は担当者によって変わる(仕切りの向こうの物は使えない)。
         # 指定が無ければ従来どおり全部の資材から選ぶ。
         if resources is None:
             resources = self._get_resources(env)
+        # 手に持っている材料を、この呼び出しの中で1工程にだけ充てる。
+        held_used = set()
 
         def raw_base_name(item):
             """まだ切り終えていない材料の名前。切りかけ(Chopping)も含む。
@@ -4325,7 +4464,9 @@ class CSPAgent:
             if order_idx is None:
                 order_idx = (tid[2] if tid and isinstance(tid[2], int) and tid[2] >= 0 else 0)
 
-            if verb == 'chop' and t.get('carry_from'):
+            if verb in ('cook', 'serve', 'serve_salad', 'mix', 'serve_juice')                     and self._plan_from_hand(env, t, resources, order_idx, held_used):
+                pass
+            elif verb == 'chop' and t.get('carry_from'):
                 # 切らずに運ぶだけ。出発点はもう切ってある物が乗っている台。
                 src = tuple(t['carry_from'])
                 dest = t.get('assigned_counter') or src
@@ -4340,6 +4481,27 @@ class CSPAgent:
                 t['start_pos'] = tuple(t['assigned_counter'])
                 t['end_pos'] = tuple(t['assigned_counter'])
                 t['fixed_res'] = ('cutboard', board)
+
+            elif verb == 'chop' and (self._held_raw_ingredient(env, obj) or (None,))[0] not in (None, *held_used):
+                # 誰かがその材料を手に持っている。取りに行く必要は無いので、
+                # 持っている人の位置から「まな板へ行く → 刻む → 置く」で
+                # 見積もり、その人に固定する(held_by。割り当てで読む)。
+                k, hpos = self._held_raw_ingredient(env, obj)
+                held_used.add(k)
+                cutboards = resources['cutboards'] or [default_start_pos]
+                best_cb = self._nearest_by_path(env, hpos, cutboards) or get_nearest(hpos, cutboards)
+                if t.get('assigned_counter'):
+                    target = t['assigned_counter']
+                else:
+                    counters = env.get_pos_by_obj_gs(gs="Counter")
+                    target = get_nearest(best_cb, counters) if counters else best_cb
+                t['start_pos'] = tuple(hpos)
+                t['end_pos'] = tuple(target)
+                t['fixed_res'] = ('cutboard', best_cb)
+                t['held_by'] = k
+                dur = self._chop_duration_from_hand(env, hpos, best_cb, target)
+                if dur is not None:
+                    t['dur'] = dur
 
             elif verb == 'chop':
                 tile_map = INGREDIENT_TILE
@@ -7489,6 +7651,12 @@ class CSPAgent:
                             # いま相手が手をつけていると見た1つだけは固定する
                             # (目の前でやっている作業を横取りしないように)。
                             pinned = False
+                        # 材料を手に持っている人がいる工程は、その人がやる。
+                        # 相手に渡すより、持っている人がそのまま刻むほうが速い。
+                        _hb = tasks[i].get('held_by')
+                        if _hb is not None:
+                            forced = 1 if int(_hb) == 1 else 0
+                            pinned = True
                         if pinned:
                             model.Add(is_a1[i] == forced)
                     self.predicted_human_tasks = (
