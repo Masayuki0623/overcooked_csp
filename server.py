@@ -486,6 +486,9 @@ PATTERN_SKIP_BUDGETS = {
     1: tuple(SKIP_BUDGETS),
     2: tuple(SKIP_BUDGETS) + (SKIP_BUDGET_INF,),
     3: tuple(SKIP_BUDGETS) + (SKIP_BUDGET_INF,),
+    # パターン4も 0 / 1 / inf の3水準(順序統制の設計と同じ)。ここに無いと
+    # 2水準に落ちて4条件になり、設計と合わずにくじ引きへ戻ってしまう。
+    4: tuple(SKIP_BUDGETS) + (SKIP_BUDGET_INF,),
 }
 
 
