@@ -320,7 +320,12 @@ class TaskAgent:
             
         width = env.world_width
         height = env.world_height
-        grid = env.to_grid_a
+        # 相手のいるマスも「床」として扱う(to_grid_a は相手のマスを壁に
+        # している)。壁にすると、相手が目的地の前や一本道に立っただけで
+        # 経路が無くなり、その場で止まってしまう(報告あり)。相手はいずれ
+        # 動くので経路は通し、そのマスにはペナルティを付けて迂回できるなら
+        # 迂回させ、できなければ手前で待つ(move_to)。
+        grid = env.to_grid
 
         def in_bounds(x, y):
             return 0 <= x < width and 0 <= y < height
@@ -451,7 +456,8 @@ class TaskAgent:
         adjacents = []
         for dx, dy in [(0,1),(0,-1),(1,0),(-1,0)]:
             nx, ny = target_pos[0]+dx, target_pos[1]+dy
-            if 0 <= nx < env.world_width and 0 <= ny < env.world_height and env.to_grid_a[nx][ny] == 1:
+            # 相手が立っているマスも候補に入れる(相手はいずれ動く)。
+            if 0 <= nx < env.world_width and 0 <= ny < env.world_height and env.to_grid[nx][ny] == 1:
                 adjacents.append((nx, ny))
 
         if not adjacents:
@@ -497,6 +503,22 @@ class TaskAgent:
 
         # もし次の一歩が他のエージェントの現在位置なら、通り過ぎるのを待機する
         if next_step in dynamic_obstacles:
+            if next_step == chosen_adj:
+                # 目的地の前のマスに相手が立っている。相手はいずれ動くので、
+                # 退避せずにその場で待つ(以前は 15 フレームで無作為に一歩
+                # 離れていた。目的地の前で行ったり来たりして見える)。
+                # 別の隣接マスから近づける経路があるなら、そちらへ回る。
+                for adj in sorted(costs, key=costs.get):
+                    path_alt = paths[adj]
+                    if adj in dynamic_obstacles or not path_alt:
+                        continue
+                    if path_alt[0] in dynamic_obstacles:
+                        continue
+                    self._last_adjacent_goal = adj
+                    self.planned_path = path_alt
+                    return (path_alt[0][0] - self_pos[0], path_alt[0][1] - self_pos[1])
+                self.wait_count = 0
+                return (0, 0)
             self.wait_count += 1
             # print(f"[{env.agent_idx}:{self.task_name}] 最短距離上の障害物を避ける迂回ルートがない(またはコスト高すぎる)と判断し待機 (wait={self.wait_count}, cost={min_cost})")
 

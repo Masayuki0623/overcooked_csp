@@ -3281,6 +3281,32 @@ async def consent(req: Request):
     # 錠は1つだけ。append_csv は自分でファイル錠を取るので、ここで
     # 同じファイルの錠を先に取ると自分自身を待ち続けて止まる(実測)。
     # assignment_for も中で _assign_lock を取るので、外では取らない。
+    # 同じ名前がもう名簿にあるなら、新しい番号を振らない。
+    #   終わっている人  -> 「すでに終わっています」と返して始めさせない
+    #   途中の人        -> その番号で続きから(同意はもう取れている)
+    # 以前は毎回新しい番号を振っていたので、終わった人が同じ名前で入ると
+    # 最初からもう1周できてしまった(報告あり)。
+    def _same_name(a, b):
+        return ''.join(str(a).split()).lower() == ''.join(str(b).split()).lower()
+    existing = [r for r in _read_roster()
+                if _same_name(r.get('お名前', ''), name)
+                and str(r.get('参加者番号', '')).strip()]
+    if existing:
+        prev = existing[-1]
+        prev_pid = str(prev.get('参加者番号')).strip()
+        prev_rec = assignment_for(prev_pid, EXPERIMENT_PATTERN)
+        prev_done = int(prev_rec.get('done', 0))
+        prev_total = total_games_of(prev_rec, EXPERIMENT_PATTERN)
+        if prev_done >= prev_total or str(prev.get('完了したか', '')).strip() == '1':
+            print(f'[server] 同意: {name!r} は {prev_pid} として全 {prev_total} 回を終えている', flush=True)
+            return JSONResponse({'ok': False, 'finished': True, 'participant_id': prev_pid,
+                                 'error': f'そのお名前のセッションはすでに終わっています'
+                                          f'({prev_pid}、全{prev_total}回)。'},
+                                status_code=409)
+        print(f'[server] 同意: {name!r} は {prev_pid} として途中({prev_done}/{prev_total})。続きから', flush=True)
+        return JSONResponse({'ok': True, 'participant_id': prev_pid, 'resumed': True,
+                             'session': prev_done + 1, 'total': prev_total})
+
     with _roster_lock:
         pid = next_participant_id()
         append_csv(ROSTER_PATH, ROSTER_FIELDS, {
@@ -3292,8 +3318,11 @@ async def consent(req: Request):
             'テスト実行か': int(is_test),
         }, notes=ROSTER_NOTES)
 
-    # 年齢とゲーム経験、そして8セッションぶんの割り当てをここで確定する。
-    pattern = pattern_of(body.get('pattern') or 3)
+    # 年齢とゲーム経験、そして本番ぶんの割り当てをここで確定する。
+    # パターンは本番のもので固定する。画面から来た値を使うと、ゲームで
+    # 使う割り当て(EXPERIMENT_PATTERN)と別の記録に年齢と経験が書かれ、
+    # 定量ファイルの年齢が空になっていた(実測)。
+    pattern = EXPERIMENT_PATTERN
     rec = assignment_for(pid, pattern)
     with _assign_lock, CrossProcessLock(ASSIGN_PATH):
         data = _load_assignments()
@@ -3308,7 +3337,7 @@ async def consent(req: Request):
           f'年齢={age} 経験={exp}' + (' [テスト実行]' if is_test else ''), flush=True)
     # 割り当ての中身は参加者に見せない。
     return JSONResponse({'ok': True, 'participant_id': pid,
-                         'total': len(rec.get('order') or [])})
+                         'total': total_games_of(rec, pattern)})
 
 
 @app.post('/api/withdraw')

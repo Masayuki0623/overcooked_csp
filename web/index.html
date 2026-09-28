@@ -1942,7 +1942,9 @@
       '<div class="c-sec"><div class="c-h">参加者番号</div>' +
       '<div class="c-t">はじめに画面へ出ていた番号です（例: p01）。</div>' +
       '<input type="text" id="rs-id" autocomplete="off" autocapitalize="off" ' +
-      'spellcheck="false" placeholder="p01"></div>' +
+      // この端末で前に使った番号があれば入れておく(打ち直しの手間と打ち間違いを減らす)。
+      `spellcheck="false" placeholder="p01" value="${esc(participantId || '')}"></div>` +
+      (participantId ? '<div class="sub">この端末で前に使った番号を入れてあります</div>' : '') +
       '<div class="err" id="rs-err"></div>' +
       '<div class="go"><button class="primary" id="rs-go">続きから始める</button> ' +
       '<button id="rs-back">戻る</button></div></div>');
@@ -2046,11 +2048,18 @@
       fetch('/api/consent', { method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ agreed, name, age, game_experience: exp.value,
-                               pattern: 3, test: isTest }) })
+                               test: isTest }) })
         .then(r => r.json())
         .then((r) => {
           if (!r.ok) throw new Error(r.error || '登録できませんでした');
           saveParticipant(r.participant_id);
+          if (r.resumed) {
+            // 同じ名前で途中の人。番号を引き継いで続きから。
+            showOverlay('<div class="big">前回の続きから始めます</div>' +
+              `<div class="sub">参加者番号 ${esc(r.participant_id)} / セッション ${r.session} / ${r.total}</div>`);
+            setTimeout(() => { loadAssignment(); showStart(); }, 1800);
+            return;
+          }
           loadAssignment();
           showStart();
         })
