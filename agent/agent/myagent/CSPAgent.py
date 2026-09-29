@@ -2339,7 +2339,8 @@ class CSPAgent:
                 }
                 candidates.append((display, payload))
 
-        # 注文ごとの「作って」
+        # 注文ごとの「作って」。同じ料理が2品あれば個数つき(1つ/2つ)。
+        make_groups = {}
         for order in current_orders:
             uid = order.get('order')
             name = order.get('name')
@@ -2348,14 +2349,21 @@ class CSPAgent:
             chain = self._chain_fixed_ids_for(current_orders, 'make', name, uid, doable)
             if len(chain) < 2:
                 continue                      # 残り1工程なら単一の指示と同じ
-            any_ready = any((c[1], c[2]) in ready for c in chain)
-            candidates.append((f"make_{name.replace(' ', '').replace('-', '_')}", {
-                'fixed_task_id': self._make_fixed_task_id('make', name, uid),
-                'fixed_task_ids': [self._make_fixed_task_id('make', name, uid)],
-                'verb': 'make', 'obj': name, 'order_uids': [uid],
-                'startable': any_ready, 'macro': True, 'chain': chain,
-                'chains': [chain], 'count': 1, 'total': 1,
-            }))
+            make_groups.setdefault(name, {})[uid] = chain
+        for name, chains in make_groups.items():
+            uids = list(chains)
+            total = len(uids)
+            all_chain = [c for ch in chains.values() for c in ch]
+            any_ready = any((c[1], c[2]) in ready for c in all_chain)
+            base = f"make_{name.replace(' ', '').replace('-', '_')}"
+            for count in range(1, total + 1):
+                candidates.append((base if total == 1 else f"{base}_x{count}", {
+                    'fixed_task_id': self._make_fixed_task_id('make', name, uids[0]),
+                    'fixed_task_ids': [self._make_fixed_task_id('make', name, u) for u in uids],
+                    'verb': 'make', 'obj': name, 'order_uids': uids,
+                    'startable': any_ready, 'macro': True, 'chain': all_chain,
+                    'chains': list(chains.values()), 'count': count, 'total': total,
+                }))
 
         return candidates
 
