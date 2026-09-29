@@ -7,7 +7,9 @@
 を解いて CSV に出す。
 
 実行方法:
-    python tools/survey_chain_loss.py [出力CSV] [--maps exp_ring,exp_partition] [--limit N]
+    python tools/survey_chain_loss.py [出力CSV] [--maps exp_ring,exp_partition] [--limit N] [--swap]
+
+--swap を付けると、AI と人の開始位置を入れ替えて解く(仕切りでは AI が鍋側になる)。
 """
 import csv
 import os
@@ -74,6 +76,7 @@ def main():
     out_path = next((a for a in args if a.endswith('.csv')), 'survey_chain_loss.csv')
     maps = list(PRESET)
     limit = None
+    swap = '--swap' in args
     if '--maps' in args:
         maps = args[args.index('--maps') + 1].split(',')
     if '--limit' in args:
@@ -91,6 +94,9 @@ def main():
         recipes = tuple(sets[case])
         env = OvercookedEnvironment(MapSetting(level=m, order_recipes=recipes))
         env.reset()
+        if swap:
+            a0, a1 = env.sim_agents[0], env.sim_agents[1]
+            a0.location, a1.location = a1.location, a0.location
         state = state_of(env)
         ai = new_ai(0)
         cands = ai.get_instruction_candidates(deepcopy(state))
@@ -99,7 +105,7 @@ def main():
         print(f'[{n}/{len(jobs)}] {m} case={case} {recipes} 候補={len(cands)} f={f}  '
               f'経過 {time.time() - t0:.0f}s', flush=True)
         for display, payload in cands:
-            row = {'地図': m, '注文構成': case, '注文': '+'.join(recipes),
+            row = {'配置': '入れ替え' if swap else '通常', '地図': m, '注文構成': case, '注文': '+'.join(recipes),
                    '指示': display, '動詞': payload['verb'], '対象': payload['obj'],
                    '個数': payload.get('count', 1), '同じ工程の数': payload.get('total', 1),
                    '今すぐできるか': int(bool(payload.get('startable'))),
