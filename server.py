@@ -322,12 +322,12 @@ SESSION_COLUMNS = [
     ('started_at', '開始時刻', 'ゲームが動き出した日時(指示の選択とカウントダウンは含まない)'),
     ('participant_id', '参加者ID', ''),
     ('pattern', 'パターン', '4=固定の注文3品・指示は開始時に1回・条件ごとに別の相方'),
-    ('group', 'グループ', '順序統制の割り当て(G1〜G6)'),
+    ('group', 'グループ', '順序統制の割り当て(G1〜G8)'),
     ('session', 'セッション番号', 'その参加者の何回目のゲームか(通し番号)'),
     ('agent', 'エージェント', '参加者に見せた相方の名前'),
     ('game_in_block', 'ブロック内の回', '同じ相方との何ゲーム目か'),
     ('map', '地図', 'exp_ring=リング / exp_partition=仕切り'),
-    ('skip_budget', '割り込み許容数', '0=すぐやる / 1=1つまで割り込み可 / inf=指示を聞かない'),
+    ('skip_budget', '割り込み許容数', '0=すぐやる / 1=1つまで割り込み可 / 2=2つまで / inf=指示を聞かない'),
     ('case', '注文の組み合わせ番号', ''),
     ('orders', '注文', '3品を | で区切る'),
     ('instruction', '指示', '最初の指示(動作_対象)。空=指示なし'),
@@ -472,7 +472,7 @@ _COND_COLUMNS = [
     ('記録時刻', 'この行を書いた日時'),
     ('参加者ID', ''),
     ('パターン', '1=注文3品を出し切る / 2=エンドレス / 3=エンドレス+鍋2つ'),
-    ('グループ', 'G1〜G6。順序統制の割り当て。先にやる地図と、割り込み許容数の順(ラテン方格の行)が決まる'),
+    ('グループ', 'G1〜G8。順序統制の割り当て。先にやる地図と、割り込み許容数の順(ラテン方格の行)が決まる'),
     ('セッション番号', 'その参加者の何回目のゲームか(通し番号)'),
     ('エージェント', '参加者に見せた相方の名前。地図×割り込み許容数の条件ごとに別の名前(パターン4)'),
     ('ブロック内の回', '同じ相方との何ゲーム目か(1〜3)。パターン4以外は1'),
@@ -568,7 +568,7 @@ INSTRUCTION_COLUMNS = [
     ('記録時刻', 'この行を書いた日時'),
     ('参加者ID', ''),
     ('パターン', '1=注文3品を出し切る / 2=エンドレス / 3=エンドレス+鍋2つ'),
-    ('グループ', 'G1〜G6。順序統制の割り当て'),
+    ('グループ', 'G1〜G8。順序統制の割り当て'),
     ('セッション番号', 'その参加者の何回目のセッションか'),
     ('ゲーム番号', 'サーバー内の通し番号'),
     ('地図', 'exp_ring=リング / exp_partition=仕切り'),
@@ -640,6 +640,8 @@ PATTERN_SKIP_BUDGETS = {
     # パターン4も 0 / 1 / inf の3水準(順序統制の設計と同じ)。ここに無いと
     # 2水準に落ちて4条件になり、設計と合わずにくじ引きへ戻ってしまう。
     4: tuple(SKIP_BUDGETS) + (SKIP_BUDGET_INF,),
+    # パターン5は 0 / 1 / 2 / inf の4水準(順序統制は 4x4 のラテン方格)。
+    5: (0, 1, 2, SKIP_BUDGET_INF),
 }
 
 
@@ -717,12 +719,37 @@ EXPERIMENT_PATTERNS = {
         'games_per_block': 1,
         'named_agents': True,
     },
+    5: {
+        # パターン4と同じ進み方で、指示の意味と条件の水準を変えた版
+        # (2026-09-30)。
+        #   - 指示は「工程の鎖」。「〇〇を作って」や、まだ材料の無い
+        #     「煮て」(前提の刻む工程ごと)も指示できる。同じ工程が複数
+        #     あれば個数を選ぶ(「たまねぎを1つ/2つ切って」)。
+        #   - 割り込み許容数 d は「指示を受けてから鎖の最後が終わるまでに、
+        #     AI が鎖の外の工程を挟んでよい数」。鎖の前でも間でも数える。
+        #     煮える待ちの中に丸ごと収まる工程は数えない。
+        #   - 水準は 0 / 1 / 2 / inf の4つ。地図2種 × 4 = 8条件 = 8ゲーム、
+        #     相方は エージェント A〜H、毎回アンケート。
+        'pots': 1,
+        'label': 'パターン5',
+        'desc': '注文3品を出し切るまで。指示は開始時に1回(工程の鎖・個数つき)。'
+                '割り込み許容数は 0/1/2/inf の4水準、条件ごとに別の相方(A〜H)、毎回アンケート。',
+        'endless': False,
+        'presets': {'exp_ring': 'experiment1', 'exp_partition': 'experiment2'},
+        'instruction': INSTRUCTION_TIMING_ONCE_AT_START,
+        'instruct_every': None,
+        'seconds': None,
+        'orders_active': None,
+        'games_per_block': 1,
+        'named_agents': True,
+    },
 }
 DEFAULT_PATTERN = 1
 # 本実験で使うパターン。固定の注文3品・鍋1つ・指示は開始時に1回、
-# 条件ごとに別の相方として見せて毎回アンケート(パターン4)。
+# 条件ごとに別の相方として見せて毎回アンケート。割り込み許容数は
+# 0/1/2/inf の4水準で、指示は工程の鎖(パターン5)。
 # 参加者ごとに進み方が変わらないよう、ここで固定する。
-EXPERIMENT_PATTERN = 4
+EXPERIMENT_PATTERN = 5
 
 
 def games_per_block_of(pattern):
@@ -2218,15 +2245,27 @@ class WebGamePlay:
         except Exception:
             return ''
 
-    def measure_natural_rank(self, verb, obj, slot=None):
+    def measure_natural_rank(self, verb, obj, slot=None, payload=None):
         """指示しなかったら、その作業は AI の何番目になるはずだったかを測る。
 
         指示を受けた場面をそのまま別の AI に解かせて、順番だけ見る。
         ゲームの進行とは別のスレッドで動かす(CP-SAT に数秒かかるため)。
+        鎖の指示(「作って」/ 個数つき)は、鎖の最後の工程が何番目かを見る
+        (「2つ切って」なら2つ目の切る工程、「作って」なら出す工程)。
         """
         state = getattr(self.game, '_latest_env_state', None)
         if state is None:
             return
+        want = 1                                  # 何個目の一致を取るか
+        chain_tids = set()
+        if isinstance(payload, dict):
+            try:
+                want = max(1, int(payload.get('count') or 1))
+            except (TypeError, ValueError):
+                want = 1
+            if payload.get('verb') == 'make':
+                chain_tids = {(str(c[1]), str(c[2]), c[3])
+                              for c in (payload.get('chain') or []) if len(c) >= 4}
 
         def work():
             try:
@@ -2245,13 +2284,26 @@ class WebGamePlay:
                 ai.active_constraints = []
                 ai(deepcopy(state))
                 sched = (ai.schedule_per_agent or {}).get(ai.own_agent_idx) or []
+                seen = 0
+                rank = None
                 for i, t in enumerate(sched, 1):
                     tid = t.get('id')
-                    if tid and str(tid[0]) == str(verb) and str(tid[1]) == str(obj):
-                        self.instruction_natural_rank = i
-                        if slot is not None:
-                            slot['rank'] = i
-                        return
+                    if not tid:
+                        continue
+                    if chain_tids:
+                        if tuple(tid) in chain_tids:
+                            rank = i              # 鎖の最後の工程の位置
+                        continue
+                    if str(tid[0]) == str(verb) and str(tid[1]) == str(obj):
+                        seen += 1
+                        if seen >= want:
+                            rank = i
+                            break
+                if rank is not None:
+                    self.instruction_natural_rank = rank
+                    if slot is not None:
+                        slot['rank'] = rank
+                    return
             except Exception as e:
                 print(f'[server] 指示なしの順番を測れませんでした: {e}')
 
@@ -2326,13 +2378,17 @@ class WebGamePlay:
             obj = payload.get('obj') if isinstance(payload, dict) else None
             startable = bool(payload.get('startable', True)) if isinstance(payload, dict) else True
             macro = bool(payload.get('macro', False)) if isinstance(payload, dict) else False
+            count = int(payload.get('count') or 1) if isinstance(payload, dict) else 1
+            total = int(payload.get('total') or 1) if isinstance(payload, dict) else 1
             items.append({
-                'label': card_label(verb, obj) if verb else str(display),
+                # 同じ工程が複数あるときは個数を添える(「たまねぎ 2つ」「切って」)
+                'label': card_label(verb, obj, count if total > 1 else None) if verb else str(display),
                 # 今すぐできない工程は、前提(材料)から引き受けることを添える
                 'action': (card_action(verb) + ('' if startable or macro else '（材料から）')) if verb else '',
                 'icon': card_icon_name(verb, obj) if verb else None,
                 'verb': verb, 'obj': obj,
                 'startable': startable, 'macro': macro,
+                'count': count, 'total': total,
             })
         with self._instruction_lock:
             self._instruction_answer = None
@@ -2360,7 +2416,8 @@ class WebGamePlay:
                 slot = {'verb': payload['verb'], 'obj': payload.get('obj'),
                         'quality': self.instruction_kinds, 'rank': None}
                 self.instruction_slots.append(slot)
-                self.measure_natural_rank(payload['verb'], payload.get('obj'), slot)
+                self.measure_natural_rank(payload['verb'], payload.get('obj'), slot,
+                                          payload=payload)
             return chosen
         finally:
             with self._instruction_lock:

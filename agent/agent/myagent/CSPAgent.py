@@ -456,17 +456,57 @@ class CSPAgent:
         return tp if isinstance(tp, dict) else None
 
     def _pending_chain_fixed_ids(self, pending):
-        """「工程の鎖」として扱う指示なら、その工程の固定IDの一覧。
+        """「工程の鎖」として扱う指示なら、その工程の固定IDの一覧(全部)。
 
         指示は工程の集合として扱う(2026-09-29〜)。「〇〇を作って」は
         その注文の AI ができる工程すべて、「煮て」のような下流の工程は
         その前提(刻む)も含めた鎖。長さ1の鎖は今までの単一の指示と同じ。
+        同じ工程が複数の注文にあるとき(たまねぎを切る×2)は、注文ごとの
+        鎖を「かたまり」として持ち、そのうち何個やるか(count)を指示が
+        決める(「1つ切って」「2つ切って」)。ここは全部を平らにして返す。
         """
         p = self._pending_payload(pending)
         chain = (p or {}).get('chain')
         if not chain:
             return None
         return [tuple(c) for c in chain]
+
+    def _pending_chain_groups(self, pending):
+        """鎖の指示の「かたまり」(注文ごとの鎖)の一覧と、そのうち何個やるか。
+
+        戻り値: (groups, count)。groups は固定IDのリストのリスト。
+        鎖でない指示なら (None, 0)。古い形(chains が無い)は1かたまり。
+        """
+        p = self._pending_payload(pending) or {}
+        chains = p.get('chains')
+        if chains:
+            groups = [[tuple(c) for c in g] for g in chains if g]
+        else:
+            chain = p.get('chain')
+            if not chain:
+                return None, 0
+            groups = [[tuple(c) for c in chain]]
+        try:
+            count = int(p.get('count') or 1)
+        except (TypeError, ValueError):
+            count = 1
+        return groups, max(1, min(count, len(groups)))
+
+    @staticmethod
+    def _tid_of_fixed(fid):
+        return (str(fid[1]), str(fid[2]), fid[3]) if len(fid) >= 4 else None
+
+    def _chain_group_finished(self, group):
+        """そのかたまりの工程が全部済んだか。"""
+        tids = [self._tid_of_fixed(f) for f in group]
+        return bool(tids) and all(t in self.completed_task_ids for t in tids)
+
+    def _chain_instruction_done(self, pending):
+        """鎖の指示が済んだか(count 個のかたまりが終わった)。"""
+        groups, count = self._pending_chain_groups(pending)
+        if not groups:
+            return False
+        return sum(1 for g in groups if self._chain_group_finished(g)) >= count
 
     def _pending_chain_tids(self, pending):
         ids = self._pending_chain_fixed_ids(pending) or []
@@ -646,11 +686,11 @@ class CSPAgent:
                 try:
                     if pending.get('status') in {'done', 'canceled', 'vanished'}:
                         continue
-                    chain_ids = self._pending_chain_fixed_ids(pending)
-                    if chain_ids:
+                    chain_groups, chain_count = self._pending_chain_groups(pending)
+                    if chain_groups:
                         self._apply_chain_instruction(
                             model, tasks, starts_by_idx, env, is_a1, pending,
-                            chain_ids, task_index_by_fixed_id)
+                            chain_groups, chain_count, task_index_by_fixed_id)
                         continue
                     init_budget = pending.get('skip_budget')
                     if init_budget is None:
@@ -798,85 +838,173 @@ class CSPAgent:
         except Exception as e:
             print(f'[指示] 制約の処理で失敗: {type(e).__name__} {e}', flush=True)
 
-    def _apply_chain_instruction(self, model, tasks, starts, env, is_a1, pending,
-                                 chain_ids, index_by_fixed):
-        """工程の鎖の指示を CP-SAT へ入れる。割り込み許容数は使わない。
+    def _chain_free_task_ids(self, pending):
+        """前回の計画で、鎖の煮える待ちの中に丸ごと入っていた自分の工程。
 
-          - 鎖の工程は全部 AI がやる
-          - 鎖の最初が始まってから最後が終わるまで、AI は他の工程をやらない
-            (ただし、煮える待ちの中に丸ごと収まる工程は自由)
+        これらは片づけても割り込み許容数を減らさない(煮えるのを待つ間の
+        作業は自由、という決まり)。
+        """
+        own = self.own_agent_idx if self.sc_2agent else 0
+        sched = (getattr(self, 'schedule_per_agent', None) or {}).get(own) or []
+        chain_tids = self._pending_chain_tids(pending)
+        cooking_frames = int(COOKING_TIME_SECONDS * self.fps)
+        windows = []
+        for t in sched:
+            tid = t.get('id')
+            if not tid or tid not in chain_tids or str(tid[0]) != 'cook' or t.get('end') is None:
+                continue
+            w0 = int(t['end'])
+            w1 = w0 + cooking_frames
+            for u in sched:
+                uid = u.get('id')
+                if (uid and uid in chain_tids and str(uid[0]) in ('serve', 'handover')
+                        and uid[2] == tid[2] and u.get('start') is not None):
+                    w1 = min(w1, int(u['start']))
+            windows.append((w0, w1))
+        free = set()
+        for t in sched:
+            tid = t.get('id')
+            if not tid or tid in chain_tids or t.get('start') is None or t.get('end') is None:
+                continue
+            if any(int(t['start']) >= w0 and int(t['end']) <= w1 for w0, w1 in windows):
+                free.add(tid)
+        return free
+
+    def _apply_chain_instruction(self, model, tasks, starts, env, is_a1, pending,
+                                 chain_groups, chain_count, index_by_fixed):
+        """工程の鎖の指示を CP-SAT へ入れる。
+
+        鎖は「かたまり」(注文ごとの鎖)の集まりで、そのうち chain_count 個を
+        AI がやる(「たまねぎを2つ切って」なら2かたまり)。
+
+          - 選んだかたまりの工程は全部 AI がやる
+          - 割り込み許容数 d: 指示を受けてから鎖の最後が終わるまでに、AI が
+            鎖の外の工程を挟んでよいのは d 個まで(鎖の前でも鎖の間でも数える)。
+            ただし、煮える待ちの中に丸ごと収まる工程は数えない
           - 煮る工程と出す工程が両方あれば、煮上がった瞬間に鍋から取る
             (皿を取りに行く分だけ前に出発する)
         """
         own = 1 if getattr(self, 'own_agent_idx', 0) == 1 else 0
-        idxs = []
-        for fid in chain_ids:
-            i = index_by_fixed.get(tuple(fid))
-            if i is None or starts.get(i) is None:
-                continue
-            if tasks[i].get('id') in self.completed_task_ids:
-                continue
-            if is_a1 is not None:
-                try:
-                    if own not in self._assignable_agents(env, tasks[i]):
-                        continue
-                except Exception:
-                    pass
-                hb = tasks[i].get('held_by')
-                if hb is not None and int(hb) != own:
-                    continue                  # 相手が材料を持っている工程は相手に任せる
-            idxs.append(i)
-        if not idxs:
-            pending['status'] = self._instruction_outcome_when_gone(pending)
-            print(f'[指示] 鎖の工程が全部済んだか消えたので、これ以降は縛りません: '
-                  f'{[tuple(c[1:3]) for c in chain_ids]}', flush=True)
-            return
-        pending['chain_remaining'] = len(idxs)
         cooking_frames = int(COOKING_TIME_SECONDS * self.fps)
         horizon = 10000
         ends = {i: starts[i] + int(tasks[i]['dur'])
                 for i in range(len(tasks)) if starts.get(i) is not None}
-        if is_a1 is not None:
-            for i in idxs:
-                if is_a1[i] is not None:
-                    model.Add(is_a1[i] == own)
-        cs = model.NewIntVar(0, horizon, 'chain_start')
-        model.AddMinEquality(cs, [starts[i] for i in idxs])
-        ce = model.NewIntVar(0, horizon, 'chain_end')
-        model.AddMaxEquality(ce, [ends[i] for i in idxs])
-        # 煮える待ちの窓と、出来上がった瞬間に取る条件
-        waits = []
-        cooks = [i for i in idxs if tasks[i].get('verb') == 'cook']
-        serves = [i for i in idxs if tasks[i].get('verb') in ('serve', 'handover')]
-        for c in cooks:
-            off = 0
-            for s_ in serves:
-                if tasks[s_].get('order') == tasks[c].get('order'):
-                    off = int(tasks[s_].get('pot_offset') or 0)
-                    model.Add(starts[s_] + off == ends[c] + cooking_frames)
-            waits.append((ends[c], ends[c] + cooking_frames - off))
-        chain_set = set(idxs)
-        for j in range(len(tasks)):
-            if j in chain_set or starts.get(j) is None:
+
+        # かたまりごとに、まだ残っていて AI ができる工程を集める
+        alive = []                       # [(idxs)]
+        finished = 0
+        for grp in chain_groups:
+            if self._chain_group_finished(grp):
+                finished += 1
                 continue
-            lits = []
+            idxs = []
+            for fid in grp:
+                i = index_by_fixed.get(tuple(fid))
+                if i is None or starts.get(i) is None:
+                    continue
+                if tasks[i].get('id') in self.completed_task_ids:
+                    continue
+                if is_a1 is not None:
+                    try:
+                        if own not in self._assignable_agents(env, tasks[i]):
+                            continue
+                    except Exception:
+                        pass
+                    hb = tasks[i].get('held_by')
+                    if hb is not None and int(hb) != own:
+                        continue          # 相手が材料を持っている工程は相手に任せる
+                idxs.append(i)
+            if idxs:
+                alive.append(idxs)
+        need = int(chain_count) - finished
+        if need <= 0:
+            pending['status'] = 'done'
+            return
+        if not alive:
+            pending['status'] = self._instruction_outcome_when_gone(pending)
+            print(f'[指示] 鎖の工程が全部済んだか消えたので、これ以降は縛りません: '
+                  f'{[[tuple(c[1:3]) for c in g] for g in chain_groups]}', flush=True)
+            return
+        need = min(need, len(alive))
+        pending['chain_remaining'] = need
+
+        # --- 指示を受けてから AI が片づけた分(割り込み)を、毎回引き直す ---
+        init_budget = pending.get('skip_budget')
+        current_ids = {t.get('id') for t in tasks}
+        chain_tids = self._pending_chain_tids(pending)
+        watched = pending.get('_watched_ai_task_ids') or set()
+        free_prev = pending.get('_free_ai_task_ids') or set()
+        if watched:
+            gone = [tid for tid in watched if tid not in current_ids and tid not in free_prev]
+            if gone:
+                pending['_consumed_tasks'] = pending.get('_consumed_tasks', 0) + len(gone)
+        ai_now = {t.get('id') for t in (getattr(self, 'schedule_per_agent', None) or {}).get(own, [])}
+        pending['_watched_ai_task_ids'] = {tid for tid in ai_now
+                                           if tid in current_ids and tid not in chain_tids}
+        pending['_free_ai_task_ids'] = self._chain_free_task_ids(pending)
+        consumed = int(pending.get('_consumed_tasks', 0))
+        remaining = None if init_budget is None else int(init_budget) - consumed
+        pending['remaining_skip_budget'] = remaining
+
+        # --- どのかたまりをやるか ---
+        if need >= len(alive):
+            sel = [None] * len(alive)     # 全部やる(無条件)
+        else:
+            sel = [model.NewBoolVar(f'chain_sel_{g}') for g in range(len(alive))]
+            model.Add(sum(sel) >= need)
+
+        ce = model.NewIntVar(0, horizon, 'chain_end')
+        waits = []                        # (w0, w1, group_lit)
+        in_group = {}                     # task idx -> group lit(None=無条件)
+        for g, idxs in enumerate(alive):
+            lit = sel[g]
+            enf = [lit] if lit is not None else []
+            for i in idxs:
+                in_group[i] = lit
+                if is_a1 is not None and is_a1[i] is not None:
+                    model.Add(is_a1[i] == own).OnlyEnforceIf(enf)
+                model.Add(ce >= ends[i]).OnlyEnforceIf(enf)
+            cooks = [i for i in idxs if tasks[i].get('verb') == 'cook']
+            serves = [i for i in idxs if tasks[i].get('verb') in ('serve', 'handover')]
+            for c in cooks:
+                off = 0
+                for s_ in serves:
+                    if tasks[s_].get('order') == tasks[c].get('order'):
+                        off = int(tasks[s_].get('pot_offset') or 0)
+                        model.Add(starts[s_] + off == ends[c] + cooking_frames).OnlyEnforceIf(enf)
+                waits.append((ends[c], ends[c] + cooking_frames - off, lit))
+
+        # --- 鎖の外の工程: 数える/数えない ---
+        counts = []
+        for j in range(len(tasks)):
+            if starts.get(j) is None:
+                continue
+            if j in in_group and in_group[j] is None:
+                continue                  # 無条件に鎖の工程
+            lits = []                     # どれかが真なら「数えない」
+            if j in in_group:
+                lits.append(in_group[j])  # そのかたまりを選んだなら鎖の工程
             if is_a1 is not None and is_a1[j] is not None:
                 other = model.NewBoolVar(f'chain_other_{j}')
                 model.Add(is_a1[j] != own).OnlyEnforceIf(other)
-                model.Add(is_a1[j] == own).OnlyEnforceIf(other.Not())
                 lits.append(other)
-            b_before = model.NewBoolVar(f'chain_before_{j}')
-            model.Add(ends[j] <= cs).OnlyEnforceIf(b_before)
-            lits.append(b_before)
-            b_after = model.NewBoolVar(f'chain_after_{j}')
-            model.Add(starts[j] >= ce).OnlyEnforceIf(b_after)
-            lits.append(b_after)
-            for k, (w0, w1) in enumerate(waits):
+            after = model.NewBoolVar(f'chain_after_{j}')
+            model.Add(starts[j] >= ce).OnlyEnforceIf(after)
+            lits.append(after)
+            for k, (w0, w1, glit) in enumerate(waits):
                 b = model.NewBoolVar(f'chain_wait_{j}_{k}')
                 model.Add(starts[j] >= w0).OnlyEnforceIf(b)
                 model.Add(ends[j] <= w1).OnlyEnforceIf(b)
+                if glit is not None:
+                    model.AddImplication(b, glit)
                 lits.append(b)
-            model.AddBoolOr(lits)
+            cnt = model.NewBoolVar(f'chain_cnt_{j}')
+            model.AddBoolOr(lits + [cnt])
+            for l in lits:
+                model.AddImplication(l, cnt.Not())
+            counts.append(cnt)
+        if remaining is not None and counts:
+            model.Add(sum(counts) <= max(0, remaining))
         pending['skip_budget_constraint_applied'] = True
         pending['chain_constraint_applied'] = True
 
@@ -983,8 +1111,23 @@ class CSPAgent:
                 continue
             chain_tids = self._pending_chain_tids(pending)
             if chain_tids:
-                if all(t in self.completed_task_ids for t in chain_tids):
+                if self._chain_instruction_done(pending):
                     pending['status'] = 'done'
+                    continue
+                if pending.get('skip_budget') is None:
+                    continue
+                own = self.own_agent_idx if self.sc_2agent else 0
+                if completed_agent_idx != own or completed_tid in chain_tids:
+                    continue
+                if completed_tid in (pending.get('_free_ai_task_ids') or set()):
+                    continue              # 煮える待ちの中の作業は数えない
+                old_remaining = pending.get('remaining_skip_budget', pending.get('skip_budget', 0))
+                pending['remaining_skip_budget'] = (old_remaining or 0) - 1
+                pending.setdefault('tasks_before_target_log', []).append(
+                    {'task_id': completed_tid,
+                     'duration_seconds': completed_dur_frames / float(self.fps) if self.fps > 0 else 0.0})
+                if pending['remaining_skip_budget'] < 0:
+                    self._mark_reschedule_needed('skip_budget_exceeded')
                 continue
             if pending.get('skip_budget') is None:
                 continue
@@ -2161,6 +2304,9 @@ class CSPAgent:
         # ごとに「〇〇を作って」(その注文の工程すべて)を出す。
         # 割り込み許容数(skip_budget)は鎖の指示には使わない。鎖の間に
         # 他の作業は挟まない。ただし煮える待ちの中に収まる作業は自由。
+        # 同じ工程が複数の注文にあるとき(たまねぎを切る×2)は、個数を
+        # 指定して選ばせる(「1つ切って」「2つ切って」)。count 個のかたまり
+        # (注文ごとの鎖)を AI がやる。
         candidates = []
         for (verb, obj), order_uids in grouped.items():
             if doable is not None and (verb, obj) not in doable:
@@ -2172,20 +2318,26 @@ class CSPAgent:
             if not chains:
                 continue
             first_uid = next(iter(chains))
-            display = f"{verb}_{obj.replace(' ', '').replace('-', '_')}"
-            payload = {
-                # 後方互換のため代表IDも持たせる(グループ先頭)
-                'fixed_task_id': self._make_fixed_task_id(verb, obj, first_uid),
-                'fixed_task_ids': [self._make_fixed_task_id(verb, obj, uid) for uid in chains],
-                'verb': verb,
-                'obj': obj,
-                'order_uids': list(chains),
-                'startable': startable,
-                'macro': False,
-                # 縛る工程の鎖(注文は代表の1つ)。前提が済んでいれば長さ1。
-                'chain': chains[first_uid],
-            }
-            candidates.append((display, payload))
+            base = f"{verb}_{obj.replace(' ', '').replace('-', '_')}"
+            total = len(chains)
+            for count in range(1, total + 1):
+                display = base if total == 1 else f"{base}_x{count}"
+                payload = {
+                    # 後方互換のため代表IDも持たせる(グループ先頭)
+                    'fixed_task_id': self._make_fixed_task_id(verb, obj, first_uid),
+                    'fixed_task_ids': [self._make_fixed_task_id(verb, obj, uid) for uid in chains],
+                    'verb': verb,
+                    'obj': obj,
+                    'order_uids': list(chains),
+                    'startable': startable,
+                    'macro': False,
+                    'count': count, 'total': total,
+                    # かたまり(注文ごとの鎖)。前提が済んでいれば長さ1。
+                    'chains': list(chains.values()),
+                    # 全部を平らにしたもの(着手・完了の検出に使う)
+                    'chain': [c for ch in chains.values() for c in ch],
+                }
+                candidates.append((display, payload))
 
         # 注文ごとの「作って」
         for order in current_orders:
@@ -2202,6 +2354,7 @@ class CSPAgent:
                 'fixed_task_ids': [self._make_fixed_task_id('make', name, uid)],
                 'verb': 'make', 'obj': name, 'order_uids': [uid],
                 'startable': any_ready, 'macro': True, 'chain': chain,
+                'chains': [chain], 'count': 1, 'total': 1,
             }))
 
         return candidates

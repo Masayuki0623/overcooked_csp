@@ -52,14 +52,14 @@ def check(label, ok, detail=""):
 
 # 1. 並びが決まりどおりか
 g1 = [(c['map'], c['skip_budget']) for c in design.plan_for('p01')]
-want_g1 = [('exp_ring', 0), ('exp_ring', 1), ('exp_ring', 'inf'),
-           ('exp_partition', 0), ('exp_partition', 1), ('exp_partition', 'inf')]
+want_g1 = [('exp_ring', 0), ('exp_ring', 1), ('exp_ring', 'inf'), ('exp_ring', 2),
+           ('exp_partition', 0), ('exp_partition', 1), ('exp_partition', 'inf'), ('exp_partition', 2)]
 check('G1: ring先・行A', g1 == want_g1, str(g1))
 
-g5 = [(c['map'], c['skip_budget']) for c in design.plan_for('p05')]
-want_g5 = [('exp_partition', 1), ('exp_partition', 'inf'), ('exp_partition', 0),
-           ('exp_ring', 1), ('exp_ring', 'inf'), ('exp_ring', 0)]
-check('G5: partition先・行B', g5 == want_g5, str(g5))
+g6 = [(c['map'], c['skip_budget']) for c in design.plan_for('p06')]
+want_g6 = [('exp_partition', 1), ('exp_partition', 2), ('exp_partition', 0), ('exp_partition', 'inf'),
+           ('exp_ring', 1), ('exp_ring', 2), ('exp_ring', 0), ('exp_ring', 'inf')]
+check('G6: partition先・行B', g6 == want_g6, str(g6))
 
 # 2. ラテン方格
 cols = list(zip(*design.LATIN_SQUARE.values()))
@@ -71,16 +71,24 @@ check('ラテン方格: どの行にもどの条件も1回ずつ',
           for r in design.LATIN_SQUARE.values()))
 
 # 3. 8人で1周
-check('7人目は1人目と同じグループ',
-      design.group_of('p07')['name'] == design.group_of('p01')['name'],
-      design.group_of('p07')['name'])
-check('6人で6グループ全部が使われる',
-      {design.group_of(f'p{i:02d}')['name'] for i in range(1, 7)}
+check('9人目は1人目と同じグループ',
+      design.group_of('p09')['name'] == design.group_of('p01')['name'],
+      design.group_of('p09')['name'])
+check('8人で8グループ全部が使われる',
+      {design.group_of(f'p{i:02d}')['name'] for i in range(1, 9)}
       == {g['name'] for g in design.GROUPS})
+# Williams 方格: 直前の条件の組も釣り合う
+pairs = Counter()
+for r in design.LATIN_SQUARE.values():
+    for a, b in zip(r, r[1:]):
+        pairs[(str(a), str(b))] += 1
+check('直前の条件の組がすべて1回ずつ(Williams 方格)',
+      len(pairs) == len(design.BUDGETS) * (len(design.BUDGETS) - 1)
+      and set(pairs.values()) == {1}, str(sorted(pairs.items())))
 
 # 4. 地図のまとまりと半々
 B = design.BLOCK
-for pid in (f'p{i:02d}' for i in range(1, 13)):
+for pid in (f'p{i:02d}' for i in range(1, 17)):
     plan = design.plan_for(pid)
     maps = [c['map'] for c in plan]
     if not (len(set(maps[:B])) == 1 and len(set(maps[B:])) == 1
@@ -88,21 +96,21 @@ for pid in (f'p{i:02d}' for i in range(1, 13)):
         check(f'{pid}: 地図がひとまとまり', False, str(maps))
         break
 else:
-    check(f'12人とも、地図が{B}回ずつのひとまとまり', True)
+    check(f'16人とも、地図が{B}回ずつのひとまとまり', True)
 
-first = Counter(design.plan_for(f'p{i:02d}')[0]['map'] for i in range(1, 13))
-check('最初の地図が半々', first['exp_ring'] == first['exp_partition'] == 6,
+first = Counter(design.plan_for(f'p{i:02d}')[0]['map'] for i in range(1, 17))
+check('最初の地図が半々', first['exp_ring'] == first['exp_partition'] == 8,
       str(dict(first)))
 
 # 5. 各セッション位置で均等
 by_pos = {i: Counter() for i in range(1, design.TOTAL + 1)}
-for i in range(1, 13):
+for i in range(1, 17):
     for c in design.plan_for(f'p{i:02d}'):
         by_pos[c['session']][(c['map'], str(c['skip_budget']))] += 1
 want_n = len(design.MAPS) * len(design.BUDGETS)
 bad = [s for s, cnt in by_pos.items()
        if len(cnt) != want_n or len(set(cnt.values())) != 1]
-check('12人で、各セッション位置の条件が均等', not bad, f'偏り: {bad}')
+check('16人で、各セッション位置の条件が均等', not bad, f'偏り: {bad}')
 
 # 6. skip_budget × 注文構成
 PRESET = {'exp_ring': 'experiment1', 'exp_partition': 'experiment2'}
@@ -114,7 +122,7 @@ def case_of(map_name, position):
 
 
 pair = Counter()
-for i in range(1, 13):
+for i in range(1, 17):
     for c in design.plan_for(f'p{i:02d}'):
         pair[(str(c['skip_budget']), case_of(c['map'], c['position']))] += 1
 check('(skip_budget × 注文構成) が均等', len(set(pair.values())) == 1,

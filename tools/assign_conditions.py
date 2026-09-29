@@ -84,7 +84,7 @@ def check(n):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--participant')
-    ap.add_argument('--group', help='G1〜G6。省略すると参加者IDから決める')
+    ap.add_argument('--group', help='G1〜G8。省略すると参加者IDから決める')
     ap.add_argument('--all', type=int, metavar='N', help='N 人ぶんの表を出す')
     ap.add_argument('--check', type=int, metavar='N', help='N 人で釣り合いを確かめる')
     a = ap.parse_args()

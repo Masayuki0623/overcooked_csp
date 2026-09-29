@@ -95,8 +95,15 @@ def _ingredients_of(obj):
     return [p.strip() for p in base.split('-') if p.strip()]
 
 
-def card_label(verb, obj):
-    """カードの小さい文字(素材名・料理名)。"""
+def card_label(verb, obj, count=None):
+    """カードの小さい文字(素材名・料理名)。count を渡すと個数を添える。"""
+    text = _card_label_base(verb, obj)
+    if count is not None:
+        text = f"{text} {int(count)}つ"
+    return text
+
+
+def _card_label_base(verb, obj):
     ings = _ingredients_of(obj)
     if verb == 'chop':
         return INGREDIENT_JP.get(ings[0] if ings else '', str(obj))
