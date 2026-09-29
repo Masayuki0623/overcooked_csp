@@ -58,7 +58,8 @@ INGREDIENT_JP = {'onion': 'たまねぎ', 'tomato': 'トマト', 'lettuce': 'レ
                  'apple': 'ブルーベリー', 'orange': 'オレンジ', 'banana': 'バナナ'}
 VERB_ACTION_JP = {'chop': '切って', 'cook': '調理して', 'serve': '提供して',
                   'serve_salad': '提供して', 'mix': '混ぜて', 'serve_juice': '提供して',
-                  'carry': '運んで', 'handover': '渡して', 'serve_from_counter': '提供して'}
+                  'carry': '運んで', 'handover': '渡して', 'serve_from_counter': '提供して',
+                  'make': '作って'}
 
 
 def _jp_font(size, bold=False):
@@ -121,7 +122,7 @@ def card_icon_name(verb, obj):
         return f"Fresh{ings[0]}"
     # cook は「これから鍋に入れる刻んだ食材」、serve_salad は「皿に乗せる刻んだ食材」、
     # serve は「鍋から出す調理済み料理」を表す絵にする。
-    prefix = 'Cooked' if verb == 'serve' else 'Chopped'
+    prefix = 'Cooked' if verb == 'serve' or (verb == 'make' and str(obj).endswith(' soup')) else 'Chopped'
     return "-".join(f"{prefix}{i}" for i in ings)
 
 

@@ -2324,11 +2324,15 @@ class WebGamePlay:
         for display, payload in candidates:
             verb = payload.get('verb') if isinstance(payload, dict) else None
             obj = payload.get('obj') if isinstance(payload, dict) else None
+            startable = bool(payload.get('startable', True)) if isinstance(payload, dict) else True
+            macro = bool(payload.get('macro', False)) if isinstance(payload, dict) else False
             items.append({
                 'label': card_label(verb, obj) if verb else str(display),
-                'action': card_action(verb) if verb else '',
+                # 今すぐできない工程は、前提(材料)から引き受けることを添える
+                'action': (card_action(verb) + ('' if startable or macro else '（材料から）')) if verb else '',
                 'icon': card_icon_name(verb, obj) if verb else None,
                 'verb': verb, 'obj': obj,
+                'startable': startable, 'macro': macro,
             })
         with self._instruction_lock:
             self._instruction_answer = None

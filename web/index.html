@@ -146,6 +146,9 @@
     padding: 8px 12px; display: flex; align-items: center; gap: 8px; min-height: 52px;
   }
   #instruct .cards button:active { background: #3b4350; transform: translateY(2px); }
+  /* 今すぐできない工程(材料から引き受ける)は少し薄く、「作って」は緑の枠 */
+  #instruct .cards button.later { opacity: .72; }
+  #instruct .cards button.macro { border-color: #8fd3a8; }
   #instruct .cards button.on {
     background: #2b5f4a; border-color: #4fd39a; border-bottom-width: 3px;
   }
@@ -2747,7 +2750,7 @@
     }
     document.getElementById('instruct-who').innerHTML = who;
     const cards = (msg.items || []).map((it, i) =>
-      `<button type="button" data-i="${i}">` +
+      `<button type="button" data-i="${i}" class="${it.startable === false ? 'later' : ''}${it.macro ? ' macro' : ''}">` +
       (it.icon ? `<img src="${esc(gfxUrl(it.icon))}" alt="">` : '') +
       `<span>${esc(it.label)}<br><span class="act">${esc(it.action)}</span></span></button>`
     ).join('');
