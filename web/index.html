@@ -146,12 +146,22 @@
     padding: 8px 12px; display: flex; align-items: center; gap: 8px; min-height: 52px;
   }
   #instruct .cards button:active { background: #3b4350; transform: translateY(2px); }
-  /* 今すぐできない工程(材料から引き受ける)は少し薄く、「作って」は緑の枠 */
-  #instruct .cards button.later { opacity: .72; }
-  #instruct .cards button.macro { border-color: #8fd3a8; }
+  /* 段(切る / 調理する / 提供まで任せる)ごとに1行。見た目はどの段も同じ色 */
+  #instruct .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch; width: 100%; }
+  #instruct .row + .row { margin-top: 6px; }
+  #instruct .row-name { flex-basis: 100%; font-size: 11.5px; color: var(--muted); margin: 2px 0 -2px 2px; }
   #instruct .cards button.on {
     background: #2b5f4a; border-color: #4fd39a; border-bottom-width: 3px;
   }
+  #instruct .cards .steps { color: var(--muted); font-size: 11px; opacity: .85; }
+  /* 個数の選択。カードを選ぶと中に出る */
+  #instruct .cards .counts { display: none; gap: 4px; margin-left: 4px; }
+  #instruct .cards button.on .counts { display: inline-flex; }
+  #instruct .cards .counts span {
+    font-size: 12.5px; padding: 3px 8px; border-radius: 8px;
+    border: 1px solid var(--btn-line); background: var(--btn-bg); color: var(--text);
+  }
+  #instruct .cards .counts span.pick { background: #4fd39a; color: #10251b; border-color: #4fd39a; font-weight: 700; }
   #instruct .go { margin-top: 10px; text-align: center; }
   #instruct .go button {
     font: inherit; font-size: 15px; font-weight: 700; color: var(--text);
@@ -2749,11 +2759,32 @@
         : 'AIに最初の指示を出してください';
     }
     document.getElementById('instruct-who').innerHTML = who;
-    const cards = (msg.items || []).map((it, i) =>
-      `<button type="button" data-i="${i}" class="${it.startable === false ? 'later' : ''}${it.macro ? ' macro' : ''}">` +
-      (it.icon ? `<img src="${esc(gfxUrl(it.icon))}" alt="">` : '') +
-      `<span>${esc(it.label)}<br><span class="act">${esc(it.action)}</span></span></button>`
-    ).join('');
+    // 段(切る / 調理する / 提供まで任せる)ごとに行を分ける。
+    // 同じ工程が複数あるカードは、選ぶと中に「1つ / 2つ」が出る。
+    const items = msg.items || [];
+    const layerName = msg.layers || {};
+    const rows = [];
+    items.forEach((it, i) => {
+      const L = it.layer == null ? 2 : it.layer;
+      let row = rows.find((r) => r.layer === L);
+      if (!row) { row = { layer: L, html: '' }; rows.push(row); }
+      const opts = it.options || [{ count: 1, index: it.index != null ? it.index : i }];
+      const counts = opts.length > 1
+        ? `<span class="counts">${opts.map((o, k) =>
+            `<span data-k="${k}" class="${k === 0 ? 'pick' : ''}">${o.count}つ</span>`).join('')}</span>`
+        : '';
+      row.html +=
+        `<button type="button" data-i="${i}" data-index="${opts[0].index}">` +
+        (it.icon ? `<img src="${esc(gfxUrl(it.icon))}" alt="">` : '') +
+        `<span>${esc(it.label)}<br><span class="act">${esc(it.action)}</span>` +
+        (it.steps ? `<br><span class="steps">${esc(it.steps)}</span>` : '') +
+        `</span>${counts}</button>`;
+    });
+    rows.sort((a, b) => a.layer - b.layer);
+    const cards = rows.map((r) =>
+      `<div class="row">` +
+      (rows.length > 1 && layerName[String(r.layer)] ? `<div class="row-name">${esc(layerName[String(r.layer)])}</div>` : '') +
+      r.html + '</div>').join('');
     // 指示を選ぶ間は移動・使うボタンを隠す。盤面の位置が動かないよう、
     // 隠す前にボタンの高さを測って、同じ高さを確保する。
     const padBox = pad.getBoundingClientRect();
@@ -2766,8 +2797,20 @@
     const ok = document.getElementById('instruct-ok');
     let chosen = null;
     ok.disabled = true;
-    box.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
-      chosen = Number(b.dataset.i);
+    box.querySelectorAll('button').forEach((b) => b.addEventListener('click', (ev) => {
+      const it = items[Number(b.dataset.i)] || {};
+      const opts = it.options || [];
+      // 個数のつまみを押したら、その個数の候補に切り替える
+      const chip = ev.target.closest('.counts span');
+      if (chip && opts.length > 1) {
+        b.querySelectorAll('.counts span').forEach((c) => c.classList.toggle('pick', c === chip));
+        chosen = opts[Number(chip.dataset.k)].index;
+      } else if (b.classList.contains('on')) {
+        return;                            // 同じカードをもう一度: そのまま
+      } else {
+        const picked = b.querySelector('.counts span.pick');
+        chosen = picked && opts.length > 1 ? opts[Number(picked.dataset.k)].index : Number(b.dataset.index);
+      }
       box.querySelectorAll('button').forEach((o) => o.classList.toggle('on', o === b));
       ok.disabled = false;
     }));

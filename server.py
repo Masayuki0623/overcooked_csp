@@ -75,7 +75,7 @@ from agent.gameplay import (  # noqa: E402
     INSTRUCTION_TIMING_ONCE_AT_START,
 )
 from agent.instruction_panel import (  # noqa: E402
-    card_action, card_icon_name, card_label)
+    card_action, card_icon_name, card_label, card_steps, VERB_LAYER, LAYER_NAME)
 from gym_cooking.utils import config as game_config  # noqa: E402
 from gym_cooking.utils.order_preset import (  # noqa: E402
     enumerate_order_recipes, experiment_case_indices, preset_names)
@@ -2263,9 +2263,10 @@ class WebGamePlay:
                 want = max(1, int(payload.get('count') or 1))
             except (TypeError, ValueError):
                 want = 1
-            if payload.get('verb') == 'make':
-                chain_tids = {(str(c[1]), str(c[2]), c[3])
-                              for c in (payload.get('chain') or []) if len(c) >= 4}
+            _chain = (payload.get('chains') or [payload.get('chain') or []])[0] or []
+            if payload.get('verb') != 'chop' and len(_chain) > 1:
+                # 前提ごと任せる鎖。最後の工程(それ自身)が何番目かを見る
+                chain_tids = {(str(c[1]), str(c[2]), c[3]) for c in _chain if len(c) >= 4}
 
         def work():
             try:
@@ -2372,24 +2373,44 @@ class WebGamePlay:
         ゲームのスレッドから呼ばれる(選んでいる間ゲームは止まっている)。
         時間制限は付けない。接続が切れたときだけ、待つのをやめる。
         """
+        # 画面には (動詞, 対象) ごとに1枚。同じ工程が複数あるときは、その
+        # カードの中で個数を選ぶ(options に候補の番号を個数ごとに持つ)。
+        # 段(切る / 調理する / 提供まで任せる)ごとに行を分けて並べる。
+        groups = {}
+        for idx, (display, payload) in enumerate(candidates):
+            if not isinstance(payload, dict) or not payload.get('verb'):
+                groups.setdefault(('', str(display)), {'display': str(display), 'options': []})['options'].append(
+                    {'count': 1, 'index': idx})
+                continue
+            key = (payload['verb'], payload.get('obj'))
+            g = groups.setdefault(key, {'payload': payload, 'options': []})
+            g['options'].append({'count': int(payload.get('count') or 1), 'index': idx})
         items = []
-        for display, payload in candidates:
-            verb = payload.get('verb') if isinstance(payload, dict) else None
-            obj = payload.get('obj') if isinstance(payload, dict) else None
-            startable = bool(payload.get('startable', True)) if isinstance(payload, dict) else True
-            macro = bool(payload.get('macro', False)) if isinstance(payload, dict) else False
-            count = int(payload.get('count') or 1) if isinstance(payload, dict) else 1
-            total = int(payload.get('total') or 1) if isinstance(payload, dict) else 1
+        for key, g in groups.items():
+            payload = g.get('payload')
+            if not payload:
+                items.append({'label': g['display'], 'action': '', 'icon': None, 'verb': None,
+                              'obj': None, 'layer': 9, 'steps': '', 'options': g['options'],
+                              'index': g['options'][0]['index']})
+                continue
+            verb, obj = key
+            startable = bool(payload.get('startable', True))
+            chain = payload.get('chains', [None])[0] or payload.get('chain') or []
+            chained = len(chain) > 1                  # 前提の工程ごと任せる
+            opts = sorted(g['options'], key=lambda o: o['count'])
             items.append({
-                # 同じ工程が複数あるときは個数を添える(「たまねぎ 2つ」「切って」)
-                'label': card_label(verb, obj, count if total > 1 else None) if verb else str(display),
-                # 今すぐできない工程は、前提(材料)から引き受けることを添える
-                'action': (card_action(verb) + ('' if startable or macro else '（材料から）')) if verb else '',
-                'icon': card_icon_name(verb, obj) if verb else None,
+                'label': card_label(verb, obj),
+                'action': card_action(verb, chained=chained),
+                # そこまでの工程(切る → 煮る → 提供)。全部 AI がやることを含ませる
+                'steps': card_steps(chain) if chained else '',
+                'icon': card_icon_name(verb, obj),
                 'verb': verb, 'obj': obj,
-                'startable': startable, 'macro': macro,
-                'count': count, 'total': total,
+                'startable': startable, 'layer': VERB_LAYER.get(verb, 2),
+                'options': opts,                      # [{count, index}] 個数ごとの候補番号
+                'index': opts[0]['index'],
             })
+        items.sort(key=lambda it: (it['layer'], it['verb'] or '', it['obj'] or ''))
+        layer_names = {str(k): v for k, v in LAYER_NAME.items()}
         with self._instruction_lock:
             self._instruction_answer = None
             self._instruction_done.clear()
@@ -2397,6 +2418,7 @@ class WebGamePlay:
             self.instruction_request = {
                 'seq': self._instruction_seq,
                 'items': items,
+                'layers': layer_names,
                 'players': (env_summary or {}).get('players', []),
             }
         try:

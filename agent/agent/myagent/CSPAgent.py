@@ -2339,32 +2339,10 @@ class CSPAgent:
                 }
                 candidates.append((display, payload))
 
-        # 注文ごとの「作って」。同じ料理が2品あれば個数つき(1つ/2つ)。
-        make_groups = {}
-        for order in current_orders:
-            uid = order.get('order')
-            name = order.get('name')
-            if uid is None or not name:
-                continue
-            chain = self._chain_fixed_ids_for(current_orders, 'make', name, uid, doable)
-            if len(chain) < 2:
-                continue                      # 残り1工程なら単一の指示と同じ
-            make_groups.setdefault(name, {})[uid] = chain
-        for name, chains in make_groups.items():
-            uids = list(chains)
-            total = len(uids)
-            all_chain = [c for ch in chains.values() for c in ch]
-            any_ready = any((c[1], c[2]) in ready for c in all_chain)
-            base = f"make_{name.replace(' ', '').replace('-', '_')}"
-            for count in range(1, total + 1):
-                candidates.append((base if total == 1 else f"{base}_x{count}", {
-                    'fixed_task_id': self._make_fixed_task_id('make', name, uids[0]),
-                    'fixed_task_ids': [self._make_fixed_task_id('make', name, u) for u in uids],
-                    'verb': 'make', 'obj': name, 'order_uids': uids,
-                    'startable': any_ready, 'macro': True, 'chain': all_chain,
-                    'chains': list(chains.values()), 'count': count, 'total': total,
-                }))
-
+        # 「〇〇を作って」は出さない。開始時点では「提供して」の鎖
+        # (切る→煮る→提供)と中身が完全に同じで、同じ指示が2枚並ぶだけ
+        # だった(全16構成で L も一致)。提供の鎖が「提供まで任せる」の
+        # 意味を担う。
         return candidates
 
     def _instructable_actions(self, env, current_orders):

@@ -94,13 +94,16 @@ def main():
     cands = {d: p for d, p in ai.get_instruction_candidates(st)}
     print('  候補:', sorted(cands))
 
-    print('[1] 候補: 「作って」、まだできない工程、個数つき')
-    make = next((p for d, p in cands.items() if p.get('verb') == 'make' and 'onion' in p['obj']), None)
+    print('[1] 候補: 提供まで任せる鎖、まだできない工程、個数つき')
+    make = next((p for d, p in cands.items() if p.get('verb') == 'serve' and 'onion' in p['obj']), None)
     cook = next((p for d, p in cands.items() if p.get('verb') == 'cook'), None)
-    check('「オニオントマトスープを作って」がある', make is not None)
+    check('「オニオントマトスープを提供まで任せて」(まだ材料が無い)がある',
+          make is not None and make.get('startable') is False)
+    check('「作って」は出ない(提供の鎖と同じ中身なので)',
+          not any(p.get('verb') == 'make' for p in cands.values()))
     check('「煮て」(まだ材料が無い)が出る', cook is not None and cook.get('startable') is False,
           str(cook and cook.get('startable')))
-    check('「作って」の鎖は 切る2 + 煮る + 出す', make is not None and
+    check('提供の鎖は 切る2 + 煮る + 出す', make is not None and
           [c[1] for c in make['chain']] == ['chop', 'chop', 'cook', 'serve'],
           str(make and [tuple(c[1:3]) for c in make['chain']]))
     check('「煮て」の鎖には前提の刻む工程が入る', cook is not None and
@@ -133,7 +136,7 @@ def main():
     print('  AI の計画:', [f'{t[0]} {t[1].split()[0]}' for t in ids])
     check('最初の工程がトマトを切る', bool(ids) and ids[0] in tids2, str(ids[:1]))
 
-    print('[5] 「作って」 d=0: 鎖の外の工程は煮える待ちの中だけ、煮上がった瞬間に取る')
+    print('[5] 「提供まで任せて」 d=0: 鎖の外の工程は煮える待ちの中だけ、煮上がった瞬間に取る')
     ai2, sched, ids = plan_with(env, make, 0)
     print('  AI の計画:', [f'{t[0]} {t[1].split()[0]}' for t in ids])
     chain_tids = {(c[1], c[2], c[3]) for c in make['chain']}
@@ -159,7 +162,7 @@ def main():
 
     print('[6] L も鎖の制約で測れる')
     ai3 = new_ai()
-    r = ai3.estimate_instruction_time_loss(state_of(env), {'task': ('make', make), 'status': 'pending',
+    r = ai3.estimate_instruction_time_loss(state_of(env), {'task': ('serve', make), 'status': 'pending',
                                                             'skip_budget': 0, 'remaining_skip_budget': 0},
                                            skip_budget=0)
     check('L が出る', r.get('status') == 'ok' and r.get('loss_seconds') is not None,
