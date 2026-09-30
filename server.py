@@ -243,6 +243,8 @@ def sanitize_debug(raw):
     out['orders_active'] = num('orders_active', 1, 5, 3)
     # 鍋の数。2 を選ぶと、既存の鍋のすぐ下にもう1つある版の地図になる。
     out['pots'] = num('pots', 1, 2, 1)
+    # AI と人の開始位置を入れ替える(仕切りでは AI が鍋側になる)
+    out['swap_agents'] = bool(raw.get('swap_agents'))
     return out
 # 注文の構成は地図ごとに決める。
 #   仕切り : サラダ + スープ + ジュース(experiment2)
@@ -2573,6 +2575,10 @@ class WebGamePlay:
                 map_name = f'{map_name}_veg'
         elif dbg and dbg.get('seconds'):
             map_overrides = {'max_num_timesteps': dbg['seconds']}
+        if dbg and dbg.get('swap_agents'):
+            map_overrides = dict(map_overrides or {})
+            map_overrides['swap_agents'] = True
+            print('[server] AI と人の開始位置を入れ替えます(デバッグ)', flush=True)
         if map_overrides and map_overrides.get('endless_orders'):
             pass
         elif sel and sel.get('mode') == 'tutorial' and sel.get('solo'):

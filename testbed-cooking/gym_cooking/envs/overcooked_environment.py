@@ -46,6 +46,9 @@ class MapSetting:
     endless_orders: bool = False
     order_pool: tuple[str, ...] | None = None
     order_seed: int | None = None
+    # AI(0番)と人(1番)の開始位置を入れ替える(デバッグ用)。地図の行は
+    # そのままで、読み込んだあとに位置だけ入れ替える。
+    swap_agents: bool = False
 
     num_agents: int = 2  # fixed
 
@@ -192,6 +195,10 @@ class OvercookedEnvironment(gym.Env):
                 elif phase == 5:
                     pos = line.split(' ')
                     self.chg_pos.append((int(pos[0]), int(pos[1])))
+
+        if getattr(self.arglist, 'swap_agents', False) and len(self.sim_agents) >= 2:
+            a0, a1 = self.sim_agents[0], self.sim_agents[1]
+            a0.location, a1.location = a1.location, a0.location
 
         if self.chg_grid is not None:
             self.chg_rand_index = 0

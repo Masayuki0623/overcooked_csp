@@ -1407,7 +1407,7 @@
   // チュートリアルには効かない(サーバー側で先に分岐している)。
   const DEBUG_DEFAULT = { on: false, endless: false, seconds: 60,
                           orders_active: 3, cook_seconds: 15, chop_steps: 8,
-                          pots: 1 };
+                          pots: 1, swap_agents: false };
   let pick = { map: null, preset: null, case: '', instruction: 'once_at_start',
                skip_budget: 0, instruct_every: 3, pattern: 1,
                // 既定は本番と同じ「2人で分担」。デバッグで見比べるときだけ
@@ -1590,6 +1590,7 @@
                cook_seconds: Number(d.cook_seconds) || 15,
                chop_steps: Number(d.chop_steps) || 8,
                pots: Number(d.pots) === 2 ? 2 : 1,
+               swap_agents: !!d.swap_agents,
              } : null,
              participant: custom ? null : (participantId || null) });
       showOverlay('<div class="big">準備しています</div><div class="sub">数秒かかります</div>');
@@ -1626,6 +1627,9 @@
       num('chop_steps', '切る回数', 1, 400, '既定 8。5Hz では半分の回数ぶん押す') +
       num('pots', '鍋の数', 1, 2,
           '2 にすると、いまの鍋のすぐ下にもう1つ増えます。同時に2品まで煮られます') +
+      '<label class="dbg-row"><span>AIと人の位置を入れ替え</span>' +
+      `<input type="checkbox" data-dbg="swap_agents"${d.swap_agents ? ' checked' : ''}>` +
+      '<em>仕切りでは AI が鍋側になります</em></label>' +
       '<div class="hint">サーバー全体に効くので、複数人が同時に遊ぶと混ざります。' +
       '一人で試すときだけ使ってください。</div>' +
       '<div class="go" style="margin-top:6px"><button type="button" id="dbg-reset">既定に戻す</button></div>' +
