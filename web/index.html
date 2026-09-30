@@ -137,15 +137,19 @@
   #instruct .who img { width: 26px; height: 26px; image-rendering: pixelated; }
   #instruct .cards {
     display: flex; gap: 8px; flex-wrap: wrap; justify-content: center;
-    /* 候補が多いとボタンの高さに収まらない。枠の中だけで送れるようにする */
-    overflow-y: auto; overscroll-behavior: contain; max-height: 100%;
+    /* 枠の中だけを縦に送る作りはやめた(上の段や「決定」が見切れる、
+       押した拍子にスクロールバーが出る)。収まらないときはスマホでは
+       パネル全体を送る(body.compact の決まり) */
+    overflow: visible;
   }
   #instruct .cards button {
     font: inherit; font-size: 14px; color: var(--text); background: var(--btn-bg);
     border: 1px solid var(--btn-line); border-bottom-width: 3px; border-radius: 10px;
     padding: 8px 12px; display: flex; align-items: center; gap: 8px; min-height: 52px;
   }
-  #instruct .cards button:active { background: #3b4350; transform: translateY(2px); }
+  /* 押している間は色だけ変える。2px 沈める演出にすると、その分だけ枠の
+     中身が高くなって横にスクロールバーが出ていた(Windows で報告) */
+  #instruct .cards button:active { background: #3b4350; }
   /* 段(切る / 調理する / 提供まで任せる)ごとに1行。見た目はどの段も同じ色 */
   #instruct .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch; width: 100%; }
   #instruct .row + .row { margin-top: 6px; }
@@ -237,6 +241,27 @@
     margin-top: 8px; width: 100%;
     padding-bottom: calc(env(safe-area-inset-bottom) + var(--lift));
   }
+  /* スマホで指示を選んでいる間は、盤面を小さくして選択肢を全部見せる
+     (選んでいる間はゲームが止まっているので、盤面は小さくてよい)。
+     以前は選択肢の枠だけが縦に送る作りで、上の段と「決定」が見切れていた。
+     それでも収まらないときは、パネル全体(決定まで含めて)を縦に送る。 */
+  body.compact.instructing #stage { flex: 0 1 29dvh; min-height: 0; }
+  body.compact #instruct.show {
+    flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+    justify-content: flex-start;
+    scrollbar-width: none;                 /* 送れるが、棒は見せない */
+  }
+  body.compact #instruct.show::-webkit-scrollbar { display: none; }
+  body.compact #instruct .cards button { font-size: 12.5px; min-height: 44px; padding: 5px 8px; gap: 6px; }
+  /* スマホでは個数のつまみの場所を取っておかない(取っておくと切るカードが
+     1行に1枚しか入らず、縦に長くなる)。選んだときだけ出す。パネル全体が
+     縦に送れる作りなので、広がっても見切れない */
+  body.compact #instruct .cards .counts { display: none; }
+  body.compact #instruct .cards button.on .counts { display: inline-flex; }
+  body.compact #instruct .cards img { width: 26px; height: 26px; }
+  body.compact #instruct .lead { font-size: 13px; margin-bottom: 2px; }
+  body.compact #instruct .who { margin-bottom: 4px; }
+  body.compact #instruct .go { margin-top: 8px; }
 
   /* ---- 重ね表示 ---- */
   #overlay {
@@ -2829,10 +2854,12 @@
       if (!started) beginCountdown();   // 決めてから 3・2・1
     };
     instructBox.classList.add('show');
+    document.body.classList.add('instructing');   // スマホでは盤面を小さくする
   }
   function hideInstruct() {
     instructShown = false;
     instructBox.classList.remove('show');
+    document.body.classList.remove('instructing');
     pad.classList.remove('hidden');
   }
 
