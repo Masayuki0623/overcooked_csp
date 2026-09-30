@@ -2402,7 +2402,7 @@ class WebGamePlay:
                 'label': card_label(verb, obj),
                 'action': card_action(verb, chained=chained),
                 # そこまでの工程(切る → 煮る → 提供)。全部 AI がやることを含ませる
-                'steps': card_steps(chain) if chained else '',
+                'steps': card_steps(chain, payload.get('human_ids')) if chained else '',
                 'icon': card_icon_name(verb, obj),
                 'verb': verb, 'obj': obj,
                 'startable': startable, 'layer': VERB_LAYER.get(verb, 2),

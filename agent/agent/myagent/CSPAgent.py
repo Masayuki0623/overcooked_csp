@@ -535,10 +535,18 @@ class CSPAgent:
                 if verb != 'make' and prio.get(t.get('verb', ''), 9) == target_prio \
                         and (t.get('verb'), t.get('obj')) != (verb, obj):
                     continue
-                if doable is not None and (tid[0], tid[1]) not in doable:
-                    continue
+                # AI ができない前提工程(仕切りの向こうで切る等)も鎖に入れる。
+                # その工程は人が「AI が必要とする時までに」済ませるものとして
+                # 計画に組み込む(_apply_chain_instruction)。以前は外していた。
                 out.append(self._make_fixed_task_id(tid[0], tid[1], tid[2]))
         return out
+
+    @staticmethod
+    def _human_only_fixed_ids(chain, doable):
+        """鎖のうち、AI にはできない(人がやる)工程の固定ID。"""
+        if doable is None:
+            return []
+        return [tuple(c) for c in chain if (str(c[1]), str(c[2])) not in doable]
 
     @staticmethod
     def _instruction_outcome_when_gone(pending):
@@ -890,14 +898,17 @@ class CSPAgent:
         ends = {i: starts[i] + int(tasks[i]['dur'])
                 for i in range(len(tasks)) if starts.get(i) is not None}
 
-        # かたまりごとに、まだ残っていて AI ができる工程を集める
-        alive = []                       # [(idxs)]
+        # かたまりごとに、まだ残っている工程を AI の分と人の分に分ける。
+        # 人の分 = AI にはできない工程(仕切りの向こう)か、相手が材料を
+        # 持っている工程。人は「AI が必要とする時までに」済ませるものとして
+        # 計画に入れる(人の側にも同じ割り込み許容数を課す)。
+        alive = []                       # [(ai_idxs, human_idxs)]
         finished = 0
         for grp in chain_groups:
             if self._chain_group_finished(grp):
                 finished += 1
                 continue
-            idxs = []
+            idxs, hidxs = [], []
             for fid in grp:
                 i = index_by_fixed.get(tuple(fid))
                 if i is None or starts.get(i) is None:
@@ -905,17 +916,18 @@ class CSPAgent:
                 if tasks[i].get('id') in self.completed_task_ids:
                     continue
                 if is_a1 is not None:
+                    ai_can = True
                     try:
-                        if own not in self._assignable_agents(env, tasks[i]):
-                            continue
+                        ai_can = own in self._assignable_agents(env, tasks[i])
                     except Exception:
                         pass
                     hb = tasks[i].get('held_by')
-                    if hb is not None and int(hb) != own:
-                        continue          # 相手が材料を持っている工程は相手に任せる
+                    if not ai_can or (hb is not None and int(hb) != own):
+                        hidxs.append(i)
+                        continue
                 idxs.append(i)
-            if idxs:
-                alive.append(idxs)
+            if idxs or hidxs:
+                alive.append((idxs, hidxs))
         need = int(chain_count) - finished
         if need <= 0:
             pending['status'] = 'done'
@@ -954,9 +966,11 @@ class CSPAgent:
             model.Add(sum(sel) >= need)
 
         ce = model.NewIntVar(0, horizon, 'chain_end')
+        he = model.NewIntVar(0, horizon, 'chain_human_end')   # 人の分が終わる時刻
+        any_human = False
         waits = []                        # (w0, w1, group_lit)
         in_group = {}                     # task idx -> group lit(None=無条件)
-        for g, idxs in enumerate(alive):
+        for g, (idxs, hidxs) in enumerate(alive):
             lit = sel[g]
             enf = [lit] if lit is not None else []
             for i in idxs:
@@ -964,6 +978,12 @@ class CSPAgent:
                 if is_a1 is not None and is_a1[i] is not None:
                     model.Add(is_a1[i] == own).OnlyEnforceIf(enf)
                 model.Add(ce >= ends[i]).OnlyEnforceIf(enf)
+            for i in hidxs:
+                in_group[i] = lit
+                any_human = True
+                if is_a1 is not None and is_a1[i] is not None:
+                    model.Add(is_a1[i] == 1 - own).OnlyEnforceIf(enf)
+                model.Add(he >= ends[i]).OnlyEnforceIf(enf)
             cooks = [i for i in idxs if tasks[i].get('verb') == 'cook']
             serves = [i for i in idxs if tasks[i].get('verb') in ('serve', 'handover')]
             for c in cooks:
@@ -975,12 +995,30 @@ class CSPAgent:
                 waits.append((ends[c], ends[c] + cooking_frames - off, lit))
 
         # --- 鎖の外の工程: 数える/数えない ---
+        # 人の側: 鎖の中の人の工程が終わるまでに、人が鎖の外の工程を
+        # 挟んでよいのも d 個まで(AI が必要とする時までに済ませる縛り)
         counts = []
+        hcounts = []
         for j in range(len(tasks)):
             if starts.get(j) is None:
                 continue
             if j in in_group and in_group[j] is None:
                 continue                  # 無条件に鎖の工程
+            if any_human and is_a1 is not None and is_a1[j] is not None:
+                hl = []
+                if j in in_group:
+                    hl.append(in_group[j])
+                mine = model.NewBoolVar(f'chain_mine_{j}')
+                model.Add(is_a1[j] == own).OnlyEnforceIf(mine)
+                hl.append(mine)
+                hafter = model.NewBoolVar(f'chain_hafter_{j}')
+                model.Add(starts[j] >= he).OnlyEnforceIf(hafter)
+                hl.append(hafter)
+                hc = model.NewBoolVar(f'chain_hcnt_{j}')
+                model.AddBoolOr(hl + [hc])
+                for l in hl:
+                    model.AddImplication(l, hc.Not())
+                hcounts.append(hc)
             lits = []                     # どれかが真なら「数えない」
             if j in in_group:
                 lits.append(in_group[j])  # そのかたまりを選んだなら鎖の工程
@@ -1005,6 +1043,8 @@ class CSPAgent:
             counts.append(cnt)
         if remaining is not None and counts:
             model.Add(sum(counts) <= max(0, remaining))
+        if remaining is not None and hcounts:
+            model.Add(sum(hcounts) <= max(0, remaining))
         pending['skip_budget_constraint_applied'] = True
         pending['chain_constraint_applied'] = True
 
@@ -2336,6 +2376,9 @@ class CSPAgent:
                     'chains': list(chains.values()),
                     # 全部を平らにしたもの(着手・完了の検出に使う)
                     'chain': [c for ch in chains.values() for c in ch],
+                    # 鎖のうち人がやる工程(AI にはできないもの)
+                    'human_ids': [c for ch in chains.values()
+                                  for c in self._human_only_fixed_ids(ch, doable)],
                 }
                 candidates.append((display, payload))
 

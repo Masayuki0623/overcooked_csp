@@ -97,7 +97,7 @@ def main():
     print('[1] 候補: 提供まで任せる鎖、まだできない工程、個数つき')
     make = next((p for d, p in cands.items() if p.get('verb') == 'serve' and 'onion' in p['obj']), None)
     cook = next((p for d, p in cands.items() if p.get('verb') == 'cook'), None)
-    check('「オニオントマトスープを提供まで任せて」(まだ材料が無い)がある',
+    check('「オニオントマトスープを提供して」(まだ材料が無い)がある',
           make is not None and make.get('startable') is False)
     check('「作って」は出ない(提供の鎖と同じ中身なので)',
           not any(p.get('verb') == 'make' for p in cands.values()))
@@ -136,7 +136,7 @@ def main():
     print('  AI の計画:', [f'{t[0]} {t[1].split()[0]}' for t in ids])
     check('最初の工程がトマトを切る', bool(ids) and ids[0] in tids2, str(ids[:1]))
 
-    print('[5] 「提供まで任せて」 d=0: 鎖の外の工程は煮える待ちの中だけ、煮上がった瞬間に取る')
+    print('[5] 「提供して」(鎖) d=0: 鎖の外の工程は煮える待ちの中だけ、煮上がった瞬間に取る')
     ai2, sched, ids = plan_with(env, make, 0)
     print('  AI の計画:', [f'{t[0]} {t[1].split()[0]}' for t in ids])
     chain_tids = {(c[1], c[2], c[3]) for c in make['chain']}

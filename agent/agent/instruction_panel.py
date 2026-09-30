@@ -63,8 +63,8 @@ VERB_ACTION_JP = {'chop': '切って', 'cook': '調理して', 'serve': '提供�
 # 前提の工程ごと任せる(材料がまだ切れていない等)ときの言い方。
 # 「提供まで任せて」は、そこまでの工程を全部 AI がやることを含ませる。
 VERB_ACTION_CHAIN_JP = {'cook': '調理して', 'mix': '混ぜて',
-                        'serve': '提供まで任せて', 'serve_salad': '提供まで任せて',
-                        'serve_juice': '提供まで任せて', 'handover': '渡すまで任せて'}
+                        'serve': '提供して', 'serve_salad': '提供して',
+                        'serve_juice': '提供して', 'handover': '渡して'}
 # 鎖の工程を短く並べるときの言い方(「切る → 煮る → 提供」)
 VERB_STEP_JP = {'chop': '切る', 'cook': '煮る', 'mix': '混ぜる', 'serve': '提供',
                 'serve_salad': '盛って提供', 'serve_juice': '提供', 'handover': '渡す',
@@ -72,7 +72,7 @@ VERB_STEP_JP = {'chop': '切る', 'cook': '煮る', 'mix': '混ぜる', 'serve':
 # 画面での段(行)。1=切る / 2=調理 / 3=提供
 VERB_LAYER = {'chop': 1, 'cook': 2, 'mix': 2, 'serve': 3, 'serve_salad': 3,
               'serve_juice': 3, 'handover': 3, 'serve_from_counter': 3, 'carry': 1}
-LAYER_NAME = {1: '切る', 2: '調理する', 3: '提供まで任せる'}
+LAYER_NAME = {1: '切る', 2: '調理する', 3: '提供する'}
 
 
 def _jp_font(size, bold=False):
@@ -135,16 +135,23 @@ def card_action(verb, chained=False):
     return VERB_ACTION_JP.get(verb, str(verb))
 
 
-def card_steps(chain):
-    """鎖の工程を「切る → 煮る → 提供」の形に。単一の工程なら空。"""
-    verbs = []
+def card_steps(chain, human_ids=None):
+    """鎖の工程を「切る → 煮る → 提供」の形に。単一の工程なら空。
+
+    人がやる工程(AI にはできないもの)には「(あなた)」を添える。
+    """
+    human = {tuple(c) for c in (human_ids or [])}
+    steps = []
     for c in chain or []:
         v = str(c[1]) if len(c) >= 2 else ''
-        if v and (not verbs or verbs[-1] != v):
-            verbs.append(v)
-    if len(verbs) < 2:
+        if not v:
+            continue
+        name = VERB_STEP_JP.get(v, v) + ('(あなた)' if tuple(c) in human else '')
+        if not steps or steps[-1] != name:
+            steps.append(name)
+    if len(steps) < 2:
         return ''
-    return ' → '.join(VERB_STEP_JP.get(v, v) for v in verbs)
+    return ' → '.join(steps)
 
 
 def card_icon_name(verb, obj):

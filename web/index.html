@@ -147,9 +147,9 @@
     border: 1px solid var(--btn-line); border-bottom-width: 3px; border-radius: 10px;
     padding: 8px 12px; display: flex; align-items: center; gap: 8px; min-height: 52px;
   }
-  /* 押している間は色だけ変える。2px 沈める演出にすると、その分だけ枠の
-     中身が高くなって横にスクロールバーが出ていた(Windows で報告) */
-  #instruct .cards button:active { background: #3b4350; }
+  /* 押している間は 2px 沈む。選択肢の枠を縦送りにしない(overflow: visible)
+     ので、沈んでもスクロールバーは出ない */
+  #instruct .cards button:active { background: #3b4350; transform: translateY(2px); }
   /* 段(切る / 調理する / 提供まで任せる)ごとに1行。見た目はどの段も同じ色 */
   #instruct .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch; width: 100%; }
   #instruct .row + .row { margin-top: 6px; }
