@@ -46,6 +46,14 @@
     font-size: 12.5px; color: var(--muted); margin-bottom: 12px;
   }
   .bar b { color: var(--text); font-weight: 600; }
+  /* いま出している指示。忘れないよう、ゲーム中はずっと出しておく */
+  #cur-instr { color: #8fd3a8; }
+  #cur-instr.hidden { display: none; }
+  #cur-instr b { color: #cdeedb; }
+  /* パソコン向けの操作の説明。バーの右端に薄く1行 */
+  .keyhint { margin-left: auto; font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+  .keyhint kbd { font-size: 11px; padding: 0 5px; }
+  body.compact .keyhint { display: none; }
   /* バグ報告。設定の隣に置く。盤面や操作ボタンには重ねない */
   #bug { border-color: #6b4a4a; color: #ffbcbc; }
   #bug:hover { background: #3a2a2a; }
@@ -142,22 +150,28 @@
        パネル全体を送る(body.compact の決まり) */
     overflow: visible;
   }
+  /* カードは1行の形(「トマトを切って」)。盤面を小さくしないよう低くする。
+     前提ごと任せる工程だけ、2行目に小さく「切る → 煮る → 提供」 */
   #instruct .cards button {
-    font: inherit; font-size: 14px; color: var(--text); background: var(--btn-bg);
-    border: 1px solid var(--btn-line); border-bottom-width: 3px; border-radius: 10px;
-    padding: 8px 12px; display: flex; align-items: center; gap: 8px; min-height: 52px;
+    font: inherit; font-size: 13px; color: var(--text); background: var(--btn-bg);
+    border: 1px solid var(--btn-line); border-bottom-width: 3px; border-radius: 9px;
+    padding: 4px 9px; display: flex; align-items: center; gap: 7px; min-height: 36px;
+    text-align: left; line-height: 1.25;
   }
+  #instruct .cards button .t { display: flex; flex-direction: column; }
+  #instruct .cards button .t b { font-weight: 600; }
   /* 押している間は 2px 沈む。選択肢の枠を縦送りにしない(overflow: visible)
      ので、沈んでもスクロールバーは出ない */
   #instruct .cards button:active { background: #3b4350; transform: translateY(2px); }
   /* 段(切る / 調理する / 提供まで任せる)ごとに1行。見た目はどの段も同じ色 */
   #instruct .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch; width: 100%; }
-  #instruct .row + .row { margin-top: 6px; }
-  #instruct .row-name { flex-basis: 100%; font-size: 11.5px; color: var(--muted); margin: 2px 0 -2px 2px; }
+  #instruct .row { gap: 6px; }
+  #instruct .row + .row { margin-top: 4px; }
+  #instruct .row-name { flex-basis: 100%; font-size: 11px; color: var(--muted); margin: 2px 0 -2px 2px; }
   #instruct .cards button.on {
     background: #2b5f4a; border-color: #4fd39a; border-bottom-width: 3px;
   }
-  #instruct .cards .steps { color: var(--muted); font-size: 11px; opacity: .85; }
+  #instruct .cards .steps { color: var(--muted); font-size: 10.5px; opacity: .9; }
   /* 個数の選択。カードを選ぶと中に出る。場所は最初から取っておく
      (選んだ瞬間にカードが広がって行が折り返し、枠にスクロールバーが
       出ていた) */
@@ -166,7 +180,7 @@
   /* 選んだつまみは色だけ変える。大きさ・太さは変えない(太字にすると
      文字幅が変わって小さく見えた) */
   #instruct .cards .counts span {
-    font-size: 12.5px; line-height: 1.4; padding: 3px 0; min-width: 2.8em; text-align: center;
+    font-size: 12px; line-height: 1.3; padding: 2px 0; min-width: 2.6em; text-align: center;
     border-radius: 8px; box-sizing: border-box;
     border: 1px solid var(--btn-line); background: var(--btn-bg); color: var(--text);
   }
@@ -182,8 +196,8 @@
     background: var(--btn-bg); border-color: var(--btn-line); color: var(--muted);
   }
   #instruct .go button:not(:disabled):active { transform: translateY(2px); }
-  #instruct .cards img { width: 30px; height: 30px; image-rendering: pixelated; }
-  #instruct .cards .act { color: var(--muted); font-size: 12px; }
+  #instruct .cards img { width: 24px; height: 24px; image-rendering: pixelated; }
+  #instruct .cards .act { color: var(--text); font-size: 13px; }
 
   .keys { font-size: 12.5px; color: var(--muted); line-height: 1.9; margin-top: 14px; }
   kbd {
@@ -209,12 +223,24 @@
   }
   /* 操作ボタンは出さない。設定はそのボタンの設定なので、こちらも出さない */
   body:not(.compact) #pad, body:not(.compact) #gear { display: none; }
-  /* 操作の説明は、盤面の邪魔にならないよう右端へ小さく置く */
-  body:not(.compact) .keys {
-    position: fixed; right: 24px; top: 50%; transform: translateY(-50%);
-    width: 200px; margin: 0; text-align: left; line-height: 1.8;
-    display: flex; flex-direction: column; gap: 14px;
+  /* 操作の説明は上のバーに1行で入れる(.keyhint)。右端に置いていた頃は、
+     窓を半分にすると盤面に重なって見えなくなった */
+  body:not(.compact) .keys { display: none; }
+  /* 指示のパネルは左側に固定して、盤面は動かさない(以前は盤面の下の
+     左寄りに出て、盤面が縮んでいた)。重ならないよう、選んでいる間は
+     盤面を置く場所を右へ寄せる */
+  body:not(.compact) #instruct.show {
+    position: fixed; left: 20px; top: 50%; transform: translateY(-50%);
+    width: 330px; margin: 0; min-height: 0; max-height: calc(100vh - 32px);
+    overflow-y: auto; scrollbar-width: none; justify-content: flex-start;
+    background: var(--panel); border: 1px solid var(--btn-line); border-radius: 10px;
+    padding: 12px 12px 10px; z-index: 30; text-align: center;
   }
+  body:not(.compact) #instruct.show::-webkit-scrollbar { display: none; }
+  body:not(.compact).instructing { padding-left: 374px; }
+  body:not(.compact) #instruct .row { justify-content: flex-start; }
+  body:not(.compact) #instruct .cards button { width: 100%; }
+  body:not(.compact) #instruct .cards button .steps { white-space: nowrap; }
   .keys .k-title {
     color: var(--text); font-weight: 600; font-size: 13px;
     border-bottom: 1px solid var(--btn-line); padding-bottom: 4px;
@@ -245,20 +271,20 @@
      (選んでいる間はゲームが止まっているので、盤面は小さくてよい)。
      以前は選択肢の枠だけが縦に送る作りで、上の段と「決定」が見切れていた。
      それでも収まらないときは、パネル全体(決定まで含めて)を縦に送る。 */
-  body.compact.instructing #stage { flex: 0 1 29dvh; min-height: 0; }
+  body.compact.instructing #stage { flex: 0 1 38dvh; min-height: 0; }
   body.compact #instruct.show {
     flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
     justify-content: flex-start;
     scrollbar-width: none;                 /* 送れるが、棒は見せない */
   }
   body.compact #instruct.show::-webkit-scrollbar { display: none; }
-  body.compact #instruct .cards button { font-size: 12.5px; min-height: 44px; padding: 5px 8px; gap: 6px; }
+  body.compact #instruct .cards button { font-size: 12.5px; min-height: 34px; padding: 3px 7px; gap: 5px; }
   /* スマホでは個数のつまみの場所を取っておかない(取っておくと切るカードが
      1行に1枚しか入らず、縦に長くなる)。選んだときだけ出す。パネル全体が
      縦に送れる作りなので、広がっても見切れない */
   body.compact #instruct .cards .counts { display: none; }
   body.compact #instruct .cards button.on .counts { display: inline-flex; }
-  body.compact #instruct .cards img { width: 26px; height: 26px; }
+  body.compact #instruct .cards img { width: 22px; height: 22px; }
   body.compact #instruct .lead { font-size: 13px; margin-bottom: 2px; }
   body.compact #instruct .who { margin-bottom: 4px; }
   body.compact #instruct .go { margin-top: 8px; }
@@ -495,7 +521,9 @@
   <span><b id="fps">--</b> fps</span>
   <span>描画 <b id="paintms">--</b> ms</span>
   <span>状態 <b id="state">--</b></span>
+  <span id="cur-instr" class="hidden">指示 <b id="cur-instr-text"></b></span>
   <span id="cfg"></span>
+  <span class="keyhint"><kbd>↑↓←→</kbd>/<kbd>WASD</kbd> 移動 <kbd>Space</kbd> 手を出す <kbd>Enter</kbd> AIへの指示 <kbd>Esc</kbd> 閉じる</span>
   <button id="bug" type="button" aria-label="バグを報告">バグを報告</button>
   <button id="gear" type="button" aria-label="ボタンの設定">⚙ 設定</button>
 </div>
@@ -2282,6 +2310,7 @@
     instructShown = false;
     needInstruction = false;
     hideInstruct();
+    showCurrentInstruction('');   // 前の回の指示は消す
     cancelCountdown();
   }
 
@@ -2811,8 +2840,8 @@
       row.html +=
         `<button type="button" data-i="${i}" data-index="${opts[0].index}">` +
         (it.icon ? `<img src="${esc(gfxUrl(it.icon))}" alt="">` : '') +
-        `<span>${esc(it.label)}<br><span class="act">${esc(it.action)}</span>` +
-        (it.steps ? `<br><span class="steps">${esc(it.steps)}</span>` : '') +
+        `<span class="t"><span><b>${esc(it.label)}</b><span class="act">${it.action ? 'を' + esc(it.action) : ''}</span></span>` +
+        (it.steps ? `<span class="steps">${esc(it.steps)}</span>` : '') +
         `</span>${counts}</button>`;
     });
     rows.sort((a, b) => a.layer - b.layer);
@@ -2851,6 +2880,14 @@
     }));
     ok.onclick = () => {
       if (chosen === null) return;
+      // 何を指示したかをバーに残す(「たまねぎを2つ切って」)
+      const onBtn = box.querySelector('button.on');
+      const onItem = onBtn ? items[Number(onBtn.dataset.i)] : null;
+      if (onItem) {
+        const opt = (onItem.options || []).find((o) => o.index === chosen);
+        const n = opt && (onItem.options || []).length > 1 ? `${opt.count}つ` : '';
+        showCurrentInstruction(`${onItem.label}を${n}${onItem.action || ''}`);
+      }
       sendNow({ type: 'instruct', seq: msg.seq, index: chosen });
       moveBlockUntil = performance.now() + stepMs;
       hideInstruct();
@@ -2859,6 +2896,13 @@
     };
     instructBox.classList.add('show');
     document.body.classList.add('instructing');   // スマホでは盤面を小さくする
+  }
+  function showCurrentInstruction(text) {
+    const box = document.getElementById('cur-instr');
+    const t = document.getElementById('cur-instr-text');
+    if (!box || !t) return;
+    t.textContent = text || '';
+    box.classList.toggle('hidden', !text);
   }
   function hideInstruct() {
     instructShown = false;
