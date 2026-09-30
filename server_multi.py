@@ -21,6 +21,7 @@ import asyncio
 import contextlib
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -263,6 +264,62 @@ def wait_backends(ports, seconds=120):
     return not pending
 
 
+def start_tunnel(port):
+    """Cloudflare の一時トンネルを立て、URL を .cache/public_url.txt に書く。
+
+    cloudflared が無ければ何もしない(固定 URL だけで遊べる)。
+    """
+    sys.path.insert(0, str(ROOT / 'tools'))
+    try:
+        import serve_public as sp
+    except Exception as e:
+        print(f'[multi] トンネルの道具を読めませんでした: {e}')
+        return None
+    exe = sp.find_cloudflared()
+    if not exe:
+        print('[multi] cloudflared が無いのでトンネルは立てません'
+              '(winget install --id Cloudflare.cloudflared -e)')
+        return None
+    sp.URL_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with contextlib.suppress(OSError):
+        sp.URL_FILE.unlink()                  # 古い行き先を残さない
+    proc = subprocess.Popen(
+        [exe, 'tunnel', '--url', f'http://localhost:{port}', '--no-autoupdate'],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, encoding='utf-8', errors='replace', bufsize=1)
+
+    def pump():
+        found = False
+        for line in proc.stdout:
+            m = sp.URL_RE.search(line)
+            if m and not found:
+                found = True
+                url = m.group(0)
+                sp.URL_FILE.write_text(url, encoding='utf-8')
+                print('=' * 60)
+                print(f'  遊ぶ URL(低遅延): {url}')
+                print('  受付の固定 URL  : https://desktop-1.tail9a3ca5.ts.net/')
+                print('    -> 固定 URL を開いた人は、上の URL へ自動で移動します')
+                print('=' * 60, flush=True)
+            elif 'ERR' in line:
+                print('[tunnel] ' + line.rstrip(), flush=True)
+        if not found:
+            print('[multi] トンネルの URL が取れませんでした(固定 URL だけで遊べます)', flush=True)
+
+    threading.Thread(target=pump, daemon=True).start()
+    return proc
+
+
+def stop_tunnel(proc):
+    if proc is None:
+        return
+    with contextlib.suppress(Exception):
+        proc.terminate()
+    # 止めたら行き先を消す。固定 URL はそのまま遊べる画面に戻る。
+    with contextlib.suppress(OSError):
+        (ROOT / '.cache' / 'public_url.txt').unlink()
+
+
 def main():
     ap = argparse.ArgumentParser(
         description='URL 1つで複数人が同時に遊べるようにする入口',
@@ -273,6 +330,8 @@ def main():
     ap.add_argument('--port', type=int, default=8000, help='受付のポート(参加者が開く)')
     ap.add_argument('--base-port', type=int, default=8001,
                     help='裏で立てるゲームのサーバーの最初のポート')
+    ap.add_argument('--no-tunnel', action='store_true',
+                    help='Cloudflare の一時トンネルを立てない(既定では起動のたびに立て直す)')
     args, passthrough = ap.parse_known_args()
 
     if args.players < 1:
@@ -285,6 +344,7 @@ def main():
 
     ports = [args.base_port + i for i in range(args.players)]
     procs = spawn_backends(args.players, args.base_port, passthrough)
+    tunnel = None
 
     try:
         if not wait_backends(ports):
@@ -298,10 +358,18 @@ def main():
         print(f'  URL: http://{shown}:{args.port}/')
         print(f'  席の状況: http://{shown}:{args.port}/__seats')
         print('=' * 60)
+        # 低遅延の入口(Cloudflare の一時トンネル)。URL は起動のたびに変わる
+        # ので、ここで立て直して .cache/public_url.txt に書く。固定 URL
+        # (Tailscale)を開いた人は自動でそちらへ移動する。以前は別の窓で
+        # tools/serve_public.py を動かしていたが、再起動のたびに忘れて
+        # 古い URL が配られたままになった。
+        if not args.no_tunnel:
+            tunnel = start_tunnel(args.port)
         uvicorn.run(app, host=args.host, port=args.port, log_level='warning')
     except KeyboardInterrupt:
         print('\n[multi] 中断しました')
     finally:
+        stop_tunnel(tunnel)
         for p in procs:
             with contextlib.suppress(Exception):
                 p.terminate()
