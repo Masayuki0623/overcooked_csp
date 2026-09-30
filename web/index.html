@@ -154,9 +154,11 @@
     background: #2b5f4a; border-color: #4fd39a; border-bottom-width: 3px;
   }
   #instruct .cards .steps { color: var(--muted); font-size: 11px; opacity: .85; }
-  /* 個数の選択。カードを選ぶと中に出る */
-  #instruct .cards .counts { display: none; gap: 4px; margin-left: 4px; align-items: center; }
-  #instruct .cards button.on .counts { display: inline-flex; }
+  /* 個数の選択。カードを選ぶと中に出る。場所は最初から取っておく
+     (選んだ瞬間にカードが広がって行が折り返し、枠にスクロールバーが
+      出ていた) */
+  #instruct .cards .counts { display: inline-flex; visibility: hidden; gap: 4px; margin-left: 4px; align-items: center; }
+  #instruct .cards button.on .counts { visibility: visible; }
   /* 選んだつまみは色だけ変える。大きさ・太さは変えない(太字にすると
      文字幅が変わって小さく見えた) */
   #instruct .cards .counts span {
