@@ -335,6 +335,9 @@ SESSION_COLUMNS = [
     ('instruction', '指示', '最初の指示(動作_対象)。空=指示なし'),
     ('instruction_verb', '指示の動作', 'chop=切る / cook=煮る / mix=混ぜる / serve系=提供'),
     ('instruction_obj', '指示の対象', ''),
+    ('instruction_count', '指示の個数', '「トマトを2つ切って」の 2。同じ工程が複数ないときは 1'),
+    ('instruction_tasks_ai', '指示の工程数_AI', '指示に含まれる工程のうち AI がやる数(「スープを調理して」なら 切る+煮る 等)'),
+    ('instruction_tasks_human', '指示の工程数_人', '指示に含まれる工程のうち、AI にはできず人がやる数(仕切りの向こうで切る等)'),
     ('quality', '指示の質', '自動の分類'),
     ('instruction_accepted_s', '指示を受けた時刻_秒', 'ゲーム内の秒'),
     ('wait_seconds', '指示までの待ち_秒', '指示を選ぶまでにかかった秒'),
@@ -393,7 +396,8 @@ ALL_COLUMNS = [
     '制約なしの所要_秒', '制約ありの所要_秒',
     '実際の実行順位', '制約なしの順位', '順位の前倒し', '先に挟まった作業数',
     '指示後に着手するまで_秒', '着手せず終了', '指示の結末', '人がやったか', '先にやったのは',
-    '指示の動作', '指示の対象', '指示を受けた時刻_秒', '指示までの待ち_秒',
+    '指示の動作', '指示の対象', '指示の個数', '指示の工程数_AI', '指示の工程数_人',
+    '指示を受けた時刻_秒', '指示までの待ち_秒',
     # --- アンケート ---
     'つながり1', 'つながり2', 'つながり3', 'つながり4',
     '協調1', '協調2', '協調3', '協調4', 'つながり平均', '協調平均', 'ラポール',
@@ -470,6 +474,33 @@ def _read_sessions():
 
 # 条件の欄は両方のファイルで同じにしてある(参加者IDとセッション番号で
 # 突き合わせられるが、片方だけ見ても条件が分かるようにしておく)。
+def instruction_task_counts(payload):
+    """指示に含まれる工程の数。(個数, AI がやる数, 人がやる数)。
+
+    「トマトを2つ切って」は個数 2、AI 2、人 0。「スープを調理して」で
+    鎖が 切る(人) → 切る(AI) → 煮る(AI) なら個数 1、AI 2、人 1。
+    個数 k のときは、かたまり(注文ごとの鎖)の先頭 k 個ぶんを数える。
+    """
+    if not isinstance(payload, dict):
+        return None, None, None
+    try:
+        count = max(1, int(payload.get('count') or 1))
+    except (TypeError, ValueError):
+        count = 1
+    groups = payload.get('chains') or ([payload['chain']] if payload.get('chain') else [])
+    if not groups:
+        return count, None, None
+    human = {tuple(c) for c in (payload.get('human_ids') or [])}
+    ai_n = hu_n = 0
+    for g in groups[:count]:
+        for c in g:
+            if tuple(c) in human:
+                hu_n += 1
+            else:
+                ai_n += 1
+    return count, ai_n, hu_n
+
+
 _COND_COLUMNS = [
     ('記録時刻', 'この行を書いた日時'),
     ('参加者ID', ''),
@@ -526,6 +557,9 @@ QUANT_COLUMNS = (
        ('指示した時刻_秒', '指示を受け取ったときのゲーム内時刻'),
        ('指示の動作', 'chop=切る / cook=煮る / mix=混ぜる / serve系=提供'),
        ('指示の対象', '料理名または材料名'),
+       ('指示の個数', '「トマトを2つ切って」の 2'),
+       ('指示の工程数_AI', '指示に含まれる工程のうち AI がやる数'),
+       ('指示の工程数_人', '指示に含まれる工程のうち人がやる数(AI にはできないもの)'),
        ('料理の種類', 'salad / soup / juice'),
        ('指示の結末',
         'done=やり終えた / started=取りかかった'
@@ -582,6 +616,9 @@ INSTRUCTION_COLUMNS = [
     ('指示した時刻_秒', '指示を受け取ったときのゲーム内時刻'),
     ('指示の動作', 'chop=切る / cook=煮る / mix=混ぜる / serve系=提供'),
     ('指示の対象', '料理名または材料名'),
+    ('指示の個数', '「トマトを2つ切って」の 2'),
+    ('指示の工程数_AI', '指示に含まれる工程のうち AI がやる数'),
+    ('指示の工程数_人', '指示に含まれる工程のうち人がやる数(AI にはできないもの)'),
     ('料理の種類', 'salad / soup / juice'),
     ('指示の結末',
      'done=やり終えた / started=取りかかった'
@@ -1932,6 +1969,7 @@ class WebGamePlay:
                 slot = next((x for x in slots
                              if x.get('verb') == verb and x.get('obj') == obj), {})
             natural = slot.get('rank')
+            _cnt = instruction_task_counts(payload)
             tasks_before = p.get('tasks_before')
             exec_rank = (tasks_before + 1) if tasks_before is not None else None
             accepted = p.get('accepted_env_time')
@@ -1971,6 +2009,7 @@ class WebGamePlay:
                 '指示した時刻_秒': (round(float(accepted), 1)
                                     if accepted is not None else None),
                 '指示の動作': verb or '', '指示の対象': obj or '',
+                '指示の個数': _cnt[0], '指示の工程数_AI': _cnt[1], '指示の工程数_人': _cnt[2],
                 '料理の種類': slot.get('quality', ''),
                 '指示の結末': p.get('status', ''),
                 '効率損失量L_秒': loss.get('loss_seconds'),
@@ -2008,6 +2047,7 @@ class WebGamePlay:
                 '指示した時刻_秒': (round(float(accepted), 1)
                                     if accepted is not None else None),
                 '指示の動作': verb or '', '指示の対象': obj or '',
+                '指示の個数': _cnt[0], '指示の工程数_AI': _cnt[1], '指示の工程数_人': _cnt[2],
                 '料理の種類': slot.get('quality', ''),
                 '指示の結末': p.get('status', ''),
                 '効率損失量L_秒': loss.get('loss_seconds'),
@@ -2201,9 +2241,12 @@ class WebGamePlay:
         accepted = p.get('accepted_env_time')
         # 時間損失量 L(d)。別スレッドで解いた結果が pending へ入っている。
         loss = p.get('time_loss') or {}
+        _cnt = instruction_task_counts(payload)
         return {
             'instruction': f'{verb}_{obj}' if verb else '',
             'instruction_verb': verb or '', 'instruction_obj': obj or '',
+            'instruction_count': _cnt[0], 'instruction_tasks_ai': _cnt[1],
+            'instruction_tasks_human': _cnt[2],
             'quality': self.instruction_kinds or '',
             'instruction_accepted_s': (round(float(accepted), 1)
                                        if accepted is not None else None),
