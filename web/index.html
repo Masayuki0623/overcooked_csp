@@ -155,7 +155,7 @@
   }
   #instruct .cards .steps { color: var(--muted); font-size: 11px; opacity: .85; }
   /* 個数の選択。カードを選ぶと中に出る */
-  #instruct .cards .counts { display: none; gap: 4px; margin-left: 4px; }
+  #instruct .cards .counts { display: none; gap: 4px; margin-left: 4px; align-items: center; }
   #instruct .cards button.on .counts { display: inline-flex; }
   /* 選んだつまみは色だけ変える。大きさ・太さは変えない(太字にすると
      文字幅が変わって小さく見えた) */
@@ -164,7 +164,8 @@
     border-radius: 8px; box-sizing: border-box;
     border: 1px solid var(--btn-line); background: var(--btn-bg); color: var(--text);
   }
-  #instruct .cards .counts span.pick { background: #4fd39a; color: #10251b; border-color: #4fd39a; }
+  /* 印の class は sel。pick は同意画面の欄の class で、余白が付いてしまう */
+  #instruct .cards .counts span.sel { background: #4fd39a; color: #10251b; border-color: #4fd39a; }
   #instruct .go { margin-top: 10px; text-align: center; }
   #instruct .go button {
     font: inherit; font-size: 15px; font-weight: 700; color: var(--text);
@@ -2774,7 +2775,7 @@
       const opts = it.options || [{ count: 1, index: it.index != null ? it.index : i }];
       const counts = opts.length > 1
         ? `<span class="counts">${opts.map((o, k) =>
-            `<span data-k="${k}" class="${k === 0 ? 'pick' : ''}">${o.count}つ</span>`).join('')}</span>`
+            `<span data-k="${k}" class="${k === 0 ? 'sel' : ''}">${o.count}つ</span>`).join('')}</span>`
         : '';
       row.html +=
         `<button type="button" data-i="${i}" data-index="${opts[0].index}">` +
@@ -2806,12 +2807,12 @@
       // 個数のつまみを押したら、その個数の候補に切り替える
       const chip = ev.target.closest('.counts span');
       if (chip && opts.length > 1) {
-        b.querySelectorAll('.counts span').forEach((c) => c.classList.toggle('pick', c === chip));
+        b.querySelectorAll('.counts span').forEach((c) => c.classList.toggle('sel', c === chip));
         chosen = opts[Number(chip.dataset.k)].index;
       } else if (b.classList.contains('on')) {
         return;                            // 同じカードをもう一度: そのまま
       } else {
-        const picked = b.querySelector('.counts span.pick');
+        const picked = b.querySelector('.counts span.sel');
         chosen = picked && opts.length > 1 ? opts[Number(picked.dataset.k)].index : Number(b.dataset.index);
       }
       box.querySelectorAll('button').forEach((o) => o.classList.toggle('on', o === b));
