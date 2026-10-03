@@ -1696,7 +1696,9 @@ class WebGamePlay:
             map_name = pr['map']
             preset = EXPERIMENT_MAP_PRESETS[map_name]
             sets = order_sets_for(preset)
-            used = experiment_case_indices(preset) or []
+            # 本番で使う構成(固定)も避ける。同じ並びを2回遊ばせない。
+            used = set(experiment_case_indices(preset) or [])
+            used.add(design.fixed_case_for(preset, used))
             case = design.practice_case(len(sets), used)
             return {'mode': 'practice', 'map': map_name, 'preset': preset,
                     'case': case, 'recipes': list(sets[case]),

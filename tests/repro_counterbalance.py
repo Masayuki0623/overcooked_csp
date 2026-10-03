@@ -132,8 +132,9 @@ check('(skip_budget × 注文構成) が均等', len(set(pair.values())) == 1,
 for m in PRESET:
     cs = {case_of(m, pos) for pos in range(1, design.BLOCK + 1)}
     check(f'{m}: 注文構成はどの位置でも同じ', len(cs) == 1, str(cs))
-    check(f'{m}: 固定した構成は良い指示が決まる候補の中にある',
-          next(iter(cs)) in (experiment_case_indices(PRESET[m]) or []), str(cs))
+    sets = enumerate_order_recipes(PRESET[m])
+    chosen = sets[next(iter(cs))]
+    check(f'{m}: 固定した構成に注文の被りが無い', len(set(chosen)) == len(chosen), str(chosen))
 
 # 7. グループの指定と、連番でないID
 check('グループを指定できる',
@@ -149,10 +150,11 @@ except ValueError:
 
 # 8. 練習
 for m, preset in PRESET.items():
-    used = experiment_case_indices(preset) or []
+    used = set(experiment_case_indices(preset) or [])
+    used.add(design.fixed_case_for(preset, used))
     pc = design.practice_case(len(enumerate_order_recipes(preset)), used)
     check(f'{m}: 練習の注文構成が本番と重ならない', pc not in used,
-          f'練習={pc} 本番={used}')
+          f'練習={pc} 本番={sorted(used)}')
 check('練習の skip_budget は全員同じ', design.PRACTICE_BUDGET == 0)
 
 # 9. サーバーが使っているか
