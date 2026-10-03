@@ -1726,18 +1726,13 @@ class WebGamePlay:
             preset = spec['presets'][cond['map']]
             sets = order_sets_for(preset)
             cases = experiment_case_indices(preset) or list(range(len(sets)))
-            # 注文の構成は、かたまりの中の「何番目か」だけで決める。
-            # くじ引きにすると、条件の比較に注文の違いが混ざる。位置で
-            # 決めれば参加者をまたいで同じになり、しかも skip_budget の
-            # 並びはラテン方格で回っているので、4行そろえば
-            # (skip_budget x 注文構成) がちょうど1回ずつ現れる。
+            # 注文の構成は地図ごとに1つに固定する。条件(割り込み許容数)の
+            # 比較に注文の違いを混ぜない。以前は「かたまりの中の何番目か」で
+            # 変えていたが、それだと条件ごとに注文が違った。
             position = cond.get('position')
             if position is None:
-                position = (cond_idx % len(cases)) + 1
-            # 同じ相方と3ゲーム遊ぶときは、3ゲームで注文の構成を変える。
-            # 「何番目の条件か × 何ゲーム目か」で決めるので、参加者を
-            # またいで同じ並びになる。
-            case = design.case_for(cases, (int(position) - 1) * gpb + game_in_block)
+                position = (cond_idx % max(1, len(cases))) + 1
+            case = design.fixed_case_for(preset, cases)
             g = design.group_of(participant)
             return {'map': cond['map'], 'preset': preset, 'case': case,
                     'recipes': list(sets[case]), 'picked_by': 'experiment',

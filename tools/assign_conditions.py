@@ -27,7 +27,7 @@ PRESET_OF_MAP = {'exp_ring': 'experiment1', 'exp_partition': 'experiment2'}
 
 def case_of(map_name, position):
     cases = experiment_case_indices(PRESET_OF_MAP[map_name]) or [0]
-    return design.case_for(cases, position)
+    return design.fixed_case_for(PRESET_OF_MAP[map_name], cases)
 
 
 def show(participant, group=None):

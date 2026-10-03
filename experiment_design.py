@@ -120,11 +120,34 @@ def condition_for(participant, session, group=None):
     return plan[int(session) - 1]
 
 
-def case_for(cases, position):
-    """注文の構成。かたまりの中の「何番目か」だけで決める。
+# 本番の注文構成は地図ごとに1つに固定する(2026-10-03〜)。
+# 条件(割り込み許容数)の比較に注文の違いを混ぜないため。同じ注文を
+# 4回続けて遊ぶことになるが、割り込み許容数の並びはラテン方格で回して
+# いるので、慣れ(学習)の効果は条件間で釣り合う。位置(何回目か)は記録に
+# 残るので、慣れの分は解析で引ける。
+#   リング : 20 = たまねぎトマトサラダ×2 + たまねぎレタススープ
+#            (たまねぎが3つあり、「1つ/2つ/3つ切って」が選べる)
+#   仕切り : 12 = トマトレタスサラダ + たまねぎレタススープ + りんごバナナジュース
+#            (サラダは人の側だけ、スープとジュースは両側の材料が要る)
+FIXED_CASE = {'experiment1': 20, 'experiment2': 12}
 
-    参加者をまたいで同じになるので、条件の比較に注文の違いが混ざらない。
-    候補が4つより少ない地図では、足りないぶんは先頭から繰り返す。
+
+def fixed_case_for(preset, cases):
+    """本番で使う注文の構成の番号。地図(プリセット)ごとに1つ。
+
+    固定の番号が候補に無ければ、候補の先頭を使う。
+    """
+    cases = list(cases or [])
+    want = FIXED_CASE.get(preset)
+    if want is not None and (not cases or want in cases):
+        return want
+    return cases[0] if cases else None
+
+
+def case_for(cases, position):
+    """(旧)注文の構成を、かたまりの中の「何番目か」で決める。
+
+    いまは本番では使わない(fixed_case_for)。道具の後方互換のために残す。
     """
     cases = list(cases)
     if not cases:

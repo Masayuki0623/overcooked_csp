@@ -118,7 +118,7 @@ PRESET = {'exp_ring': 'experiment1', 'exp_partition': 'experiment2'}
 
 def case_of(map_name, position):
     cases = experiment_case_indices(PRESET[map_name]) or [0]
-    return design.case_for(cases, position)
+    return design.fixed_case_for(PRESET[map_name], cases)
 
 
 pair = Counter()
@@ -128,12 +128,12 @@ for i in range(1, 17):
 check('(skip_budget × 注文構成) が均等', len(set(pair.values())) == 1,
       str(sorted(set(pair.values()))))
 
-# 注文構成が参加者をまたいで同じか
-same = all(case_of(c['map'], c['position'])
-           == case_of(design.plan_for('p01')[k]['map'],
-                      design.plan_for('p01')[k]['position'])
-           for k, c in enumerate(design.plan_for('p01')))
-check('注文構成は位置だけで決まる(くじ引きでない)', same)
+# 注文構成は地図ごとに1つ(条件が違っても同じ注文)
+for m in PRESET:
+    cs = {case_of(m, pos) for pos in range(1, design.BLOCK + 1)}
+    check(f'{m}: 注文構成はどの位置でも同じ', len(cs) == 1, str(cs))
+    check(f'{m}: 固定した構成は良い指示が決まる候補の中にある',
+          next(iter(cs)) in (experiment_case_indices(PRESET[m]) or []), str(cs))
 
 # 7. グループの指定と、連番でないID
 check('グループを指定できる',
@@ -161,13 +161,9 @@ SRC = inspect.getsource(srv.assignment_for)
 check('サーバーが順序統制の並びを使っている',
       'design.plan_for(participant)' in SRC, 'くじ引きのまま')
 SRC2 = inspect.getsource(srv)
-check('注文構成がくじ引きでなく位置で決まる',
-      'design.case_for(cases, (int(position) - 1) * gpb + game_in_block)' in SRC2,
-      'くじ引きのまま(random.choice)')
-check('本番の注文構成が random.choice でなくなった',
-      "cases = experiment_case_indices(preset) or list(range(len(sets)))"
-      + '' + "            case = random.choice(cases)" not in SRC2
-      if False else 'design.case_for' in SRC2)
+check('本番の注文構成は地図ごとに固定(サーバーが fixed_case_for を使う)',
+      'case = design.fixed_case_for(preset, cases)' in SRC2,
+      '位置やくじ引きで決めたまま')
 check('定量ファイルにグループの列がある', 'グループ' in srv.QUANT_FIELDS,
       str(srv.QUANT_FIELDS[:5]))
 check('定性ファイルにグループの列がある', 'グループ' in srv.QUAL_FIELDS,
