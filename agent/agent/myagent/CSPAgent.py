@@ -668,6 +668,64 @@ class CSPAgent:
                 dep_indices.add(j)
         return dep_indices
 
+    def _track_instruction_progress(self, env, tasks):
+        """指示ごとに「AI が先に片づけた他の作業の数」と結末を、計画のたびに数える。
+
+        割り込み許容数の縛りとは切り離して、どの条件(inf も)でも同じに数える。
+        以前は縛りの中で数えていたので、inf の回は常に 0 で、結末も done に
+        ならなかった(実測: inf の行が全部 started のまま)。
+
+        数え方は「前回の計画で AI の担当だった他の作業が、計画から消えたか」。
+        完了通知に頼ると chop や提供が別経路で完了扱いになり取りこぼす。
+          _consumed_tasks   : 指示が終わるまでに AI が片づけた他の作業の数
+                              (煮える待ちの中に収まっていたものは除く)
+          inserted_in_wait  : 煮える待ちの中で片づけた他の作業の数
+          tasks_before      : 着手した時点の _consumed_tasks(_note_instruction_started)
+        """
+        own = self.own_agent_idx if self.sc_2agent else 0
+        current_ids = {t.get('id') for t in tasks}
+        pend = list(getattr(self, '_pending_instructions', []) or [])
+        for p in (getattr(env, '_pending_instructions', []) or []):
+            if not any(e.get('id') == p.get('id') for e in pend):
+                pend.append(p)
+        for pending in pend:
+            try:
+                if pending.get('status') in {'done', 'canceled', 'vanished'}:
+                    continue
+                chain_tids = self._pending_chain_tids(pending)
+                if chain_tids:
+                    targets, deps = set(chain_tids), set()
+                else:
+                    action = self._extract_instruction_action(pending)
+                    idxs = self._find_group_task_indices(tasks, action)
+                    targets = {tasks[i].get('id') for i in idxs}
+                    deps = self._dependency_ids_of(tasks, idxs)
+                watched = pending.get('_watched_ai_task_ids') or set()
+                free_prev = pending.get('_free_ai_task_ids') or set()
+                for tid in watched:
+                    if tid in current_ids:
+                        continue
+                    if tid in free_prev:
+                        pending['inserted_in_wait'] = pending.get('inserted_in_wait', 0) + 1
+                    else:
+                        pending['_consumed_tasks'] = pending.get('_consumed_tasks', 0) + 1
+                ai_now = {t.get('id') for t in (getattr(self, 'schedule_per_agent', None) or {}).get(own, [])}
+                pending['_watched_ai_task_ids'] = {
+                    tid for tid in ai_now
+                    if tid in current_ids and tid not in targets and tid not in deps}
+                pending['_free_ai_task_ids'] = (
+                    self._chain_free_task_ids(pending) if chain_tids else set())
+                # 結末。縛りの有無に関わらずここで決める
+                if chain_tids:
+                    if self._chain_instruction_done(pending):
+                        pending['status'] = 'done'
+                    elif not (chain_tids & current_ids):
+                        pending['status'] = self._instruction_outcome_when_gone(pending)
+                elif not targets:
+                    pending['status'] = self._instruction_outcome_when_gone(pending)
+            except Exception as e:
+                print(f'[指示] 進み具合を数えられませんでした: {type(e).__name__} {e}', flush=True)
+
     def _apply_instruction_skip_budget_constraints(self, model, tasks, starts_by_idx, env, is_a1=None):
         """skip_budget(タスク数)ベースの順序制約を CP-SAT モデルへ反映する。
         is_a1: 2エージェントモードの割り当て変数リスト(BoolVar) or None(1エージェント)。"""
@@ -744,30 +802,8 @@ class CSPAgent:
 
                     target_ids = {tasks[idx].get('id') for idx in group_indices}
 
-                    # --- 指示を受けてから AI が片づけた分を、毎回引き直す ---
-                    # 完了通知に頼ると、chop や提供は別経路で完了扱いになるため
-                    # 一度も引かれず、再計画のたびに初期値で縛り直すことになる
-                    # (実質的に割り込み許容数が無制限に延びる)。計画から消えたかどうかで
-                    # 数えれば、どの経路で終わっても取りこぼさない。
-                    current_ids = {t.get('id') for t in tasks}
-                    watched = pending.get('_watched_ai_task_ids')
-                    if watched:
-                        gone = [tid for tid in watched if tid not in current_ids]
-                        if gone:
-                            pending['_consumed_tasks'] = (
-                                pending.get('_consumed_tasks', 0) + len(gone))
-                    # 次回のために、いま AI の担当として残っている他タスクを控える
-                    # 最初の計画のときはまだ schedule_per_agent が無い。
-                    # ここで例外になると、指示の制約がまるごと入らないまま
-                    # 計画が決まってしまう(指示が効かない原因だった)。
-                    ai_now = {t.get('id')
-                              for t in (getattr(self, 'schedule_per_agent', None)
-                                        or {}).get(0, [])}
-                    pending['_watched_ai_task_ids'] = {
-                        tid for tid in ai_now
-                        if tid in current_ids and tid not in target_ids
-                        and tid not in self._dependency_ids_of(tasks, group_indices)
-                    }
+                    # 指示を受けてから AI が片づけた分は _track_instruction_progress
+                    # が計画のたびに数えている(縛りの有無に関わらず同じ数え方)。
                     consumed = pending.get('_consumed_tasks', 0)
                     remaining = init_budget - consumed
                     pending['remaining_skip_budget'] = remaining
@@ -940,20 +976,9 @@ class CSPAgent:
         need = min(need, len(alive))
         pending['chain_remaining'] = need
 
-        # --- 指示を受けてから AI が片づけた分(割り込み)を、毎回引き直す ---
+        # 指示を受けてから AI が片づけた分(割り込み)は _track_instruction_progress
+        # が計画のたびに数えている(縛りの有無に関わらず同じ数え方)。
         init_budget = pending.get('skip_budget')
-        current_ids = {t.get('id') for t in tasks}
-        chain_tids = self._pending_chain_tids(pending)
-        watched = pending.get('_watched_ai_task_ids') or set()
-        free_prev = pending.get('_free_ai_task_ids') or set()
-        if watched:
-            gone = [tid for tid in watched if tid not in current_ids and tid not in free_prev]
-            if gone:
-                pending['_consumed_tasks'] = pending.get('_consumed_tasks', 0) + len(gone)
-        ai_now = {t.get('id') for t in (getattr(self, 'schedule_per_agent', None) or {}).get(own, [])}
-        pending['_watched_ai_task_ids'] = {tid for tid in ai_now
-                                           if tid in current_ids and tid not in chain_tids}
-        pending['_free_ai_task_ids'] = self._chain_free_task_ids(pending)
         consumed = int(pending.get('_consumed_tasks', 0))
         remaining = None if init_budget is None else int(init_budget) - consumed
         pending['remaining_skip_budget'] = remaining
@@ -8456,6 +8481,8 @@ class CSPAgent:
         # 旧: 秒数ベース制約 (当面は呼び出さない — メソッドは残す)
         # self._apply_instruction_deadline_constraints(model, tasks, starts, env)
         instruction_watch = None
+        # 指示の進み具合(挟まった作業の数・結末)は、縛りの有無に関わらず数える
+        self._track_instruction_progress(env, tasks)
         if self.skip_budget is not None:
             self._apply_instruction_skip_budget_constraints(model, tasks, starts, env, is_a1=is_a1)
             # 縛った結果、計画の何番目に来たかを後で照合するために控える

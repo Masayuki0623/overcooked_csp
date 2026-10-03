@@ -346,7 +346,9 @@ SESSION_COLUMNS = [
     ('exec_rank', '実際の実行順位', 'AI が何番目にその作業をしたか'),
     ('natural_rank', '制約なしの順位', '指示が無ければ何番目だったか'),
     ('rank_gain', '順位の前倒し', '制約なしの順位 − 実際の順位'),
-    ('tasks_before', '先に挟まった作業数', ''),
+    ('tasks_before', '先に挟まった作業数', '指示した作業に取りかかるまでに AI が先に片づけた他の作業の数'),
+    ('tasks_before_end', '終わるまでに挟まった作業数', '指示した作業(鎖なら最後の工程)が終わるまでに AI が片づけた他の作業の数。煮える待ちの中のものは含まない。終わらなかった回はその時点まで'),
+    ('tasks_in_wait', '煮える待ちの中の作業数', '指示の煮える待ちの中で AI が片づけた他の作業の数(割り込みには数えない)'),
     ('loss_seconds', '効率損失量L_秒', "f'(d) − f"),
     ('baseline_seconds', '制約なしの所要_秒', 'f'),
     ('constrained_seconds', '制約ありの所要_秒', "f'(d)"),
@@ -395,6 +397,7 @@ ALL_COLUMNS = [
     '効率損失量L_秒', '即時実行の効率損失量L0_秒', 'L算出の可否', 'L0算出の可否',
     '制約なしの所要_秒', '制約ありの所要_秒',
     '実際の実行順位', '制約なしの順位', '順位の前倒し', '先に挟まった作業数',
+    '終わるまでに挟まった作業数', '煮える待ちの中の作業数',
     '指示後に着手するまで_秒', '着手せず終了', '指示の結末', '人がやったか', '先にやったのは',
     '指示の動作', '指示の対象', '指示の個数', '指示の工程数_AI', '指示の工程数_人',
     '指示を受けた時刻_秒', '指示までの待ち_秒',
@@ -580,6 +583,9 @@ QUANT_COLUMNS = (
        ('L0算出の可否', 'ok=出せた / それ以外は理由'),
        ('割り込まれた作業数',
         '指示した作業に取りかかるまでに、AI が先に片づけた他の作業の数'),
+       ('終わるまでに挟まった作業数',
+        '指示した作業(鎖なら最後の工程)が終わるまでに AI が片づけた他の作業の数。煮える待ちの中は除く'),
+       ('煮える待ちの中の作業数', '煮える待ちの中で AI が片づけた他の作業の数'),
        ('実際の実行順位', 'AI が何番目にその作業をやったか(割り込まれた作業数+1)'),
        ('指示なしの実行順位', '指示しなかったら何番目になるはずだったか'),
        ('繰り上がった順位', '指示なしの実行順位 - 実際の実行順位'),
@@ -640,6 +646,9 @@ INSTRUCTION_COLUMNS = [
     ('L算出時の工程数', 'そのとき解いた工程の数'),
     ('割り込まれた作業数',
      '指示した作業に取りかかるまでに、AI が先に片づけた他の作業の数'),
+    ('終わるまでに挟まった作業数',
+     '指示した作業(鎖なら最後の工程)が終わるまでに AI が片づけた他の作業の数。煮える待ちの中は除く'),
+    ('煮える待ちの中の作業数', '煮える待ちの中で AI が片づけた他の作業の数'),
     ('実際の実行順位', 'AI が何番目にその作業をやったか(割り込まれた作業数+1)'),
     ('指示なしの実行順位', '指示しなかったら何番目になるはずだったか'),
     ('繰り上がった順位', '指示なしの実行順位 - 実際の実行順位'),
@@ -2020,6 +2029,8 @@ class WebGamePlay:
                 '即時実行の着手_秒': loss.get('immediate_start_s'),
                 'L算出時の工程数': loss.get('num_tasks'),
                 '割り込まれた作業数': tasks_before,
+                '終わるまでに挟まった作業数': p.get('_consumed_tasks', 0),
+                '煮える待ちの中の作業数': p.get('inserted_in_wait', 0),
                 '実際の実行順位': exec_rank,
                 '指示なしの実行順位': natural,
                 '繰り上がった順位': ((natural - exec_rank)
@@ -2055,6 +2066,8 @@ class WebGamePlay:
                 '即時実行の見込み_秒': loss.get('immediate_seconds'),
                 'L0算出の可否': loss.get('immediate_status', ''),
                 '割り込まれた作業数': tasks_before,
+                '終わるまでに挟まった作業数': p.get('_consumed_tasks', 0),
+                '煮える待ちの中の作業数': p.get('inserted_in_wait', 0),
                 '実際の実行順位': exec_rank,
                 '指示なしの実行順位': natural,
                 '繰り上がった順位': ((natural - exec_rank)
@@ -2141,7 +2154,8 @@ class WebGamePlay:
             'instructions': [
                 {k: v for k, v in (p or {}).items()
                  if k in ('task', 'status', 'skip_budget', 'accepted_env_time',
-                          'started_env_time', 'tasks_before')}
+                          'started_env_time', 'tasks_before', '_consumed_tasks',
+                          'inserted_in_wait')}
                 for p in (getattr(env, '_pending_instructions', []) or [])
             ] if env else [],
         }
@@ -2257,6 +2271,8 @@ class WebGamePlay:
             'natural_rank': natural,
             'rank_gain': (natural - exec_rank) if (natural and exec_rank) else None,
             'tasks_before': tasks_before,
+            'tasks_before_end': p.get('_consumed_tasks', 0),
+            'tasks_in_wait': p.get('inserted_in_wait', 0),
             'loss_seconds': loss.get('loss_seconds'),
             'baseline_seconds': loss.get('baseline_seconds'),
             'constrained_seconds': loss.get('constrained_seconds'),
