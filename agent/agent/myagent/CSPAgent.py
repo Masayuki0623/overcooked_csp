@@ -150,6 +150,9 @@ class CSPAgent:
         # 式も残してあるが、終盤に計画が入れ替わって挙動がおかしくなるので
         # 使わない。使うのは、それ自体を試すテストだけ(False にして呼ぶ)。
         self.fixed_objective = True
+        # 指示の候補の範囲。'all' = 全工程 / 'dish' = 料理を提供するまで
+        # 丸ごと任せる指示だけ(注文ごとに1枚)。サーバーが実験パターンで決める。
+        self.instruction_scope = 'all'
         # 2人ぶんの割り当てをソルバーに決めさせるか。
         # True にすると、どちらがどの作業をやると速いかを、それぞれの
         # 位置と移動時間から計算して割り振る。相手が人間でも同じ。
@@ -2411,6 +2414,12 @@ class CSPAgent:
         # (切る→煮る→提供)と中身が完全に同じで、同じ指示が2枚並ぶだけ
         # だった(全16構成で L も一致)。提供の鎖が「提供まで任せる」の
         # 意味を担う。
+        if getattr(self, 'instruction_scope', 'all') == 'dish':
+            # 料理を提供するまで丸ごと任せる指示だけ(提供系の動詞で、
+            # その注文の残りの工程を全部含む鎖)。注文ごとに1枚になる。
+            serve_verbs = ('serve', 'serve_salad', 'serve_juice', 'handover')
+            candidates = [(d, p) for d, p in candidates
+                          if p.get('verb') in serve_verbs and int(p.get('count') or 1) == 1]
         return candidates
 
     def _instructable_actions(self, env, current_orders):

@@ -161,10 +161,10 @@ check('練習の skip_budget は全員同じ', design.PRACTICE_BUDGET == 0)
 import server as srv
 SRC = inspect.getsource(srv.assignment_for)
 check('サーバーが順序統制の並びを使っている',
-      'design.plan_for(participant)' in SRC, 'くじ引きのまま')
+      'design.plan_for(participant, maps=pattern_maps(pattern))' in SRC, 'くじ引きのまま')
 SRC2 = inspect.getsource(srv)
 check('本番の注文構成は地図ごとに固定(サーバーが fixed_case_for を使う)',
-      'case = design.fixed_case_for(preset, cases)' in SRC2,
+      'case = design.fixed_case_for(preset, cases, pattern)' in SRC2,
       '位置やくじ引きで決めたまま')
 check('定量ファイルにグループの列がある', 'グループ' in srv.QUANT_FIELDS,
       str(srv.QUANT_FIELDS[:5]))

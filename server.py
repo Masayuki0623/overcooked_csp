@@ -691,6 +691,7 @@ PATTERN_SKIP_BUDGETS = {
     4: tuple(SKIP_BUDGETS) + (SKIP_BUDGET_INF,),
     # パターン5は 0 / 1 / 2 / inf の4水準(順序統制は 4x4 のラテン方格)。
     5: (0, 1, 2, SKIP_BUDGET_INF),
+    6: (0, 1, 2, SKIP_BUDGET_INF),
 }
 
 
@@ -792,8 +793,37 @@ EXPERIMENT_PATTERNS = {
         'games_per_block': 1,
         'named_agents': True,
     },
+    6: {
+        # パターン5のリングだけ版(2026-10-04)。指示は「料理を提供するまで
+        # 丸ごと任せる」ものだけ(注文ごとに1枚、計3枚)。地図が1つなので
+        # 4条件 = 4ゲーム、相方は エージェント A〜D、グループは G1〜G4。
+        'pots': 1,
+        'label': 'パターン6',
+        'desc': 'リングだけ。注文3品を出し切るまで。指示は開始時に1回、'
+                '料理を提供するまで任せる指示だけ(3枚)。割り込み許容数 0/1/2/inf、毎回アンケート。',
+        'endless': False,
+        'presets': {'exp_ring': 'experiment1'},
+        'instruction': INSTRUCTION_TIMING_ONCE_AT_START,
+        'instruction_scope': 'dish',
+        'instruct_every': None,
+        'seconds': None,
+        'orders_active': None,
+        'games_per_block': 1,
+        'named_agents': True,
+    },
 }
 DEFAULT_PATTERN = 1
+
+
+def pattern_maps(pattern):
+    """そのパターンで使う地図の一覧(presets の鍵)。"""
+    spec = EXPERIMENT_PATTERNS.get(pattern_of(pattern), {})
+    return list(spec.get('presets') or EXPERIMENT_MAP_PRESETS)
+
+
+def instruction_scope_of(pattern):
+    """そのパターンの指示の候補の範囲('all' / 'dish')。"""
+    return EXPERIMENT_PATTERNS.get(pattern_of(pattern), {}).get('instruction_scope', 'all')
 # 本実験で使うパターン。固定の注文3品・鍋1つ・指示は開始時に1回、
 # 条件ごとに別の相方として見せて毎回アンケート。割り込み許容数は
 # 0/1/2/inf の4水準で、指示は工程の鎖(パターン5)。
@@ -842,7 +872,7 @@ def all_conditions(pattern=None):
     """
     budgets = PATTERN_SKIP_BUDGETS.get(pattern_of(pattern), tuple(SKIP_BUDGETS))
     return [{'map': m, 'skip_budget': b}
-            for m in EXPERIMENT_MAP_PRESETS for b in budgets]
+            for m in pattern_maps(pattern) for b in budgets]
 
 
 class CrossProcessLock:
@@ -949,7 +979,7 @@ def assignment_for(participant, pattern=DEFAULT_PATTERN):
             # 順序統制(カウンターバランス)に従って並べる。くじ引きにすると、
             # ある条件だけたまたま後半に偏る参加者が出る。8セッションは
             # 学習効果が強いので、少人数では打ち消されない。
-            plan = design.plan_for(participant)
+            plan = design.plan_for(participant, maps=pattern_maps(pattern))
             order = [{'map': c['map'], 'skip_budget': c['skip_budget'],
                       'position': c['position'], 'block': c['block']}
                      for c in plan]
@@ -958,7 +988,7 @@ def assignment_for(participant, pattern=DEFAULT_PATTERN):
                 # くじ引きにする(順序統制はパターン3の8条件が前提)。
                 order = all_conditions(pattern)
                 random.shuffle(order)
-            g = design.group_of(participant)
+            g = design.group_of(participant, maps=pattern_maps(pattern))
             rec = {'order': order, 'done': 0, 'pattern': pattern_of(pattern),
                    'group': g['name'], 'row': g['row'],
                    'design': design.DESIGN_VERSION,
@@ -1702,13 +1732,13 @@ class WebGamePlay:
             #   skip_budget 0 に固定(全員同じなら、条件間の差には効かない)
             #   注文構成    本番で使わないもの(同じ並びを2回遊ばせない)
             practice_pid = str(choice.get('participant') or '').strip()
-            pr = design.practice_condition(practice_pid)
+            pr = design.practice_condition(practice_pid, maps=pattern_maps(EXPERIMENT_PATTERN))
             map_name = pr['map']
             preset = EXPERIMENT_MAP_PRESETS[map_name]
             sets = order_sets_for(preset)
             # 本番で使う構成(固定)も避ける。同じ並びを2回遊ばせない。
             used = set(experiment_case_indices(preset) or [])
-            used.add(design.fixed_case_for(preset, used))
+            used.add(design.fixed_case_for(preset, used, EXPERIMENT_PATTERN))
             case = design.practice_case(len(sets), used)
             return {'mode': 'practice', 'map': map_name, 'preset': preset,
                     'case': case, 'recipes': list(sets[case]),
@@ -1744,8 +1774,8 @@ class WebGamePlay:
             position = cond.get('position')
             if position is None:
                 position = (cond_idx % max(1, len(cases))) + 1
-            case = design.fixed_case_for(preset, cases)
-            g = design.group_of(participant)
+            case = design.fixed_case_for(preset, cases, pattern)
+            g = design.group_of(participant, maps=pattern_maps(pattern))
             return {'map': cond['map'], 'preset': preset, 'case': case,
                     'recipes': list(sets[case]), 'picked_by': 'experiment',
                     'participant': participant, 'session': done + 1,
@@ -2694,6 +2724,9 @@ class WebGamePlay:
             if ai is not None:
                 ai.skip_budget = agent_skip_budget(sel['skip_budget'])
                 ai.deadline_seconds = None
+                # 指示の候補の範囲。パターン6は「料理を提供するまで任せる」だけ
+                ai.instruction_scope = (instruction_scope_of(sel.get('pattern'))
+                                        if sel.get('participant') else 'all')
                 # デバッグ画面からの切り替え。実験の回では常に切り。
                 if hasattr(ai, 'two_agent_assignment'):
                     ai.two_agent_assignment = bool(getattr(self, '_two_agent', False))

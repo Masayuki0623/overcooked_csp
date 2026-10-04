@@ -82,20 +82,35 @@ def group_index_of(participant, group=None):
     return h % len(GROUPS)
 
 
-def group_of(participant, group=None):
+def group_of(participant, group=None, maps=None):
+    """その参加者のグループ。
+
+    maps に地図を1つだけ渡すと(リングだけのパターン)、地図の順序は無いので
+    グループは G1..G4(ラテン方格の行 A..D)になる。
+    """
+    if maps is not None and len(maps) == 1:
+        idx = group_index_of(participant, group)
+        if group is None:
+            idx = idx % len(ROWS)
+        elif idx >= len(ROWS):
+            raise ValueError(f'地図が1つのときグループは1〜{len(ROWS)}です: {group!r}')
+        return {'name': f'G{idx + 1}', 'first_map': maps[0], 'row': ROWS[idx]}
     return GROUPS[group_index_of(participant, group)]
 
 
-def plan_for(participant, group=None):
-    """その参加者の本番8ゲームぶんの条件。
+def plan_for(participant, group=None, maps=None):
+    """その参加者の本番の条件(地図2つなら8ゲーム、1つなら4ゲーム)。
 
     戻り値は session 1 から順に並んだ一覧。
         {'session', 'map', 'skip_budget', 'block', 'position', 'group', 'row'}
-        block    : 前半=1 / 後半=2
+        block    : 前半=1 / 後半=2(地図が1つなら 1 だけ)
         position : そのかたまりの中で何番目か(1..4)。注文構成はこれで決まる
     """
-    g = group_of(participant, group)
-    order_of_maps = ((g['first_map'], MAPS[1] if g['first_map'] == MAPS[0] else MAPS[0]))
+    g = group_of(participant, group, maps)
+    if maps is not None and len(maps) == 1:
+        order_of_maps = (maps[0],)
+    else:
+        order_of_maps = ((g['first_map'], MAPS[1] if g['first_map'] == MAPS[0] else MAPS[0]))
     budgets = LATIN_SQUARE[g['row']]
     out = []
     for block, map_name in enumerate(order_of_maps, 1):
@@ -133,15 +148,23 @@ def condition_for(participant, session, group=None):
 #            (ジュースにブルーベリー、スープにたまねぎが要る、という条件を満たす
 #             8つの中からユーザーが選んだ。2026-10-03)
 FIXED_CASE = {'experiment1': 16, 'experiment2': 12}
+# パターンごとに別の番号を使うとき。無ければ FIXED_CASE。
+#   6: リングだけ・料理を提供するまで任せる指示だけ。番号は未定(ユーザーが
+#      決める)。決まるまでは FIXED_CASE のリング(16)を使う。
+FIXED_CASE_BY_PATTERN = {6: {'experiment1': None}}
 
 
-def fixed_case_for(preset, cases):
+def fixed_case_for(preset, cases, pattern=None):
     """本番で使う注文の構成の番号。地図(プリセット)ごとに1つ。
 
     固定の番号は「良い指示が一意に決まる」絞り(cases)より優先する
     (リングのその絞りは全部サラダが被っていた)。固定が無ければ候補の先頭。
     """
-    want = FIXED_CASE.get(preset)
+    want = None
+    if pattern is not None:
+        want = (FIXED_CASE_BY_PATTERN.get(int(pattern)) or {}).get(preset)
+    if want is None:
+        want = FIXED_CASE.get(preset)
     if want is not None:
         return want
     cases = list(cases or [])
@@ -187,7 +210,7 @@ def practice_case(all_count, used):
     return sorted(used)[-1] if used else 0
 
 
-def practice_condition(participant, group=None):
-    g = group_of(participant, group)
+def practice_condition(participant, group=None, maps=None):
+    g = group_of(participant, group, maps)
     return {'map': g['first_map'], 'skip_budget': PRACTICE_BUDGET,
             'position': PRACTICE_POSITION, 'group': g['name'], 'row': g['row']}
