@@ -404,7 +404,7 @@ ALL_COLUMNS = [
     # --- アンケート ---
     'つながり1', 'つながり2', 'つながり3', 'つながり4',
     '協調1', '協調2', '協調3', '協調4', 'つながり平均', '協調平均', 'ラポール',
-    '指示1', '指示2', '指示3', '指示4', '指示5', '指示6', '指示平均',
+    '指示1', '指示2', '指示3', '指示4', '指示5', '指示6', '指示平均', '指示への自信',
     'うまく噛み合ったところ', '気になったところ', '指示に対するAIの動き', 'アンケート記録時刻',
     # --- 参加者 ---
     '年齢', 'ゲーム経験',
@@ -545,6 +545,7 @@ QUAL_COLUMNS = (
          '指示した作業にすぐ取りかかってくれた', '指示が伝わっている気がした',
          '指示と違う動きにも、理由がありそうだった', '指示を出した甲斐があった'], 1)]
     + [('指示平均', '指示1〜6の平均'),
+       ('指示への自信', '自分の指示に自信があった(1〜5。自己評価。指示平均には入れない)'),
        ('うまく噛み合ったところ', '自由記述(任意)'),
        ('気になったところ', '自由記述(任意)'),
        ('指示に対するAIの動き', '自由記述(任意)')]
@@ -3338,10 +3339,12 @@ CCR_COORDINATION_FIELDS = [f'coord_{i}' for i in range(1, 5)]
 # 指示についての項目。この研究の本題(指示にどれだけ従うかで受け取り方が
 # どう変わるか)を直接きくもので、既製の尺度ではない。
 INSTR_FIELDS = [f'instr_{i}' for i in range(1, 7)]
+# 自分の指示についての自己評価(指示平均には入れない)
+SELF_FIELDS = ['self_conf']
 SURVEY_FIELDS = (['participant_id', 'session', 'pattern', 'timestamp']
                  + CCR_CONNECTION_FIELDS + CCR_COORDINATION_FIELDS
                  + ['connection_mean', 'coordination_mean', 'rapport']
-                 + INSTR_FIELDS + ['instr_mean']
+                 + INSTR_FIELDS + ['instr_mean'] + SELF_FIELDS
                  + FREE_TEXT_FIELDS
                  + ['map', 'skip_budget', 'case', 'served', 'makespan_s',
                     'agent', 'block'])
@@ -3383,6 +3386,9 @@ async def survey(req: Request):
     instr, err = read_five(INSTR_FIELDS, '指示について')
     if err:
         return JSONResponse({'ok': False, 'error': err}, status_code=400)
+    selfv, err = read_five(SELF_FIELDS, '自分の指示について')
+    if err:
+        return JSONResponse({'ok': False, 'error': err}, status_code=400)
 
     # 自由記述は任意。長すぎる貼り付けだけ切って、あとはそのまま残す。
     free = {}
@@ -3402,6 +3408,7 @@ async def survey(req: Request):
         'rapport': round((connection_mean + coordination_mean) / 2, 2),
         **free,
         'instr_mean': round(sum(instr) / len(instr), 2),
+        'self_conf': selfv[0],
         'map': body.get('map'), 'skip_budget': body.get('skip_budget'),
         'case': body.get('case'), 'served': body.get('served'),
         'makespan_s': body.get('makespan_s'),
@@ -3440,6 +3447,7 @@ async def survey(req: Request):
         '協調平均': coordination_mean,
         'ラポール': row['rapport'],
         '指示平均': row['instr_mean'],
+        '指示への自信': selfv[0],
         'うまく噛み合ったところ': free.get('free_good', ''),
         '気になったところ': free.get('free_bad', ''),
         '指示に対するAIの動き': free.get('free_instruction', ''),
