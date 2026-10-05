@@ -918,6 +918,13 @@ def instruction_scope_of(pattern):
 # 回ごとに固定した4注文、d は 0/1/2/inf、4ゲーム)。
 EXPERIMENT_PATTERN = 6
 
+# 実験のセッションで、その回の条件(割り込み許容数・回・注文)と、指示の
+# 効き方(挟んだ数・残り・L)、CSP の計画表を画面に出すか。
+# 実験の動作を確かめるための**一時的な表示**(2026-10-05)。
+# 参加者に遊んでもらう前に、必ず False に戻すこと。出したままだと、
+# 参加者に条件が見えてしまう。
+DEBUG_SHOW_CONDITION = True
+
 
 def games_per_block_of(pattern):
     """1つの条件を何ゲーム続けるか。パターン4だけ3、それ以外は1。"""
@@ -1783,6 +1790,9 @@ class WebGamePlay:
             # 計画表を出しても読めない)。実験セッション・練習・デバッグは
             # 送ってくる。
             self.show_plan = bool((choice or {}).get('show_plan'))
+            if DEBUG_SHOW_CONDITION and (self.selection or {}).get('participant'):
+                # 条件を出して確かめている間は、実験の回でも計画表を送る。
+                self.show_plan = True
             # 2人ぶんの割り当て。既定で有効。デバッグ画面からだけ切れる。
             _ta = (choice or {}).get('two_agent')
             self._two_agent = True if _ta is None else bool(_ta)
@@ -2400,6 +2410,8 @@ class WebGamePlay:
             # どのパターンの回かも残す。これが無いと、集計のときに
             # パターン1/2/3 を区別できない。
             'pattern': sel.get('pattern'),
+            # 条件を画面に出すか(デバッグのための一時的な表示)
+            'debug_show': bool(DEBUG_SHOW_CONDITION),
         }
 
     def selection_info(self, sel=None):
@@ -2777,7 +2789,33 @@ class WebGamePlay:
                 'who': 'AI' if idx == own else 'あなた',
                 'tasks': rows,
             })
+        out['instruction'] = self._instruction_debug(ai)
         return out
+
+    @staticmethod
+    def _instruction_debug(ai):
+        """いまの指示がどう効いているか(デバッグ画面用)。指示が無ければ None。"""
+        pend = list(getattr(ai, '_pending_instructions', None) or [])
+        if not pend:
+            return None
+        p = pend[0]
+        task = p.get('task')
+        payload = (task if isinstance(task, dict)
+                   else task[1] if isinstance(task, (list, tuple)) and len(task) > 1
+                   and isinstance(task[1], dict) else {})
+        loss = p.get('time_loss') or {}
+        budget = p.get('skip_budget')
+        return {
+            'verb': payload.get('verb'), 'obj': payload.get('obj'),
+            'd': 'inf' if budget is None else budget,
+            'remaining': p.get('remaining_skip_budget'),
+            'consumed': p.get('_consumed_tasks', 0),
+            'in_wait': p.get('inserted_in_wait', 0),
+            'status': p.get('status'),
+            'L': loss.get('loss_seconds'), 'L0': loss.get('immediate_loss_seconds'),
+            'f': loss.get('baseline_seconds'), 'fd': loss.get('constrained_seconds'),
+            'loss_status': loss.get('status'),
+        }
 
     def notify(self, text):
         with self._notices_lock:
@@ -4410,6 +4448,10 @@ def main():
     _stamp_prints()
     args = parse_arguments()
     INSTANCE_ID = int(args.instance)
+    if DEBUG_SHOW_CONDITION:
+        print('[server] ★ 条件の表示(デバッグ)が有効です。実験の回で、割り込み許容数などが'
+              '画面に出ます。参加者に遊んでもらう前に DEBUG_SHOW_CONDITION を False に'
+              '戻してください。', flush=True)
     # 1秒あたりに行動できる回数。ゲームを組み立てる前に決めておく
     # (刻む回数や環境の1手の長さがこれで決まる)。
     game_config.set_input_hz(args.input_hz)
