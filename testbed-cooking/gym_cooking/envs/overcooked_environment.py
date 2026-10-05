@@ -14,6 +14,7 @@ from gym_cooking.utils.agent import SimAgent
 from gym_cooking.utils.agent import COLORS
 from gym_cooking.utils.order_schedule import OrderScheduler
 from gym_cooking.utils.event import get_all_events
+from gym_cooking.utils import mistakes
 
 import copy
 import networkx as nx
@@ -99,6 +100,10 @@ class OvercookedEnvironment(gym.Env):
         # 最初の提供が消えてしまう。提供の記録は試合ごとに数件しかないため、
         # 落とさずに別に取っておく。
         self.delivery_log = []
+        # ミスの記録(注文外の提供 / 使えない組み合わせ / 余分に切った)。
+        # 拾い方は utils/mistakes.py。
+        self.mistake_log = []
+        self._unusable_seen = {}
 
         # changeable
         self.chg_grid = None
@@ -222,6 +227,10 @@ class OvercookedEnvironment(gym.Env):
         self.t = 0
         self.current_time = 0.
         self.delivery_log = []
+        # ミスの記録(注文外の提供 / 使えない組み合わせ / 余分に切った)。
+        # 拾い方は utils/mistakes.py。
+        self.mistake_log = []
+        self._unusable_seen = {}
 
         # For visualizing episode.
         self.rep = []
@@ -296,8 +305,15 @@ class OvercookedEnvironment(gym.Env):
                     'ok': ok,
                     'by': getattr(event, 'playerA', None),
                 })
+                if not ok:
+                    mistakes.note_misserve(self, getattr(event, 'playerA', None), name)
             if event.event not in self.all_events:
                 print("Invalid event detected: {}".format(event.event))
+        # 記録のための処理なので、失敗してもゲームは止めない。
+        try:
+            mistakes.note_events(self, events)
+        except Exception as e:
+            print('[mistakes] 拾えませんでした: %s %s' % (type(e).__name__, e), flush=True)
 
         # Update Orders
         self.order_scheduler.update(self.world, passed_time=passed_time)

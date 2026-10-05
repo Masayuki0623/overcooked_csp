@@ -186,6 +186,21 @@
   }
   /* 印の class は sel。pick は同意画面の欄の class で、余白が付いてしまう */
   #instruct .cards .counts span.sel { background: #4fd39a; color: #10251b; border-color: #4fd39a; }
+  /* 指示への自信(1〜5)。指示のカードを選ぶのと同じ場所で答える */
+  #instruct .conf { margin-top: 8px; }
+  #instruct .conf.hidden { display: none; }
+  #instruct .conf-q { font-size: 13px; margin-bottom: 4px; }
+  #instruct .conf-scale { display: flex; gap: 4px; }
+  #instruct .conf-scale button {
+    flex: 1 1 0; font: inherit; font-size: 14px; color: var(--text);
+    background: var(--btn-bg); border: 1px solid var(--btn-line);
+    border-radius: 8px; padding: 6px 0; min-height: 32px;
+  }
+  #instruct .conf-scale button.on { background: #2f6f57; border-color: #4fd39a; font-weight: 700; }
+  #instruct .conf-anchors {
+    display: flex; justify-content: space-between; font-size: 10.5px;
+    color: var(--muted); margin-top: 2px;
+  }
   #instruct .go { margin-top: 10px; text-align: center; }
   #instruct .go button {
     font: inherit; font-size: 15px; font-weight: 700; color: var(--text);
@@ -536,9 +551,14 @@
 </div>
 
 <div id="instruct">
-  <div class="lead" id="instruct-lead">AIに最初の指示を出してください</div>
+  <div class="lead" id="instruct-lead">AIに今すぐやってほしい作業を指示してください</div>
   <div class="who" id="instruct-who"></div>
   <div class="cards" id="instruct-cards"></div>
+  <div class="conf hidden" id="instruct-conf">
+    <div class="conf-q">この指示に自信がある</div>
+    <div class="conf-scale" id="instruct-conf-scale"></div>
+    <div class="conf-anchors"><span>全くそう思わない</span><span>強くそう思う</span></div>
+  </div>
   <div class="go" id="instruct-go">
     <button type="button" id="instruct-ok" disabled>決定</button>
   </div>
@@ -1512,7 +1532,7 @@
       (custom ? '<div class="sub">好きな条件で遊べます。記録は残りません。</div>' : idBox) +
       // 実験のセッションでは、始める前に AI についての説明を必ず見せる
       // (チュートリアルを飛ばした人にも届くように)。
-      (experiment ? `<div class="sub">${esc(AI_NOTE)}</div>` : '') +
+      (experiment ? `<div class="sub"><b>${esc(GOAL_NOTE)}</b><br>${esc(AI_NOTE)}</div>` : '') +
       // 実験セッションはパターン3で固定。選ばせると、参加者ごとに
       // 違う進み方になって比べられなくなる。
       (custom || experiment ? '' : patternBlock()) +
@@ -1959,6 +1979,9 @@
   // 0 の回は、効率の悪い指示にもそのまま従うため)。
   const AI_NOTE = 'AIは、いちばん早く作り終える段取りを計算できます。' +
                   'ただし、あなたの考えを推し量ることはしません。';
+  // 何を目指すゲームか。完了時間を効率の指標にするので、「協力して早く
+  // 終える」が目的だと全員に伝えておく。
+  const GOAL_NOTE = 'AIと二人で協力して、できるだけ早く3品を作り終えてください。';
   const TUTORIALS = [
     { key: 'salad', title: 'サラダ',
       lead: '切った野菜を皿に乗せて出します。火は使いません。',
@@ -1990,8 +2013,12 @@
         [G('delivery'), '提供口へ運ぶ'],
       ] },
     { key: 'ai', title: 'AI と一緒に',
-      lead: 'ここからは本番と同じです。AI が相方として一緒に料理します。' +
-            '<br>ゲームが始まる前に、AI にやってほしいことを 1 つ選べます。' +
+      // この回は指示を出さない(指示ありで遊ぶと、そのときの条件だけ余分に
+      // 経験することになる)。本番で指示を求められることは、ここで伝える。
+      lead: 'AI が相方として一緒に料理します。地図は本番と同じです。' +
+            '<br><b>' + GOAL_NOTE + '</b>' +
+            '<br>この回は、AI への指示はありません。' +
+            '<br>本番では、ゲームが始まる前に、AI に今すぐやってほしい作業を 1 つ指示します。' +
             '<br>' + AI_NOTE,
       dishes: ['注文は3つ。サラダとスープが混ざります'],
       steps: [
@@ -2660,12 +2687,8 @@
     ['instr_5', '指示と違う動きにも、理由がありそうだった'],
     ['instr_6', '指示を出した甲斐があった'],
   ];
-  // 自分の指示についての項目(自己評価)。AI の動きではなく、参加者が
-  // 自分の指示をどう見ていたかをきく。「自分の指示が不適切だったことに
-  // 気づけるか」を見るための項目で、指示平均には入れない。
-  const SELF_ITEMS = [
-    ['self_conf', '自分の指示に自信があった'],
-  ];
+  // 自分の指示への自信は、ここでは聞かない。指示を選ぶのと同時に答えて
+  // もらう(showInstruct)。ゲームのあとだと AI の動きを見たあとの自信になる。
   // 確認の質問。指示は「今すぐ作って」の意味で出してもらう前提なので、
   // 「いずれ作ってほしい料理」のつもりで選んだ回を見分けられるようにする。
   // 二択・必須。値は now / later。
@@ -2708,9 +2731,9 @@
     fiveNo = 0;
     const instrQs = fiveQs(INSTR_ITEMS);
     fiveNo = 0;
-    const selfQs = fiveQs(SELF_ITEMS) +
+    const selfQs =
       `<div class="q" id="q-${INTENT_ITEM[0]}">` +
-      `<div class="text">${SELF_ITEMS.length + 1}. ${esc(INTENT_ITEM[1])}</div>` +
+      `<div class="text">1. ${esc(INTENT_ITEM[1])}</div>` +
       '<div class="scale choice">' + INTENT_CHOICES.map(([val, lab]) =>
         `<label><input type="radio" name="${INTENT_ITEM[0]}" value="${val}">` +
         `<span>${esc(lab)}</span></label>`).join('') + '</div></div>';
@@ -2785,7 +2808,6 @@
       for (const [name] of CCR_CONNECTION) body[name] = read(name);
       for (const [name] of CCR_COORDINATION) body[name] = read(name);
       for (const [name] of INSTR_ITEMS) body[name] = read(name);
-      for (const [name] of SELF_ITEMS) body[name] = read(name);
       {
         // 二択は数字ではないので、read() を通さずに値をそのまま読む。
         const name = INTENT_ITEM[0];
@@ -2871,7 +2893,7 @@
     if (lead) {
       lead.textContent = started
         ? '選んでから「決定」を押してください'
-        : 'AIに最初の指示を出してください';
+        : 'AIに今すぐやってほしい作業を指示してください';
     }
     document.getElementById('instruct-who').innerHTML = who;
     // 段(切る / 調理する / 提供まで任せる)ごとに行を分ける。
@@ -2912,6 +2934,23 @@
     const ok = document.getElementById('instruct-ok');
     let chosen = null;
     ok.disabled = true;
+    // 指示への自信(1〜5)。実験の回では、指示と一緒に答えてもらう。ゲームの
+    // あとに聞くと、AI の動きを見たあとの自信になってしまう。
+    const askConf = !!msg.ask_confidence;
+    let conf = null;
+    const confBox = document.getElementById('instruct-conf');
+    const confScale = document.getElementById('instruct-conf-scale');
+    confBox.classList.toggle('hidden', !askConf);
+    confScale.innerHTML = askConf
+      ? [1, 2, 3, 4, 5].map((v) => `<button type="button" data-v="${v}">${v}</button>`).join('')
+      : '';
+    // 「決定」は、指示(と自信)を選び終えてから押せる。
+    const refreshOk = () => { ok.disabled = chosen === null || (askConf && conf === null); };
+    confScale.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
+      conf = Number(b.dataset.v);
+      confScale.querySelectorAll('button').forEach((o) => o.classList.toggle('on', o === b));
+      refreshOk();
+    }));
     box.querySelectorAll('button').forEach((b) => b.addEventListener('click', (ev) => {
       const it = items[Number(b.dataset.i)] || {};
       const opts = it.options || [];
@@ -2927,10 +2966,10 @@
         chosen = picked && opts.length > 1 ? opts[Number(picked.dataset.k)].index : Number(b.dataset.index);
       }
       box.querySelectorAll('button').forEach((o) => o.classList.toggle('on', o === b));
-      ok.disabled = false;
+      refreshOk();
     }));
     ok.onclick = () => {
-      if (chosen === null) return;
+      if (chosen === null || (askConf && conf === null)) return;
       // 何を指示したかをバーに残す(「たまねぎを2つ切って」)
       const onBtn = box.querySelector('button.on');
       const onItem = onBtn ? items[Number(onBtn.dataset.i)] : null;
@@ -2939,7 +2978,7 @@
         const n = opt && (onItem.options || []).length > 1 ? `${opt.count}つ` : '';
         showCurrentInstruction(`${onItem.label}を${n}${onItem.action || ''}`);
       }
-      sendNow({ type: 'instruct', seq: msg.seq, index: chosen });
+      sendNow({ type: 'instruct', seq: msg.seq, index: chosen, confidence: conf });
       moveBlockUntil = performance.now() + stepMs;
       hideInstruct();
       instructDone = true;

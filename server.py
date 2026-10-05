@@ -77,6 +77,7 @@ from agent.gameplay import (  # noqa: E402
 from agent.instruction_panel import (  # noqa: E402
     card_action, card_icon_name, card_label, card_steps, VERB_LAYER, LAYER_NAME)
 from gym_cooking.utils import config as game_config  # noqa: E402
+from gym_cooking.utils import mistakes as game_mistakes  # noqa: E402
 from gym_cooking.utils.order_preset import (  # noqa: E402
     enumerate_order_recipes, experiment_case_indices, preset_names)
 import experiment_design as design
@@ -339,6 +340,8 @@ SESSION_COLUMNS = [
     ('instruction_tasks_ai', '指示の工程数_AI', '指示に含まれる工程のうち AI がやる数(「スープを調理して」なら 切る+煮る 等)'),
     ('instruction_tasks_human', '指示の工程数_人', '指示に含まれる工程のうち、AI にはできず人がやる数(仕切りの向こうで切る等)'),
     ('quality', '指示の質', '自動の分類'),
+    ('instruction_confidence', '指示への自信',
+     '「この指示に自信がある」(1〜5)。指示を選ぶのと同時に、ゲームが始まる前に答える'),
     ('instruction_accepted_s', '指示を受けた時刻_秒', 'ゲーム内の秒'),
     ('wait_seconds', '指示までの待ち_秒', '指示を選ぶまでにかかった秒'),
     ('wait_after_instruction_s', '指示後に着手するまで_秒', ''),
@@ -366,6 +369,15 @@ SESSION_COLUMNS = [
     ('serve_times_s', '提供時刻_秒', '1品ごと、| 区切り'),
     ('serve_dishes', '提供した料理', '| 区切り'),
     ('misserved', '注文外の提供数', '注文に無い物を提供口へ出した回数'),
+    ('mistakes_human', '人のミスの回数',
+     '参加者のミスの合計(注文外の提供 + 使えない組み合わせ + 余分に切った)。AI のぶんは含まない'),
+    ('mistake_misserve_human', '人のミス_注文外の提供', '参加者が、注文に無い物を提供口へ出した回数'),
+    ('mistake_unusable_human', '人のミス_使えない組み合わせ',
+     '参加者が、残っている注文のどれにも合わない組み合わせを作った回数(台・皿で重ねた / 鍋に入れた)'),
+    ('mistake_extra_chop_human', '人のミス_余分に切った',
+     '参加者が、残っている注文に要る数より多く材料を切った回数(切り始めた時点で数える)'),
+    ('mistake_log_human', '人のミスの内訳',
+     '時刻_秒:種類:対象 を | で区切る。種類は misserve / unusable / extra_chop'),
     ('aborted', '中断したか', '1=途中で終わった'),
     ('discard_reason', '除外理由', 'quit=途中で抜けた / bug=バグ報告。空=正式な回'),
     ('accepted', '正式な回か', '1=集計に入れる'),
@@ -393,6 +405,8 @@ ALL_COLUMNS = [
     '地図', '割り込み許容数', '注文の組み合わせ番号', '注文',
     # --- 結果 ---
     '完了したか', '提供数', '失敗数', 'プレイ時間_秒', '注文外の提供数', '提供した料理', '提供時刻_秒',
+    '人のミスの回数', '人のミス_注文外の提供', '人のミス_使えない組み合わせ', '人のミス_余分に切った',
+    '人のミスの内訳',
     # --- 効率損失(先) と 指示の内容(後) ---
     '効率損失量L_秒', '即時実行の効率損失量L0_秒', 'L算出の可否', 'L0算出の可否',
     '制約なしの所要_秒', '制約ありの所要_秒',
@@ -547,7 +561,9 @@ QUAL_COLUMNS = (
          '指示した作業にすぐ取りかかってくれた', '指示が伝わっている気がした',
          '指示と違う動きにも、理由がありそうだった', '指示を出した甲斐があった'], 1)]
     + [('指示平均', '指示1〜6の平均'),
-       ('指示への自信', '自分の指示に自信があった(1〜5。自己評価。指示平均には入れない)'),
+       ('指示への自信',
+        '「この指示に自信がある」(1〜5)。指示を選ぶのと同時に、ゲームが始まる前に答える'
+        '(ゲーム記録から引く。指示平均には入れない)'),
        ('指示の意図',
         '確認の質問。now=今すぐ作ってほしい料理のつもりで選んだ / '
         'later=いずれ作ってほしい料理のつもりで選んだ'),
@@ -1615,6 +1631,7 @@ class WebGamePlay:
         self.instruction_slots = []
         self.instruction_request = None
         self._instruction_answer = None
+        self.instruction_confidence = None   # 指示と一緒に答えた自信(1〜5)
         self._instruction_seq = 0
         self._instruction_lock = threading.Lock()
         self._instruction_done = threading.Event()
@@ -1706,6 +1723,28 @@ class WebGamePlay:
             print(f"[server] #{self.game_id} ゲームを{'止めました' if on else '再開します'}"
                   f"(バグ報告)")
 
+    def human_mistake_record(self):
+        """参加者のミス(種類・回数・時点)。拾い方は gym_cooking/utils/mistakes.py。"""
+        # ここで落ちると、その回のゲームの記録ごと書けなくなる。拾えなければ
+        # 空のまま返す。
+        try:
+            env = self.env
+            idx = getattr(self.game, 'idx_human', None)
+            agents = getattr(env, 'sim_agents', None) or []
+            if idx is None or idx >= len(agents):
+                return {}
+            s = game_mistakes.summarize(getattr(env, 'mistake_log', None), by=agents[idx].name)
+        except Exception as e:
+            print(f'[server] ミスの記録を集計できませんでした: {type(e).__name__} {e}', flush=True)
+            return {}
+        return {
+            'mistakes_human': s['total'],
+            'mistake_misserve_human': s['counts']['misserve'],
+            'mistake_unusable_human': s['counts']['unusable'],
+            'mistake_extra_chop_human': s['counts']['extra_chop'],
+            'mistake_log_human': s['detail'],
+        }
+
     def _resolve_choice(self, choice):
         """画面で選ばれた内容を、組み立てに使える形にする。おかしな値は既定に戻す。
 
@@ -1728,21 +1767,22 @@ class WebGamePlay:
                    'instruction': INSTRUCTION_TIMING_NO_INSTRUCTION,
                    'skip_budget': None}
             if not spec['solo']:
-                # 本番と同じ形(指示を1回受け取ってから始める)。効き方は真ん中。
-                preset = EXPERIMENT_MAP_PRESETS[spec['map']]
+                # 地図は本番と同じ(本番で使うパターンの1つ目。パターン6なら
+                # 鍋2つのリング)。固定の注文3品を出し切るまで。
+                # 指示は出さない。指示ありで遊ばせると、そのときの割り込み
+                # 許容数の条件だけ余分に経験することになる。本番で指示を
+                # 求められることは、画面の説明で伝える。
+                tut_map = pattern_maps(EXPERIMENT_PATTERN)[0]
+                preset = (EXPERIMENT_PATTERNS[EXPERIMENT_PATTERN]['presets'].get(tut_map)
+                          or EXPERIMENT_MAP_PRESETS.get(tut_map) or 'experiment1')
                 sets = order_sets_for(preset)
                 cases = experiment_case_indices(preset) or list(range(len(sets)))
                 case = random.choice(cases)
-                out.update({'preset': preset, 'case': case,
+                out.update({'map': tut_map, 'preset': preset, 'case': case,
                             'recipes': list(sets[case]),
-                            'instruction': INSTRUCTION_TIMING_ONCE_AT_START,
-                            'skip_budget': SKIP_BUDGETS[len(SKIP_BUDGETS) // 2],
-                            # 本番(パターン4)と同じ進み方。固定の注文3品を
-                            # 出し切るまで、鍋は1つ、指示は開始時に1回。
-                            # 以前は30秒のエンドレスにしていたが、本番と
-                            # 進み方が違うと練習にならない。
-                            'endless': False,
-                            'pots': 1})
+                            'instruction': INSTRUCTION_TIMING_NO_INSTRUCTION,
+                            'skip_budget': None,
+                            'endless': False})
             return out
 
         if mode == 'practice':
@@ -1947,6 +1987,8 @@ class WebGamePlay:
             'serve_dishes': '|'.join(d['dish'] for d in deliveries),
             # 注文に無い物を提供口へ出してしまった回数(材料の無駄)
             'misserved': misserved,
+            **self.human_mistake_record(),
+            'instruction_confidence': getattr(self, 'instruction_confidence', None),
             'aborted': int(bool(res.get('aborted'))),
             # 正式な記録として数える回かどうか。バグ報告の出た回と、
             # 途中で抜けた回は外す。やり直した回が正式な1回になる。
@@ -2539,6 +2581,10 @@ class WebGamePlay:
                 'items': items,
                 'layers': layer_names,
                 'players': (env_summary or {}).get('players', []),
+                # 指示と一緒に、その指示への自信(1〜5)も答えてもらうか。
+                # 実験の回と練習だけ。
+                'ask_confidence': bool((self.selection or {}).get('participant')
+                                       or (self.selection or {}).get('mode') == 'practice'),
             }
         try:
             while not self._instruction_done.wait(0.5):
@@ -2564,12 +2610,17 @@ class WebGamePlay:
             with self._instruction_lock:
                 self.instruction_request = None
 
-    def answer_instruction(self, seq, index):
-        """ブラウザで選ばれた指示を受け取る。"""
+    def answer_instruction(self, seq, index, confidence=None):
+        """ブラウザで選ばれた指示と、その指示への自信(1〜5)を受け取る。"""
         with self._instruction_lock:
             req = self.instruction_request
             if not req or req['seq'] != seq:
                 return False
+            try:
+                c = int(confidence)
+                self.instruction_confidence = c if 1 <= c <= 5 else None
+            except (TypeError, ValueError):
+                self.instruction_confidence = None
             self._instruction_answer = int(index)
             self._instruction_done.set()
             return True
@@ -3408,8 +3459,9 @@ CCR_COORDINATION_FIELDS = [f'coord_{i}' for i in range(1, 5)]
 # 指示についての項目。この研究の本題(指示にどれだけ従うかで受け取り方が
 # どう変わるか)を直接きくもので、既製の尺度ではない。
 INSTR_FIELDS = [f'instr_{i}' for i in range(1, 7)]
-# 自分の指示についての自己評価(指示平均には入れない)
-SELF_FIELDS = ['self_conf']
+# 自分の指示への自信は、アンケートではなく指示を選ぶときに取る(ゲームの
+# あとに聞くと、AI の動きを見たあとの自信になってしまう)。値はゲームの
+# 記録(指示への自信)にあり、アンケートの行へはそこから引く。
 # 確認の質問(二択)。指示は「今すぐ作って」の意味で出してもらう前提なので、
 # 「いずれ作ってほしい料理」のつもりで選んだ回を見分けるために残す。
 INTENT_FIELD = 'instr_intent'
@@ -3419,7 +3471,7 @@ PLAY_FIELDS = ['play_fun', 'play_control', 'play_skill']
 SURVEY_FIELDS = (['participant_id', 'session', 'pattern', 'timestamp']
                  + CCR_CONNECTION_FIELDS + CCR_COORDINATION_FIELDS
                  + ['connection_mean', 'coordination_mean', 'rapport']
-                 + INSTR_FIELDS + ['instr_mean'] + SELF_FIELDS + [INTENT_FIELD]
+                 + INSTR_FIELDS + ['instr_mean'] + [INTENT_FIELD]
                  + PLAY_FIELDS
                  + FREE_TEXT_FIELDS
                  + ['map', 'skip_budget', 'case', 'served', 'makespan_s',
@@ -3462,9 +3514,6 @@ async def survey(req: Request):
     instr, err = read_five(INSTR_FIELDS, '指示について')
     if err:
         return JSONResponse({'ok': False, 'error': err}, status_code=400)
-    selfv, err = read_five(SELF_FIELDS, '自分の指示について')
-    if err:
-        return JSONResponse({'ok': False, 'error': err}, status_code=400)
     intent = str(body.get(INTENT_FIELD) or '').strip()
     if intent not in INTENT_CHOICES:
         return JSONResponse({'ok': False, 'error': '指示した料理をどちらのつもりで選んだかが未回答です'},
@@ -3481,6 +3530,11 @@ async def survey(req: Request):
     connection_mean = round(sum(conn) / len(conn), 2)
     coordination_mean = round(sum(coord) / len(coord), 2)
     _rec_prof = assignment_for(pid, pattern_of(body.get('pattern') or EXPERIMENT_PATTERN))
+    # 指示への自信は、指示を選んだときにゲームの記録へ入れてある。
+    confidence = ''
+    for _g in _read_sessions():
+        if _g.get('participant_id') == pid and str(_g.get('session')) == str(body.get('session')):
+            confidence = _g.get('instruction_confidence', '')   # 同じ回が複数あれば最後
     row = {
         'participant_id': pid, 'session': body.get('session'),
         'pattern': body.get('pattern'),
@@ -3491,7 +3545,6 @@ async def survey(req: Request):
         'rapport': round((connection_mean + coordination_mean) / 2, 2),
         **free,
         'instr_mean': round(sum(instr) / len(instr), 2),
-        'self_conf': selfv[0],
         INTENT_FIELD: intent,
         'play_fun': playv[0], 'play_control': playv[1], 'play_skill': playv[2],
         'map': body.get('map'), 'skip_budget': body.get('skip_budget'),
@@ -3532,7 +3585,7 @@ async def survey(req: Request):
         '協調平均': coordination_mean,
         'ラポール': row['rapport'],
         '指示平均': row['instr_mean'],
-        '指示への自信': selfv[0],
+        '指示への自信': confidence,
         '指示の意図': intent,
         '楽しかった': playv[0], '思うようにプレイできた': playv[1], 'うまくプレイできた': playv[2],
         'うまく噛み合ったところ': free.get('free_good', ''),
@@ -3942,7 +3995,8 @@ async def ws(sock: WebSocket):
             except (TypeError, ValueError):
                 pass
         elif kind == 'instruct':
-            session.answer_instruction(msg.get('seq'), msg.get('index'))
+            session.answer_instruction(msg.get('seq'), msg.get('index'),
+                                       msg.get('confidence'))
         elif kind == 'go':
             session.go(token)
         elif kind == 'pause':

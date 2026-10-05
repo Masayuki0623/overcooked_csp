@@ -61,10 +61,11 @@ VERB_ACTION_JP = {'chop': '切って', 'cook': '調理して', 'serve': '提供�
                   'carry': '運んで', 'handover': '渡して', 'serve_from_counter': '提供して',
                   'make': '調理して'}
 # 前提の工程ごと任せる(材料がまだ切れていない等)ときの言い方。
-# 「提供まで任せて」は、そこまでの工程を全部 AI がやることを含ませる。
+# 提供までの鎖は「最後まで作って」と書く。料理を1品まるごと任せる指示で、
+# そこまでの工程を全部 AI がやることを含む(以前は「提供して」だった)。
 VERB_ACTION_CHAIN_JP = {'cook': '調理して', 'mix': '混ぜて',
-                        'serve': '提供して', 'serve_salad': '提供して',
-                        'serve_juice': '提供して', 'handover': '渡して'}
+                        'serve': '最後まで作って', 'serve_salad': '最後まで作って',
+                        'serve_juice': '最後まで作って', 'handover': '渡して'}
 # 鎖の工程を短く並べるときの言い方(「切る → 煮る → 提供」)
 VERB_STEP_JP = {'chop': '切る', 'cook': '煮る', 'mix': '混ぜる', 'serve': '提供',
                 'serve_salad': '盛って提供', 'serve_juice': '提供', 'handover': '渡す',
