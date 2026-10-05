@@ -460,6 +460,8 @@
   /* 数字だけの目盛り。言葉は両端にだけ置く */
   #overlay .survey .scale.num { gap: 4px; }
   #overlay .survey .scale.num label { min-width: 0; }
+  /* 言葉の選択肢(二択など)。横に並べると折り返しで高さがそろわないので縦に積む */
+  #overlay .survey .scale.choice { flex-direction: column; }
   #overlay .survey .anchors {
     display: flex; justify-content: space-between; gap: 8px;
     font-size: 11.5px; color: var(--muted); margin: 4px 0 6px;
@@ -2709,7 +2711,7 @@
     const selfQs = fiveQs(SELF_ITEMS) +
       `<div class="q" id="q-${INTENT_ITEM[0]}">` +
       `<div class="text">${SELF_ITEMS.length + 1}. ${esc(INTENT_ITEM[1])}</div>` +
-      '<div class="scale">' + INTENT_CHOICES.map(([val, lab]) =>
+      '<div class="scale choice">' + INTENT_CHOICES.map(([val, lab]) =>
         `<label><input type="radio" name="${INTENT_ITEM[0]}" value="${val}">` +
         `<span>${esc(lab)}</span></label>`).join('') + '</div></div>';
     fiveNo = 0;
