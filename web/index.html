@@ -2714,8 +2714,10 @@
           ((exp.games_per_block || 1) > 1 ? ` ${exp.games_per_block} 回のゲーム` : 'ゲーム') +
           `についてお答えください<br>(${exp.session} / ${exp.sessions_total})</div>`
         : `<div class="sub">セッション ${exp.session} / ${exp.sessions_total}</div>`) +
-      `<h3>${esc(exp.agent || 'AI')}とのやりとりは、どうでしたか</h3>` + rapportQs +
+      // 操作チェック(指示にどう応じたと感じたか)を最初に聞く。ほかの評価
+      // (やりとりの印象など)に答えたあとだと、その答えに引きずられる。
       `<h3>${esc(exp.agent || 'AI')}に出した指示について</h3>` + instrQs +
+      `<h3>${esc(exp.agent || 'AI')}とのやりとりは、どうでしたか</h3>` + rapportQs +
       '<h3>あなた自身の指示について</h3>' + selfQs +
       '<h3>ゲームプレイについて</h3>' + playQs +
       '<h3>気づいたこと(任意)</h3>' + freeQs +
