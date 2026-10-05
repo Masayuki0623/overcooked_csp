@@ -3945,12 +3945,15 @@ async def pending_survey(participant: str = ''):
 async def assignment(participant: str = '', pattern: int = DEFAULT_PATTERN):
     """参加者に割り当てた条件の並びと、次のセッション番号。
 
-    割り当てはパターンごとに別で持つので、どちらの進み具合も混ざらない。
+    パターンは本番のもの(EXPERIMENT_PATTERN)で固定する。画面から来た値は
+    使わない。ゲーム本体は本番のパターンで始まるのに、ここだけ画面の値
+    (端末に残っていた古い番号)を使っていたので、「セッション 1 / 6」の
+    ように回数も進み具合も違うものが出ていた(本番は4回)。
     """
     pid = participant.strip()
     if not pid:
         return JSONResponse({'ok': False, 'error': '参加者IDがありません'}, status_code=400)
-    pat = pattern_of(pattern)
+    pat = EXPERIMENT_PATTERN
     rec = assignment_for(pid, pat)
     done = int(rec.get('done', 0))
     gpb = games_per_block_of(pat)
