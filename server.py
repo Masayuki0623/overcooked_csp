@@ -405,6 +405,7 @@ ALL_COLUMNS = [
     'つながり1', 'つながり2', 'つながり3', 'つながり4',
     '協調1', '協調2', '協調3', '協調4', 'つながり平均', '協調平均', 'ラポール',
     '指示1', '指示2', '指示3', '指示4', '指示5', '指示6', '指示平均', '指示への自信',
+    '指示の意図',
     '楽しかった', '思うようにプレイできた', 'うまくプレイできた',
     'うまく噛み合ったところ', '気になったところ', '指示に対するAIの動き', 'アンケート記録時刻',
     # --- 参加者 ---
@@ -547,6 +548,9 @@ QUAL_COLUMNS = (
          '指示と違う動きにも、理由がありそうだった', '指示を出した甲斐があった'], 1)]
     + [('指示平均', '指示1〜6の平均'),
        ('指示への自信', '自分の指示に自信があった(1〜5。自己評価。指示平均には入れない)'),
+       ('指示の意図',
+        '確認の質問。now=今すぐ作ってほしい料理のつもりで選んだ / '
+        'later=いずれ作ってほしい料理のつもりで選んだ'),
        ('楽しかった', 'ゲームプレイは楽しかった(1〜5)'),
        ('思うようにプレイできた', '自分の思うようにプレイできた(1〜5)'),
        ('うまくプレイできた', 'うまくプレイできた(1〜5)'),
@@ -2751,8 +2755,14 @@ class WebGamePlay:
                 ai.skip_budget = agent_skip_budget(sel['skip_budget'])
                 ai.deadline_seconds = None
                 # 指示の候補の範囲。パターン6は「料理を提供するまで任せる」だけ
-                ai.instruction_scope = (instruction_scope_of(sel.get('pattern'))
-                                        if sel.get('participant') else 'all')
+                # 練習は本番と同じ候補にする(本番で使うパターンの範囲)。以前は
+                # 練習だけ全工程のカードが出て、本番の3枚と違っていた。
+                if sel.get('participant'):
+                    ai.instruction_scope = instruction_scope_of(sel.get('pattern'))
+                elif sel.get('mode') == 'practice':
+                    ai.instruction_scope = instruction_scope_of(EXPERIMENT_PATTERN)
+                else:
+                    ai.instruction_scope = 'all'
                 # デバッグ画面からの切り替え。実験の回では常に切り。
                 if hasattr(ai, 'two_agent_assignment'):
                     ai.two_agent_assignment = bool(getattr(self, '_two_agent', False))
@@ -3400,12 +3410,17 @@ CCR_COORDINATION_FIELDS = [f'coord_{i}' for i in range(1, 5)]
 INSTR_FIELDS = [f'instr_{i}' for i in range(1, 7)]
 # 自分の指示についての自己評価(指示平均には入れない)
 SELF_FIELDS = ['self_conf']
+# 確認の質問(二択)。指示は「今すぐ作って」の意味で出してもらう前提なので、
+# 「いずれ作ってほしい料理」のつもりで選んだ回を見分けるために残す。
+INTENT_FIELD = 'instr_intent'
+INTENT_CHOICES = ('now', 'later')
 # ゲームプレイそのものについて(楽しさ・思いどおり・上手さ)
 PLAY_FIELDS = ['play_fun', 'play_control', 'play_skill']
 SURVEY_FIELDS = (['participant_id', 'session', 'pattern', 'timestamp']
                  + CCR_CONNECTION_FIELDS + CCR_COORDINATION_FIELDS
                  + ['connection_mean', 'coordination_mean', 'rapport']
-                 + INSTR_FIELDS + ['instr_mean'] + SELF_FIELDS + PLAY_FIELDS
+                 + INSTR_FIELDS + ['instr_mean'] + SELF_FIELDS + [INTENT_FIELD]
+                 + PLAY_FIELDS
                  + FREE_TEXT_FIELDS
                  + ['map', 'skip_budget', 'case', 'served', 'makespan_s',
                     'agent', 'block'])
@@ -3450,6 +3465,10 @@ async def survey(req: Request):
     selfv, err = read_five(SELF_FIELDS, '自分の指示について')
     if err:
         return JSONResponse({'ok': False, 'error': err}, status_code=400)
+    intent = str(body.get(INTENT_FIELD) or '').strip()
+    if intent not in INTENT_CHOICES:
+        return JSONResponse({'ok': False, 'error': '指示した料理をどちらのつもりで選んだかが未回答です'},
+                            status_code=400)
     playv, err = read_five(PLAY_FIELDS, 'ゲームプレイについて')
     if err:
         return JSONResponse({'ok': False, 'error': err}, status_code=400)
@@ -3473,6 +3492,7 @@ async def survey(req: Request):
         **free,
         'instr_mean': round(sum(instr) / len(instr), 2),
         'self_conf': selfv[0],
+        INTENT_FIELD: intent,
         'play_fun': playv[0], 'play_control': playv[1], 'play_skill': playv[2],
         'map': body.get('map'), 'skip_budget': body.get('skip_budget'),
         'case': body.get('case'), 'served': body.get('served'),
@@ -3513,6 +3533,7 @@ async def survey(req: Request):
         'ラポール': row['rapport'],
         '指示平均': row['instr_mean'],
         '指示への自信': selfv[0],
+        '指示の意図': intent,
         '楽しかった': playv[0], '思うようにプレイできた': playv[1], 'うまくプレイできた': playv[2],
         'うまく噛み合ったところ': free.get('free_good', ''),
         '気になったところ': free.get('free_bad', ''),

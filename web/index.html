@@ -1508,6 +1508,9 @@
       `<div class="big">${custom ? '条件を指定して練習'
         : (experiment ? 'セッションを始めます' : 'ステージを選んでください')}</div>` +
       (custom ? '<div class="sub">好きな条件で遊べます。記録は残りません。</div>' : idBox) +
+      // 実験のセッションでは、始める前に AI についての説明を必ず見せる
+      // (チュートリアルを飛ばした人にも届くように)。
+      (experiment ? `<div class="sub">${esc(AI_NOTE)}</div>` : '') +
       // 実験セッションはパターン3で固定。選ばせると、参加者ごとに
       // 違う進み方になって比べられなくなる。
       (custom || experiment ? '' : patternBlock()) +
@@ -1948,6 +1951,12 @@
   // レシピ表。本家のレシピカードと同じで、材料から提供までを絵で並べる。
   // 絵はゲームで使っているものをそのまま使う(遊び始めて迷わないように)。
   const G = (n) => gfxUrl(n);
+  // AI についての事前の説明。AI の能力についての予想を全員でそろえ、
+  // 後回しを故障ではなく段取りの結果と受け取れるようにする。
+  // 「計算できる」と書く(「常に最善に動く」とは書かない。割り込み許容数が
+  // 0 の回は、効率の悪い指示にもそのまま従うため)。
+  const AI_NOTE = 'AIは、いちばん早く作り終える段取りを計算できます。' +
+                  'ただし、あなたの考えを推し量ることはしません。';
   const TUTORIALS = [
     { key: 'salad', title: 'サラダ',
       lead: '切った野菜を皿に乗せて出します。火は使いません。',
@@ -1980,8 +1989,9 @@
       ] },
     { key: 'ai', title: 'AI と一緒に',
       lead: 'ここからは本番と同じです。AI が相方として一緒に料理します。' +
-            '<br>ゲームが始まる前に、AI にやってほしいことを 1 つ選べます。',
-      dishes: ['注文は3つ。サラダ・スープ・ジュースが混ざります'],
+            '<br>ゲームが始まる前に、AI にやってほしいことを 1 つ選べます。' +
+            '<br>' + AI_NOTE,
+      dishes: ['注文は3つ。サラダとスープが混ざります'],
       steps: [
         [G('agent-blue-front'), 'あなた'],
         [G('agent-magenta-front'), 'AI'],
@@ -2654,6 +2664,14 @@
   const SELF_ITEMS = [
     ['self_conf', '自分の指示に自信があった'],
   ];
+  // 確認の質問。指示は「今すぐ作って」の意味で出してもらう前提なので、
+  // 「いずれ作ってほしい料理」のつもりで選んだ回を見分けられるようにする。
+  // 二択・必須。値は now / later。
+  const INTENT_ITEM = ['instr_intent', '指示した料理は、どちらのつもりで選びましたか'];
+  const INTENT_CHOICES = [
+    ['now', '今すぐ作ってほしい料理'],
+    ['later', 'いずれ作ってほしい料理'],
+  ];
   // ゲームプレイそのものについて(楽しさ・思いどおり・上手さ)。5段階・必須。
   const PLAY_ITEMS = [
     ['play_fun', 'ゲームプレイは楽しかった'],
@@ -2688,7 +2706,12 @@
     fiveNo = 0;
     const instrQs = fiveQs(INSTR_ITEMS);
     fiveNo = 0;
-    const selfQs = fiveQs(SELF_ITEMS);
+    const selfQs = fiveQs(SELF_ITEMS) +
+      `<div class="q" id="q-${INTENT_ITEM[0]}">` +
+      `<div class="text">${SELF_ITEMS.length + 1}. ${esc(INTENT_ITEM[1])}</div>` +
+      '<div class="scale">' + INTENT_CHOICES.map(([val, lab]) =>
+        `<label><input type="radio" name="${INTENT_ITEM[0]}" value="${val}">` +
+        `<span>${esc(lab)}</span></label>`).join('') + '</div></div>';
     fiveNo = 0;
     const playQs = fiveQs(PLAY_ITEMS);
 
@@ -2761,6 +2784,14 @@
       for (const [name] of CCR_COORDINATION) body[name] = read(name);
       for (const [name] of INSTR_ITEMS) body[name] = read(name);
       for (const [name] of SELF_ITEMS) body[name] = read(name);
+      {
+        // 二択は数字ではないので、read() を通さずに値をそのまま読む。
+        const name = INTENT_ITEM[0];
+        const picked = el.overlayText.querySelector(`input[name="${name}"]:checked`);
+        document.getElementById(`q-${name}`).classList.toggle('todo', !picked);
+        if (!picked) missing.push(name);
+        body[name] = picked ? picked.value : null;
+      }
       for (const [name] of PLAY_ITEMS) body[name] = read(name);
       // 自由記述は任意なので、未回答の確認(missing)には入れない。
       for (const [name] of FREE_ITEMS) {
