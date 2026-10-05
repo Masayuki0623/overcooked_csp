@@ -356,6 +356,9 @@
      盤面を覆ってしまうので出さず、上の帯の1行だけにする */
   body.compact.expdebug #plan { display: none !important; }
   body.expdebug #cfg { color: #ffd166; }
+  /* スマホでは上の帯の情報欄(#cfg)を隠しているが、条件を出している間は見せる。
+     帯の中で1行ぶんを丸ごと使う */
+  body.compact.expdebug #cfg { display: block; flex-basis: 100%; font-size: 11px; line-height: 1.4; }
   #plan h4 { margin: 6px 0 3px; font-size: 12px; color: var(--muted); }
   #plan table { width: 100%; border-collapse: collapse; }
   #plan th { color: var(--muted); font-weight: 400; text-align: right; padding: 0 3px; }
@@ -1790,10 +1793,10 @@
   }
   function instructionDebugText(ins) {
     const f = (v) => (v === null || v === undefined ? '-' : Number(v).toFixed(1));
-    return `指示 ${ins.verb || ''} ${ins.obj || ''} / 挟んだ数 ${ins.consumed}` +
+    return `指示 ${ins.obj || ''} / 挟んだ数 ${ins.consumed}` +
            `(待ちの中 ${ins.in_wait}) / 残り ${ins.remaining === null || ins.remaining === undefined ? '-' : ins.remaining}` +
-           ` / 状態 ${ins.status || '-'} / L(d) ${f(ins.L)} / L0 ${f(ins.L0)}` +
-           ` (f ${f(ins.f)} → f' ${f(ins.fd)})`;
+           ` / ${ins.status || '-'} / L(d) ${f(ins.L)} / L0 ${f(ins.L0)}` +
+           ` (f ${f(ins.f)}→f' ${f(ins.fd)})`;
   }
 
   function renderPlan(msg) {
@@ -2415,10 +2418,10 @@
         sessionExp = msg.experiment;
         if (sessionExp.debug_show) {
           const x = sessionExp;
-          debugCondText = `【条件の表示(デバッグ)】割り込み許容数 d=${x.skip_budget}` +
+          // スマホの帯は狭いので短く書く。注文の中身は盤面の下に絵で出ている。
+          debugCondText = `【条件】割り込み許容数 d=${x.skip_budget}` +
             ` / ${x.session}回目(全${x.sessions_total}回) / ${x.agent || ''} / ${x.group || ''}` +
-            ` / 注文の番号 ${x.case}` +
-            (lastSelection && lastSelection.orders ? ` / ${lastSelection.orders.join('、')}` : '');
+            ` / 注文の番号 ${x.case}`;
           refreshDebugLine();
         }
       }
