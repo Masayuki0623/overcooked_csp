@@ -54,6 +54,11 @@ def main():
                                            order_recipes=ORDERS))
     env.reset()
 
+    # この検証では相方を動かさない。初期位置(たまねぎの置き場の前)に立たせた
+    # ままだと、AI がたまねぎを取りに行く計画になったとき、ただ通れなくて
+    # 止まる(見たいこととは別の理由)。邪魔にならない隅へ寄せておく。
+    env.sim_agents[1].move_to((11, 9))
+
     me = env.sim_agents[0]
     held = Object(location=tuple(me.location), contents=[chopped(Onion), Plate()])
     env.world.insert(held)

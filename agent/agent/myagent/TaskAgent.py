@@ -13,6 +13,9 @@ class TaskAgent:
         
         # Assigned resources for CSP
         self.assigned_cutboard = None
+        # 計画(CSP)が選んだまな板。空いていればそこに置く。ふさがっていれば
+        # 今までどおり、空いているいちばん近いまな板を使う。
+        self.preferred_cutboard = None
         self.assigned_pot = None
         self.assigned_plate = None
         self.assigned_serve_loc = None
@@ -2137,6 +2140,13 @@ class TaskAgent:
             if env.agent_idx == 1:
                 check_cbs = list(reversed(check_cbs))
 
+            pref = getattr(self, 'preferred_cutboard', None)
+            if (pref is not None and tuple(pref) in {tuple(c) for c in check_cbs}
+                    and env.pos_obj[tuple(pref)] is None):
+                # 計画が選んだまな板が空いている。近いほうではなく、そちらを使う
+                # (近いほうは、相手がこれから使う計画になっていることがある)。
+                best_cb = tuple(pref)
+                check_cbs = []
             for loc in check_cbs:
                 if env.pos_obj[loc] is None:
                     dist = abs(self_pos[0]-loc[0]) + abs(self_pos[1]-loc[1])

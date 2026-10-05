@@ -237,6 +237,14 @@ class CSPAgent:
         # 一度決めたら注文が終わるまで変えない(下の _serve_route_by_order の
         # 説明を参照)。
         self._serve_route_by_order = {}
+        # 「切る」工程で、前の計画がどのまな板を選んだか(工程の id -> 位置)。
+        # 同点のときに選び直して行ったり来たりしないための覚え書き。
+        self._chop_board_prev = {}
+        # どのまな板を使うかを CSP に決めさせるか。False にすると、以前の
+        # 「材料の置き場からいちばん近いまな板」の決め打ちに戻る(比較用)。
+        self.choose_cutboard = True
+        # 計画が選んだまな板を、実行側にも守らせるか(_planned_cutboard の説明)。
+        self.follow_planned_cutboard = False
         self.order_display_labels = []
         self.carry_task_by_agent = {0: None, 1: None} if self.sc_2agent else None
         # 詳細トレースの既定は OFF。
@@ -729,7 +737,8 @@ class CSPAgent:
             except Exception as e:
                 print(f'[指示] 進み具合を数えられませんでした: {type(e).__name__} {e}', flush=True)
 
-    def _apply_instruction_skip_budget_constraints(self, model, tasks, starts_by_idx, env, is_a1=None):
+    def _apply_instruction_skip_budget_constraints(self, model, tasks, starts_by_idx, env, is_a1=None,
+                                                   ends_by_idx=None):
         """skip_budget(タスク数)ベースの順序制約を CP-SAT モデルへ反映する。
         is_a1: 2エージェントモードの割り当て変数リスト(BoolVar) or None(1エージェント)。"""
         try:
@@ -759,7 +768,8 @@ class CSPAgent:
                     if chain_groups:
                         self._apply_chain_instruction(
                             model, tasks, starts_by_idx, env, is_a1, pending,
-                            chain_groups, chain_count, task_index_by_fixed_id)
+                            chain_groups, chain_count, task_index_by_fixed_id,
+                            ends_by_idx=ends_by_idx)
                         continue
                     init_budget = pending.get('skip_budget')
                     if init_budget is None:
@@ -918,7 +928,7 @@ class CSPAgent:
         return free
 
     def _apply_chain_instruction(self, model, tasks, starts, env, is_a1, pending,
-                                 chain_groups, chain_count, index_by_fixed):
+                                 chain_groups, chain_count, index_by_fixed, ends_by_idx=None):
         """工程の鎖の指示を CP-SAT へ入れる。
 
         鎖は「かたまり」(注文ごとの鎖)の集まりで、そのうち chain_count 個を
@@ -934,7 +944,10 @@ class CSPAgent:
         own = 1 if getattr(self, 'own_agent_idx', 0) == 1 else 0
         cooking_frames = int(COOKING_TIME_SECONDS * self.fps)
         horizon = 10000
-        ends = {i: starts[i] + int(tasks[i]['dur'])
+        # 終わりの時刻。所要が選択で変わる工程(まな板・サラダの回り方)が
+        # あるので、渡されていればモデルの変数をそのまま使う。
+        ends = {i: (ends_by_idx[i] if ends_by_idx is not None and i in ends_by_idx
+                    else starts[i] + int(tasks[i]['dur']))
                 for i in range(len(tasks)) if starts.get(i) is not None}
 
         # かたまりごとに、まだ残っている工程を AI の分と人の分に分ける。
@@ -2137,6 +2150,8 @@ class CSPAgent:
             self.counter_policy_by_order.pop(uid, None)
         for uid in [u for u in list(self._serve_route_by_order) if u not in active_uids]:
             self._serve_route_by_order.pop(uid, None)
+        for tid in [t for t in list(self._chop_board_prev) if t[2] not in active_uids]:
+            self._chop_board_prev.pop(tid, None)
 
         self.active_order_entries = next_entries
         return current_uids
@@ -2316,6 +2331,23 @@ class CSPAgent:
                 remaining_tids.add((serve_verb, dish_name, order_uid))
 
         return remaining_tids
+
+    def _planned_cutboard(self, task):
+        """実行側に渡す、計画がその「切る」工程に選んだまな板。渡さないなら None。
+
+        既定では渡さない(follow_planned_cutboard = False)。実行側は今までどおり
+        「空いているいちばん近いまな板」を使う。計画のまな板に従わせると、
+        計画どおりに動く相方とは少し速くなるが(模擬対戦の平均 35.8 -> 35.0 秒)、
+        でたらめに動く相方とは遅くなった(36 対の平均で 45.7 -> 48.7 秒)。
+        近いほうは相方が使う計画だからと遠いほうへ歩くのに、相方はそこを
+        使わない、ということが起きる。
+        """
+        if not getattr(self, 'follow_planned_cutboard', False):
+            return None
+        res = (task or {}).get('res')
+        if res and len(res) > 1 and res[0] == 'cutboard' and res[1] is not None:
+            return tuple(res[1])
+        return None
 
     def _make_fixed_task_id(self, verb, obj, order_uid):
         return ("task", str(verb), str(obj), int(order_uid))
@@ -3627,6 +3659,7 @@ class CSPAgent:
                 task_name = f"chop_{obj}"
                 if getattr(self.task_agent, 'assigned_task_id', None) != tid or getattr(self.task_agent, 'assigned_counter', None) is None:
                     self.task_agent.assigned_counter = task.get('assigned_counter')
+                self.task_agent.preferred_cutboard = self._planned_cutboard(task)
             elif verb == 'cook':
                 parts = dish_ingredients(obj)
                 task_name = f"cook_{'_'.join(parts)}"
@@ -4052,6 +4085,8 @@ class CSPAgent:
                 ta.order_ingredients = self._order_ingredients_of(task)
                 # 「切らずに運ぶだけ」の指定(既に切られた物が別テーブルにある場合)
                 ta.carry_from = task.get('carry_from') if verb == 'chop' else None
+                # 計画が選んだまな板。空いていればそこを使う(TaskAgent)。
+                ta.preferred_cutboard = self._planned_cutboard(task) if verb == 'chop' else None
 
                 # 置き場(assigned_counter)は「刻んだ材料を1か所に集める」ための
                 # 指定で、chop/cook/serve_salad/mix はこれを見て動く。単体エージェント
@@ -4490,7 +4525,7 @@ class CSPAgent:
         }
 
     # 幾何情報のうち、担当者によって変わるもの。
-    GEOMETRY_KEYS = ('start_pos', 'end_pos', 'fixed_res', 'route_choices')
+    GEOMETRY_KEYS = ('start_pos', 'end_pos', 'fixed_res', 'route_choices', 'board_choices')
 
     # サラダの提供で選べる回り方。CSP の解と実行側で同じ名前を使う。
     SALAD_ROUTE_INGREDIENT = 'ingredient'
@@ -4661,6 +4696,56 @@ class CSPAgent:
                 if name.startswith(prefix) and name[len(prefix):].lower() == want:
                     return k, tuple(ag.location)
         return None
+
+    def _chop_walk_frames(self, env, ing_pos, cutboard_pos, target):
+        """材料の場所 → まな板 → 置き場 と歩く手数。経路が引けなければ None。"""
+        best = None
+        for s in self._adjacent_walkable_positions(env, [tuple(ing_pos)]):
+            for m in self._adjacent_walkable_positions(env, [tuple(cutboard_pos)]):
+                d1 = self.astar_distance(env, s, m)
+                if d1 is None:
+                    continue
+                for e in self._adjacent_walkable_positions(env, [tuple(target)]):
+                    d2 = self.astar_distance(env, m, e)
+                    if d2 is None:
+                        continue
+                    if best is None or d1 + d2 < best:
+                        best = d1 + d2
+        return best
+
+    def _board_choices(self, env, t, base_board, boards, walk):
+        """「切る」工程で選べるまな板と、そのときの所要。[(位置, 所要), ...]。
+
+        どのまな板を使うかは CSP に決めさせる。以前は「材料の置き場から
+        いちばん近いまな板」に決め打ちだったので、そのまな板が相手の工程で
+        ふさがっていても、空いているもう一方を使う計画は出なかった。
+
+        先頭は今までどおりのまな板(base_board)で、所要も今までの値のまま。
+        ほかのまな板は、歩く手数の差(walk)だけを足し引きする。
+        選ばせないのは次のとき(None を返す):
+          - まな板が1つしか無い / 経路が引けない
+          - 置き場が決まっていない(まな板によって終わる場所が変わり、次の
+            工程までの距離も変わるため。2材料以上の料理では必ず決まっている)
+        """
+        if not getattr(self, 'choose_cutboard', True):
+            return None                   # 比べるとき用(決め打ちに戻す)
+        if t.get('assigned_counter') is None or t.get('dur') is None:
+            return None
+        base = tuple(base_board)
+        boards = [tuple(b) for b in (boards or [])]
+        if len(boards) < 2 or base not in boards:
+            return None
+        w0 = walk(base)
+        if w0 is None:
+            return None
+        out = [(base, int(t['dur']))]
+        for b in boards:
+            if b == base:
+                continue
+            w = walk(b)
+            if w is not None:
+                out.append((b, max(1, int(t['dur']) + int(w - w0))))
+        return out if len(out) > 1 else None
 
     def _chop_duration_from_hand(self, env, holder_pos, cutboard_pos, target):
         """材料を手に持っている人が、その場から刻み終えて置き場に置くまで。
@@ -4875,6 +4960,8 @@ class CSPAgent:
             obj = t.get('obj') if t.get('obj') is not None else (tid[1] if tid else None)
             if verb is None or obj is None:
                 continue
+            # まな板の選択肢は、下の「切る」の枝で付け直す。
+            t['board_choices'] = None
             order_idx = t.get('slot_idx')
             if order_idx is None:
                 order_idx = t.get('order')
@@ -4921,6 +5008,9 @@ class CSPAgent:
                 dur = self._chop_duration_from_hand(env, hpos, best_cb, target)
                 if dur is not None:
                     t['dur'] = dur
+                    t['board_choices'] = self._board_choices(
+                        env, t, best_cb, cutboards,
+                        lambda b, _h=hpos, _t=target: self._chop_duration_from_hand(env, _h, b, _t))
 
             elif verb == 'chop':
                 tile_map = INGREDIENT_TILE
@@ -4958,6 +5048,12 @@ class CSPAgent:
                 t['start_pos'] = ing_pos
                 t['end_pos'] = target
                 t['fixed_res'] = ('cutboard', best_cb)
+                # 材料がもうまな板に乗っている(置いたまま・切りかけ)なら、
+                # そのまな板で切るしかない。
+                if cutboards and tuple(ing_pos) not in {tuple(c) for c in cutboards}:
+                    t['board_choices'] = self._board_choices(
+                        env, t, best_cb, cutboards,
+                        lambda b, _s=ing_pos, _t=target: self._chop_walk_frames(env, _s, b, _t))
 
             elif verb == 'carry':
                 tiles = env.get_pos_by_obj_gs(gs=INGREDIENT_TILE.get(obj, ""))
@@ -7997,6 +8093,20 @@ class CSPAgent:
                 return [([], dist_matrix)]
             return [([var.Not()], dist_matrix), ([var], dist_alt)]
 
+        # 「切る」工程でどのまな板を使うかも CSP の決定変数にする。
+        # 選んだまな板で所要(歩く距離)が変わり、同じまな板を使う工程とは
+        # 時間を重ねられない(下の「まな板の占有制約」)。出発点(材料の場所)と
+        # 終点(置き場)はどのまな板でも同じなので、前後の移動は変わらない。
+        board_lits = {}          # task_idx -> [(まな板の位置, BoolVar, 所要), ...]
+        for i in range(num_tasks):
+            choices = tasks[i].get('board_choices')
+            if tasks[i]['verb'] != 'chop' or not choices or len(choices) < 2:
+                continue
+            lits = [(tuple(b), model.NewBoolVar(f'board_{tasks[i]["id"]}_{k}'), int(d))
+                    for k, (b, d) in enumerate(choices)]
+            model.AddExactlyOne([lit for _b, lit, _d in lits])
+            board_lits[i] = lits
+
         # Debug: Check distances between task types
         self._emit_counter_debug("--- 距離行列サンプル ---")
         sample_chop = next((i for i, t in enumerate(tasks) if t['verb'] == 'chop'), None)
@@ -8031,6 +8141,12 @@ class CSPAgent:
                                       max(dur_ing, dur_plate), f'dur_{t["id"]}')
                 model.Add(dur == dur_plate).OnlyEnforceIf(route_plate_first[i])
                 model.Add(dur == dur_ing).OnlyEnforceIf(route_plate_first[i].Not())
+            elif i in board_lits:
+                # 選んだまな板によって、この工程の中で歩く距離が変わる。
+                _ds = [d for _b, _lit, d in board_lits[i]]
+                dur = model.NewIntVar(min(_ds), max(_ds), f'dur_{t["id"]}')
+                for _b, _lit, d in board_lits[i]:
+                    model.Add(dur == d).OnlyEnforceIf(_lit)
             interval = model.NewIntervalVar(s_var, dur, e_var, f'interval_{t["id"]}')
             
             starts[i] = s_var
@@ -8430,7 +8546,13 @@ class CSPAgent:
         cutboard_intervals = {}
         for i in range(num_tasks):
             t = tasks[i]
-            if t['verb'] == 'chop':
+            if t['verb'] == 'chop' and i in board_lits:
+                # まな板を選べる工程は、選んだまな板のぶんだけ占有する。
+                for b, lit, d in board_lits[i]:
+                    cutboard_intervals.setdefault(b, []).append(
+                        model.NewOptionalIntervalVar(
+                            starts[i], d, ends[i], lit, f'board_use_{t["id"]}_{b}'))
+            elif t['verb'] == 'chop':
                 c_res = t.get('fixed_res')
                 if c_res and c_res[0] == 'cutboard':
                     c_loc = c_res[1]
@@ -8442,6 +8564,13 @@ class CSPAgent:
             if len(intervals_list) > 1:
                 model.AddNoOverlap(intervals_list)
                 self._emit_counter_debug(f"[CSPAgent] まな板 {c_loc} の重複禁止制約を追加 ({len(intervals_list)} タスク)")
+
+        # 同点なら、前の計画で選んだまな板(無ければ今までどおりのまな板)を
+        # 使い続ける。時間が少しでも縮むなら選び直す(優先度はいちばん下)。
+        for i, lits in board_lits.items():
+            prev = self._chop_board_prev.get(tasks[i]['id'])
+            keep = next((lit for b, lit, _d in lits if b == prev), lits[0][1])
+            switch_penalty_terms.append(1 - keep)
 
         # 動的制約 (Dynamic Constraints)
         if hasattr(self, 'active_constraints') and self.active_constraints:
@@ -8493,7 +8622,8 @@ class CSPAgent:
         # 指示の進み具合(挟まった作業の数・結末)は、縛りの有無に関わらず数える
         self._track_instruction_progress(env, tasks)
         if self.skip_budget is not None:
-            self._apply_instruction_skip_budget_constraints(model, tasks, starts, env, is_a1=is_a1)
+            self._apply_instruction_skip_budget_constraints(model, tasks, starts, env, is_a1=is_a1,
+                                                            ends_by_idx=ends)
             # 縛った結果、計画の何番目に来たかを後で照合するために控える
             for _p in (list(getattr(env, '_pending_instructions', []) or [])
                        + list(getattr(self, '_pending_instructions', []) or [])):
@@ -8638,7 +8768,19 @@ class CSPAgent:
                 self._serve_route_by_order[uid] = route
             return route
 
-        self._last_solve_metrics.update(status=status_name, num_tasks=num_tasks)
+        def chosen_res(task_idx):
+            """その工程が使う器具。まな板を選べる工程は、選ばれたまな板。"""
+            lits = board_lits.get(task_idx)
+            if not lits:
+                return tasks[task_idx].get('fixed_res')
+            for b, lit, _d in lits:
+                if solver.Value(lit):
+                    self._chop_board_prev[tasks[task_idx]['id']] = b
+                    return ('cutboard', b)
+            return tasks[task_idx].get('fixed_res')
+
+        self._last_solve_metrics.update(status=status_name, num_tasks=num_tasks,
+                                        board_choice_tasks=len(board_lits))
 
         schedule = []
         if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
@@ -8675,7 +8817,7 @@ class CSPAgent:
                                     'id': t['id'],
                                     'start': solver.Value(starts[j]),
                                     'end': solver.Value(ends[j]),
-                                    'res': t.get('fixed_res'),
+                                    'res': chosen_res(j),
                                     'assigned_counter': t.get('assigned_counter'),
                                     'display_order': t.get('display_order', t.get('slot_idx', t['order'])),
                                     'serve_route': chosen_route(j),
@@ -8699,7 +8841,7 @@ class CSPAgent:
                         'id': t['id'],
                         'start': solver.Value(starts[i]),
                         'end': solver.Value(ends[i]),
-                        'res': t.get('fixed_res'),
+                        'res': chosen_res(i),
                         'assigned_counter': t.get('assigned_counter'),
                         'display_order': t.get('display_order', t.get('slot_idx', t['order'])),
                         'agent_idx': agent_idx,
