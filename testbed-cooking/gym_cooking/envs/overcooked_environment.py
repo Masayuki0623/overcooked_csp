@@ -481,10 +481,14 @@ class OvercookedEnvironment(gym.Env):
         # Tracks whether agents can execute their action.
         execute = [True, True]
 
-        # 手を出す行動は動かないので、その場に留まる扱いにする
-        if tuple(agent1_action) == INTERACT:
+        # 手を出す行動は動かないので、その場に留まる扱いにする。
+        # ただし「何もしていない」のとは区別しておく(下の、同じマスを取り合う
+        # ときの判定で使う)。
+        agent1_interacts = tuple(agent1_action) == INTERACT
+        agent2_interacts = tuple(agent2_action) == INTERACT
+        if agent1_interacts:
             agent1_action = (0, 0)
-        if tuple(agent2_action) == INTERACT:
+        if agent2_interacts:
             agent2_action = (0, 0)
 
         # Collision between agents and world objects.
@@ -508,9 +512,14 @@ class OvercookedEnvironment(gym.Env):
 
         # Inter-agent collision.
         if agent1_next_loc == agent2_next_loc:
-            if agent1_next_loc == agent1_loc and agent1_action != (0, 0):
+            # その場で手を出している人のマスへ相手が入ろうとしたら、止めるのは
+            # 入ろうとした側だけ。手を出すほうまで取り消すと、相手に押され
+            # 続けている間ずっと何もできない(実測: 鍋の前で皿を持った AI が、
+            # 同じマスへ来ようとする相手に 116 秒止められた)。手を出すのが
+            # 「台の方向へ進む」だった頃は、下の条件でそうなっていた。
+            if agent1_next_loc == agent1_loc and (agent1_action != (0, 0) or agent1_interacts):
                 execute[1] = False
-            elif agent2_next_loc == agent2_loc and agent2_action != (0, 0):
+            elif agent2_next_loc == agent2_loc and (agent2_action != (0, 0) or agent2_interacts):
                 execute[0] = False
             else:
                 execute[0] = False
