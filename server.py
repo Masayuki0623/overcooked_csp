@@ -794,15 +794,25 @@ EXPERIMENT_PATTERNS = {
         'named_agents': True,
     },
     6: {
-        # パターン5のリングだけ版(2026-10-04)。指示は「料理を提供するまで
-        # 丸ごと任せる」ものだけ(注文ごとに1枚、計3枚)。地図が1つなので
+        # リング(鍋2つ)だけ(2026-10-05)。指示は「料理を提供するまで丸ごと
+        # 任せる」ものだけ(注文ごとに1枚、計3枚)。地図が1つなので
         # 4条件 = 4ゲーム、相方は エージェント A〜D、グループは G1〜G4。
+        # 注文は回ごとに固定(games)。4回とも「2材料スープ + フルスープ +
+        # 2材料サラダ」の型で、どれも 2材料スープ ≈ 0 秒 / フルスープ 1〜2 秒 /
+        # サラダ 8 秒前後(d=0)。並びも回ごとに変えてある(サラダを2番目に置くと
+        # f が 7 秒伸びて役割が崩れるので、サラダは1番目か3番目)。
         'pots': 1,
         'label': 'パターン6',
-        'desc': 'リングだけ。注文3品を出し切るまで。指示は開始時に1回、'
+        'desc': 'リング(鍋2つ)だけ。注文3品を出し切るまで。指示は開始時に1回、'
                 '料理を提供するまで任せる指示だけ(3枚)。割り込み許容数 0/1/2/inf、毎回アンケート。',
         'endless': False,
-        'presets': {'exp_ring': 'experiment1'},
+        'presets': {'exp_ring_2pot': 'experiment1'},
+        'games': [
+            ['TomatoLettuceSoup', 'FullSoup', 'OnionLettuceSalad'],    # 0.0 / 1.4 / 8.2
+            ['TomatoLettuceSalad', 'FullSoup', 'OnionTomatoSoup'],     # 1.0 / 1.8 / 8.4
+            ['FullSoup', 'OnionLettuceSoup', 'OnionTomatoSalad'],      # 1.2 / 1.8 / 8.2
+            ['OnionLettuceSalad', 'OnionTomatoSoup', 'FullSoup'],      # 1.0 / 1.6 / 7.6
+        ],
         'instruction': INSTRUCTION_TIMING_ONCE_AT_START,
         'instruction_scope': 'dish',
         'instruct_every': None,
@@ -1734,11 +1744,14 @@ class WebGamePlay:
             practice_pid = str(choice.get('participant') or '').strip()
             pr = design.practice_condition(practice_pid, maps=pattern_maps(EXPERIMENT_PATTERN))
             map_name = pr['map']
-            preset = EXPERIMENT_MAP_PRESETS[map_name]
+            preset = (EXPERIMENT_PATTERNS[EXPERIMENT_PATTERN]['presets'].get(map_name)
+                      or EXPERIMENT_MAP_PRESETS.get(map_name) or 'experiment1')
             sets = order_sets_for(preset)
             # 本番で使う構成(固定)も避ける。同じ並びを2回遊ばせない。
             used = set(experiment_case_indices(preset) or [])
             used.add(design.fixed_case_for(preset, used, EXPERIMENT_PATTERN))
+            # 注文の被り(同じ料理が2品)がある構成は練習でも使わない
+            used |= {i for i, st in enumerate(sets) if len(set(st)) != len(st)}
             case = design.practice_case(len(sets), used)
             return {'mode': 'practice', 'map': map_name, 'preset': preset,
                     'case': case, 'recipes': list(sets[case]),
@@ -1774,10 +1787,17 @@ class WebGamePlay:
             position = cond.get('position')
             if position is None:
                 position = (cond_idx % max(1, len(cases))) + 1
-            case = design.fixed_case_for(preset, cases, pattern)
+            games = spec.get('games')
+            if games:
+                # 回ごとに注文を固定するパターン(6)。番号は回(0始まり)
+                case = (int(position) - 1) % len(games)
+                recipes = list(games[case])
+            else:
+                case = design.fixed_case_for(preset, cases, pattern)
+                recipes = list(sets[case])
             g = design.group_of(participant, maps=pattern_maps(pattern))
             return {'map': cond['map'], 'preset': preset, 'case': case,
-                    'recipes': list(sets[case]), 'picked_by': 'experiment',
+                    'recipes': recipes, 'picked_by': 'experiment',
                     'participant': participant, 'session': done + 1,
                     'group': g['name'], 'row': g['row'],
                     # 同意のときに受け取った分。名前は入れない。
