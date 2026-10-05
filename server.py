@@ -1906,6 +1906,8 @@ class WebGamePlay:
             used.add(design.fixed_case_for(preset, used, EXPERIMENT_PATTERN))
             # 注文の被り(同じ料理が2品)がある構成は練習でも使わない
             used |= {i for i, st in enumerate(sets) if len(set(st)) != len(st)}
+            # 全部入りサラダは出さない(本番の注文にも入れていない)
+            used |= {i for i, st in enumerate(sets) if 'FullSalad' in st}
             case = design.practice_case(len(sets), used)
             return {'mode': 'practice', 'map': map_name, 'preset': preset,
                     'case': case, 'recipes': list(sets[case]),
