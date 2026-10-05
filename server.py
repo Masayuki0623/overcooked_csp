@@ -2969,6 +2969,10 @@ class WebGamePlay:
         """次の1ゲームを組み立て、Web 版に要る差し替えを入れる。"""
         self.state = 'preparing'
         self.take_notices()
+        # 前の回に答えた「指示への自信」を持ち越さない。消さないと、指示を
+        # 出す前に切れた回の記録に、前の回の値が入る(実測: 指示が空なのに
+        # 自信だけ 4 と残った)。
+        self.instruction_confidence = None
         game = self.build()
 
         self._me_range = None
