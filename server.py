@@ -440,17 +440,32 @@ def _all_notes():
     return {c: notes.get(c, '') for c in ALL_COLUMNS}
 
 
+def pending_path(path):
+    """本体へ書けなかった行を逃がしておくファイル(append_csv)。"""
+    return path.with_name(f'{path.stem}-pending{path.suffix}')
+
+
+def _csv_dict_rows(path):
+    """CSV の行。本体に加えて、逃がしてある分(-pending)も読む。
+
+    Excel で開いている間に足した行は、閉じられるまで隣のファイルにある。
+    本体だけを読むと、その間に終わったゲームや同意した人が「まだ無い」
+    ことになる(統合ファイルにゲームの記録が入らない、参加者番号が重なる)。
+    """
+    out = []
+    for q in (path, pending_path(path)):
+        try:
+            with q.open('r', encoding='utf-8-sig', newline='') as f:
+                out.extend(csv.DictReader(f))
+        except OSError:
+            pass
+    return out
+
+
 def _read_instruction_rows():
     """指示の記録(日本語の見出し)を読む。説明行は飛ばす。"""
-    out = []
-    try:
-        with INSTRUCTION_LOG_PATH.open('r', encoding='utf-8-sig', newline='') as f:
-            for r in csv.DictReader(f):
-                if str(r.get('記録時刻', '')).startswith('20'):
-                    out.append(r)
-    except OSError:
-        pass
-    return out
+    return [r for r in _csv_dict_rows(INSTRUCTION_LOG_PATH)
+            if str(r.get('記録時刻', '')).startswith('20')]
 
 
 def write_all_in_one(pid, session, qual):
@@ -480,15 +495,11 @@ def write_all_in_one(pid, session, qual):
 def _read_sessions():
     """ゲームの記録を英語キーで読む。見出しの下の説明行は飛ばす。"""
     out = []
-    try:
-        with SESSION_LOG_PATH.open('r', encoding='utf-8-sig', newline='') as f:
-            for r in csv.DictReader(f):
-                row = {_SESSION_JA_TO_KEY.get(k, k): v for k, v in r.items()}
-                if not str(row.get('timestamp', '')).startswith('20'):
-                    continue                     # 説明行
-                out.append(row)
-    except OSError:
-        pass
+    for r in _csv_dict_rows(SESSION_LOG_PATH):
+        row = {_SESSION_JA_TO_KEY.get(k, k): v for k, v in r.items()}
+        if not str(row.get('timestamp', '')).startswith('20'):
+            continue                     # 説明行
+        out.append(row)
     return out
 
 # 条件の欄は両方のファイルで同じにしてある(参加者IDとセッション番号で
@@ -964,15 +975,43 @@ class CrossProcessLock:
 
 
 def _load_assignments():
-    try:
-        return json.loads(ASSIGN_PATH.read_text(encoding='utf-8'))
-    except Exception:
-        return {}
+    """割り当てを読む。ファイルが無ければ空。
+
+    読めない・壊れているときは、空を返さずに止まる。以前はどんな失敗でも
+    空を返していたので、そのまま誰か1人ぶんを足して保存すると、ほかの
+    全員の割り当てと進み具合が消えるところだった。
+    """
+    last = None
+    for wait in (0, 0.05, 0.2, 0.5):
+        if wait:
+            time.sleep(wait)
+        try:
+            return json.loads(ASSIGN_PATH.read_text(encoding='utf-8'))
+        except FileNotFoundError:
+            return {}
+        except Exception as e:
+            last = e
+    print(f'[server] 割り当て({ASSIGN_PATH.name})を読めません。上書きはしません: '
+          f'{type(last).__name__} {last}', flush=True)
+    raise RuntimeError(f'割り当てを読めません: {ASSIGN_PATH}') from last
 
 
 def _save_assignments(data):
+    """割り当てを書く。別名で書いてから差し替えるので、途中で止まっても
+    書きかけのファイルは残らない(プロセスを止めた瞬間でも壊れない)。"""
     ASSIGN_PATH.parent.mkdir(parents=True, exist_ok=True)
-    ASSIGN_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding='utf-8')
+    tmp = ASSIGN_PATH.with_name(ASSIGN_PATH.name + '.tmp')
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding='utf-8')
+    last = None
+    for wait in (0, 0.05, 0.2, 0.5, 1.0):
+        if wait:
+            time.sleep(wait)
+        try:
+            tmp.replace(ASSIGN_PATH)
+            return
+        except PermissionError as e:      # 誰かが読んでいる最中
+            last = e
+    raise last
 
 
 def assignment_key(participant, pattern):
@@ -1154,14 +1193,8 @@ def map_rank(map_name, participant, makespan, completed):
 
 def _read_roster():
     """名簿を読む。無ければ空。"""
-    if not ROSTER_PATH.exists():
-        return []
-    try:
-        with ROSTER_PATH.open('r', encoding='utf-8-sig', newline='') as f:
-            rows = list(csv.DictReader(f))
-    except OSError as e:
-        print(f'[server] 名簿を読めません: {e}', flush=True)
-        return []
+    # Excel で開いている間に同意した人は、隣のファイルに逃がしてある。
+    rows = _csv_dict_rows(ROSTER_PATH)
     # 見出しのすぐ下の説明行は、参加者ではない。
     return [r for r in rows
             if str(r.get('参加者番号', '')).strip().lower().startswith('p')
@@ -1180,27 +1213,57 @@ def next_participant_id():
             top = max(top, int(str(r.get('参加者番号', '')).strip()[1:]))
         except (ValueError, IndexError):
             continue
+    # 念のため、割り当てに残っている番号も見る(名簿を消した・戻し忘れた
+    # ときでも、遊んだことのある番号は使い回さない)。
+    try:
+        for key in _load_assignments():
+            m = re.match(r'p(\d+)', str(key))
+            if m:
+                top = max(top, int(m.group(1)))
+    except Exception:
+        pass
     return f'p{top + 1:02d}'
+
+
+def register_participant(name, is_test=False):
+    """新しい参加者番号を採番して、名簿に1行足す。番号を返す。
+
+    「いちばん大きい番号を読む → 次の番号で1行足す」を、プロセスをまたいで
+    1人ずつにする。席ごとに別のプロセスなので、スレッドの鍵だけでは、同時に
+    同意した2人が同じ番号になる(実測: 4プロセス x 15人で 60 人中 17 人が重複)。
+    鍵のファイルは名簿そのものとは別にする(append_csv が名簿の鍵を取るので、
+    同じ鍵だと自分自身を待ち続ける)。
+    """
+    with _roster_lock, CrossProcessLock(ROSTER_PATH.with_name(ROSTER_PATH.name + '.alloc')):
+        pid = next_participant_id()
+        append_csv(ROSTER_PATH, ROSTER_FIELDS, {
+            '参加者番号': pid,
+            'お名前': name,
+            '同意した日時': datetime.now().isoformat(timespec='seconds'),
+            '完了したか': 0,
+            '中断したか': 0,
+            'テスト実行か': int(is_test),
+        }, notes=ROSTER_NOTES)
+    return pid
 
 
 def _update_roster(participant, **changes):
     """名簿の1行を書き換える。名前は触らない。"""
-    rows = []
-    if ROSTER_PATH.exists():
-        try:
-            with ROSTER_PATH.open('r', encoding='utf-8-sig', newline='') as f:
-                rows = list(csv.DictReader(f))
-        except OSError:
-            return False
-    hit = False
-    for r in rows:
-        if str(r.get('参加者番号', '')).strip() == participant:
-            r.update({k: v for k, v in changes.items()})
-            hit = True
-    if not hit:
-        return False
+    # 読んでから書くまでを鍵の中でやる。外で読むと、そのあいだに別の席の
+    # サーバーが足した行や書き換えた印を、古い中身で上書きしてしまう。
     try:
         with CrossProcessLock(ROSTER_PATH):
+            rows = []
+            if ROSTER_PATH.exists():
+                with ROSTER_PATH.open('r', encoding='utf-8-sig', newline='') as f:
+                    rows = list(csv.DictReader(f))
+            hit = False
+            for r in rows:
+                if str(r.get('参加者番号', '')).strip() == participant:
+                    r.update({k: v for k, v in changes.items()})
+                    hit = True
+            if not hit:
+                return False
             with ROSTER_PATH.open('w', encoding='utf-8', newline='') as f:
                 f.write('﻿')
                 w = csv.DictWriter(f, fieldnames=ROSTER_FIELDS,
@@ -3685,16 +3748,7 @@ async def consent(req: Request):
         return JSONResponse({'ok': True, 'participant_id': prev_pid, 'resumed': True,
                              'session': prev_done + 1, 'total': prev_total})
 
-    with _roster_lock:
-        pid = next_participant_id()
-        append_csv(ROSTER_PATH, ROSTER_FIELDS, {
-            '参加者番号': pid,
-            'お名前': name,
-            '同意した日時': datetime.now().isoformat(timespec='seconds'),
-            '完了したか': 0,
-            '中断したか': 0,
-            'テスト実行か': int(is_test),
-        }, notes=ROSTER_NOTES)
+    pid = register_participant(name, is_test)
 
     # 年齢とゲーム経験、そして本番ぶんの割り当てをここで確定する。
     # パターンは本番のもので固定する。画面から来た値を使うと、ゲームで
