@@ -832,10 +832,17 @@ EXPERIMENT_PATTERNS = {
         # リング(鍋2つ)だけ(2026-10-05)。指示は「料理を提供するまで丸ごと
         # 任せる」ものだけ(注文ごとに1枚、計3枚)。地図が1つなので
         # 4条件 = 4ゲーム、相方は エージェント A〜D、グループは G1〜G4。
-        # 注文は回ごとに固定(games)。4回とも「2材料スープ + フルスープ +
-        # 2材料サラダ」の型で、どれも 2材料スープ ≈ 0 秒 / フルスープ 1〜2 秒 /
-        # サラダ 8 秒前後(d=0)。並びも回ごとに変えてある(サラダを2番目に置くと
-        # f が 7 秒伸びて役割が崩れるので、サラダは1番目か3番目)。
+        # 注文は回ごとに固定(games)。4回とも「2材料サラダ1品 + 2材料スープ2品」
+        # (2026-10-05〜)。まな板の選択を CSP に任せるようにしたら、それまでの
+        # 「サラダ + フルスープ + 2材料スープ」では d=0 と d=1 の計画がほぼ同じに
+        # なった。全構成(336通り)を解いて、サラダを指示したときに d=0 -> 1 -> 2 で
+        # 完了時間が段階的に縮むものから、段差の大きい順に4組を選んだ。
+        #   サラダを指示: 完了 37.6〜38.6 -> 34.2〜35.8 -> 30.0〜31.4 秒(inf 28.4〜30.0)
+        #                 サラダの完成 14.2〜15.4 -> 20.4〜21.6 -> 25.0〜26.2 秒
+        #                 L(即時実行の損失) 8.2〜9.6 秒
+        #   スープを指示: d では変わらない。L は 0.0〜1.6 秒
+        # 並びは参加者と回ごとにくじ引き(shuffle_orders)。サラダは2番目に
+        # 置かない(置くと完了時間が約12秒伸び、段階も崩れる)。
         'pots': 1,
         'label': 'パターン6',
         'desc': 'リング(鍋2つ)だけ。注文3品を出し切るまで。指示は開始時に1回、'
@@ -843,11 +850,12 @@ EXPERIMENT_PATTERNS = {
         'endless': False,
         'presets': {'exp_ring_2pot': 'experiment1'},
         'games': [
-            ['TomatoLettuceSoup', 'FullSoup', 'OnionLettuceSalad'],    # 0.0 / 1.4 / 8.2
-            ['TomatoLettuceSalad', 'FullSoup', 'OnionTomatoSoup'],     # 1.0 / 1.8 / 8.4
-            ['FullSoup', 'OnionLettuceSoup', 'OnionTomatoSalad'],      # 1.2 / 1.8 / 8.2
-            ['OnionLettuceSalad', 'OnionTomatoSoup', 'FullSoup'],      # 1.0 / 1.6 / 7.6
+            ['OnionTomatoSalad', 'OnionLettuceSoup', 'OnionTomatoSoup'],
+            ['OnionLettuceSalad', 'OnionLettuceSoup', 'OnionTomatoSoup'],
+            ['TomatoLettuceSalad', 'OnionLettuceSoup', 'OnionTomatoSoup'],
+            ['OnionTomatoSalad', 'OnionTomatoSoup', 'TomatoLettuceSoup'],
         ],
+        'shuffle_orders': True,
         'instruction': INSTRUCTION_TIMING_ONCE_AT_START,
         'instruction_scope': 'dish',
         'instruct_every': None,
@@ -858,6 +866,26 @@ EXPERIMENT_PATTERNS = {
     },
 }
 DEFAULT_PATTERN = 1
+
+
+def shuffled_orders(recipes, participant, session):
+    """注文の並びを、参加者と回ごとにくじ引きで決める。
+
+    同じ参加者の同じ回は、やり直しても・サーバーを入れ替えても同じ並びに
+    なる(番号と回から決めるので、どこにも覚えておかなくてよい)。
+    サラダは2番目に置かない。サラダ1品 + スープ2品のとき、2番目に置くと
+    理論上の完了時間が約12秒伸び、割り込み許容数による段階も崩れる。
+    実際の並びはゲームの記録の「注文」に残る。
+    """
+    rng = random.Random(f'{participant}|{session}|orders')
+    salads = [r for r in recipes if 'Salad' in r]
+    others = [r for r in recipes if 'Salad' not in r]
+    rng.shuffle(others)
+    if len(salads) != 1 or len(others) != 2:
+        out = list(recipes)
+        rng.shuffle(out)
+        return out
+    return salads + others if rng.random() < 0.5 else others + salads
 
 
 def pattern_maps(pattern):
@@ -1905,6 +1933,8 @@ class WebGamePlay:
                 # 回ごとに注文を固定するパターン(6)。番号は回(0始まり)
                 case = (int(position) - 1) % len(games)
                 recipes = list(games[case])
+                if spec.get('shuffle_orders'):
+                    recipes = shuffled_orders(recipes, participant, done + 1)
             else:
                 case = design.fixed_case_for(preset, cases, pattern)
                 recipes = list(sets[case])
