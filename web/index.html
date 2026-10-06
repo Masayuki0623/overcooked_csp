@@ -1579,7 +1579,7 @@
           '<div class="pick"><div class="lab">指示の入れ方</div><div class="opts">' +
           `<button type="button" data-key="instruction_input" data-val="cards" class="${pick.instruction_input === 'text' ? '' : 'on'}">一覧から選ぶ</button>` +
           `<button type="button" data-key="instruction_input" data-val="text" class="${pick.instruction_input === 'text' ? 'on' : ''}">文章で書く</button>` +
-          '</div><div class="hint">文章で書くと、LLM が解釈して確認を求めます。合わなければ一覧から選べます</div></div>'
+          '</div><div class="hint">文章で書くと、LLM が解釈して確認を求めます。合わなければ書き直します</div></div>'
         : '') +
       '<div class="go"><button class="primary" id="start" disabled>スタート</button> ' +
       '<button id="pick-back">最初に戻る</button>' +
@@ -2935,7 +2935,7 @@
 
   // ---- 文章で書く指示(パターン7) --------------------------------------------
   // 書いた文をサーバーへ送り、LLM の解釈(候補のどれか)を見せて確認する。
-  // 合っていれば「この内容にする」-> 決定。違えば書き直すか、一覧から選ぶ。
+  // 合っていれば「この内容にする」-> 決定。違えば書き直す(一覧から選ぶ逃げ道は無い)。
   function renderInstructText(msg, S, refreshOk, prevText) {
     const box = document.getElementById('instruct-cards');
     S.index = null; S.indices = null; S.exclude = null; S.label = ''; S.via = 'text';
@@ -2944,16 +2944,11 @@
       '<div class="nl">' +
       `<div class="hint">${esc(msg.hint || 'AIに今すぐやってほしい作業を、具体的に書いてください')}</div>` +
       `<textarea id="nl-text" rows="2" maxlength="300" placeholder="例: トマトレタススープを1つと、たまねぎを1つ切って">${esc(prevText || '')}</textarea>` +
-      '<div class="row2"><button type="button" class="primary" id="nl-send">送る</button>' +
-      '<button type="button" id="nl-cards">一覧から選ぶ</button></div>' +
+      '<div class="row2"><button type="button" class="primary" id="nl-send">送る</button></div>' +
       '<div id="nl-result"></div></div>';
     const ta = document.getElementById('nl-text');
     const send = document.getElementById('nl-send');
     const result = document.getElementById('nl-result');
-    document.getElementById('nl-cards').addEventListener('click', () => {
-      instructInterpHandler = null;
-      renderInstructCards(msg, S, refreshOk);
-    });
     const submit = () => {
       const text = (ta.value || '').trim();
       if (!text) { result.innerHTML = '<div class="wait">作業を書いてください</div>'; return; }
@@ -2961,10 +2956,10 @@
       ta.disabled = true;
       result.innerHTML = '<div class="wait">解釈しています...</div>';
       sendNow({ type: 'instruct_text', seq: msg.seq, text });
-      // 返事が来なければ(通信や API の不調)、書き直しか一覧へ
+      // 返事が来なければ(通信や API の不調)、もう一度送ってもらう
       const timer = setTimeout(() => {
         if (instructInterpHandler !== onInterp) return;
-        showResult({ ok: false, message: '返事が来ませんでした。もう一度送るか、一覧から選んでください。' });
+        showResult({ ok: false, message: '返事が来ませんでした。もう一度送ってください。' });
       }, 40000);
       const onInterp = (r) => { clearTimeout(timer); showResult(r); };
       instructInterpHandler = onInterp;
@@ -2987,8 +2982,7 @@
             ((t.steps || []).length > 1 ? `<br><small>${esc(t.steps.join(' → '))}</small>` : '') +
             '</li>').join('')}</ul>` +
           '<div class="row2"><button type="button" class="primary" id="nl-yes">この内容にする</button>' +
-          '<button type="button" id="nl-retry">書き直す</button>' +
-          '<button type="button" id="nl-cards2">一覧から選ぶ</button></div></div>';
+          '<button type="button" id="nl-retry">書き直す</button></div></div>';
         document.getElementById('nl-yes').addEventListener('click', () => {
           refreshOk();
           document.getElementById('nl-yes').textContent = askConf && S.conf === null
@@ -2998,19 +2992,13 @@
       } else {
         S.indices = null; S.label = '';
         refreshOk();
-        const head = r.valid === false ? '有効な指示ではありません: '
-          : r.ambiguous ? '曖昧です: ' : '';
+        // 理由は文だけ(「曖昧です」のような見出しは付けない)
         result.innerHTML =
-          `<div class="interp ng">${esc(head + (r.message || '解釈できませんでした'))}` +
-          '<div class="row2"><button type="button" class="primary" id="nl-retry">書き直す</button>' +
-          '<button type="button" id="nl-cards2">一覧から選ぶ</button></div></div>';
+          `<div class="interp ng">${esc(r.message || 'うまく読み取れませんでした。もう一度送ってください。')}` +
+          '<div class="row2"><button type="button" class="primary" id="nl-retry">書き直す</button></div></div>';
       }
       document.getElementById('nl-retry').addEventListener('click', () => {
         renderInstructText(msg, S, refreshOk, ta.value);
-      });
-      document.getElementById('nl-cards2').addEventListener('click', () => {
-        instructInterpHandler = null;
-        renderInstructCards(msg, S, refreshOk);
       });
     };
     const askConf = !!msg.ask_confidence;

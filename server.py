@@ -896,7 +896,7 @@ EXPERIMENT_PATTERNS = {
         'pots': 1,
         'label': 'パターン7',
         'desc': 'パターン6と同じ(リング・鍋2つ・4ゲーム)で、指示は文章で書く。'
-                'LLM が解釈し、確認してから開始。合わなければ一覧から選ぶ。',
+                'LLM が解釈し、確認してから開始。合わなければ書き直す。',
         'endless': False,
         'presets': {'exp_ring_2pot': 'experiment1'},
         'games': [

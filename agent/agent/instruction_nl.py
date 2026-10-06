@@ -37,13 +37,26 @@ MAX_CHOP_UNITS = None   # 切る材料の合計
 MIN_AI_STEPS = 2
 MAX_AI_SHARE = 0.5
 REJECT_REASONS = ['invalid', 'ambiguous', 'too_few', 'too_many', 'error']
+# 参加者に見せる却下の文。やわらかく、何をどう書き直せばよいかを伝える
+# (「曖昧です」「無効です」は使わない。2026-10-06)
 REJECT_JA = {
-    'invalid': 'この回の注文にない作業か、AI への作業の指定がありません',
-    'ambiguous': '作業か個数が決められません',
-    'too_few': 'AI の分担が少なすぎます',
-    'too_many': '一度に頼める量を超えています(全体の半分まで)',
-    'error': '解釈できませんでした',
+    'invalid': 'この回の注文にある作業で、AI にやってほしいことを書き直してください。',
+    'ambiguous': 'どの作業か、いくつかが決めきれませんでした。料理や材料と個数を入れて、書き直してください。',
+    'too_few': 'もう少し多くの作業を頼んでください。切る作業を2つ以上にするか、'
+               '料理を煮る・提供するところまで任せる形で書き直してください。',
+    'too_many': '一度に頼めるのは全体の半分までです。頼む量を減らして、書き直してください。',
+    'error': 'うまく読み取れませんでした。もう一度送ってください。',
 }
+# LLM が書いた文にこの語があれば、こちらの文に差し替える
+HARSH_WORDS = ('曖昧', '無効', '有効では', '不明確', '不適切')
+
+
+def soft_message(llm_message, reason):
+    """LLM の助言が使えればそれ(書き直しの促しを添える)、きつい言い方ならこちらの文。"""
+    m = (llm_message or '').strip()
+    if not m or any(w in m for w in HARSH_WORDS):
+        return REJECT_JA[reason]
+    return m if m.endswith('。') else m + '。'
 
 # LLM の出力の形。
 #   valid     : 有効な指示か(この回の注文にある作業を、AI に指定しているか)
@@ -97,7 +110,9 @@ def system_prompt(menu, orders_ja, ingredients_ja='たまねぎ・トマト・�
 - exclude_steps: 「材料は切らないで」「切るのは私がやる」「提供は私がやる」のように、料理の工程のうち AI に
              やらせないと言われた工程を入れる(chop=切る, cook=煮る, serve=提供)。何も言われなければ空の配列。
              除く工程があっても、料理の指定(serve 系 / cook 系)はそのまま選ぶ(受けるかどうかは後で決める)。
-- message  : 参加者に見せる短い日本語。受理なら解釈した内容を1文で、曖昧・無効なら理由と書き直しの助言を1文で。
+- message  : 参加者に見せる短い日本語。受理なら解釈した内容を1文で、曖昧・無効なら「何を足して書き直せばよいか」を
+             やわらかく1文で(「曖昧です」「無効です」「不明確」のような言い方はしない。例: 「たまねぎは2つ要るので、
+             切る個数を入れて書き直してください」)。
 
 規則:
 - 一覧にある id だけを使う。文に作業が複数あれば、当てはまる id をすべて選ぶ。量が多くても、全部選ぶ(「全部やって」「3品全部」なら、料理をすべて)。
@@ -322,7 +337,7 @@ def interpret(text, candidates, orders_ja, model=None, timeout_s=25.0):
     system = system_prompt(menu, orders_ja)
     t0 = time.perf_counter()
     fail = {'decision': 'reject', 'valid': None, 'ambiguous': None, 'tasks': [], 'reject_reason': 'error',
-            'message': '解釈できませんでした。もう一度書くか、一覧から選んでください。',
+            'message': REJECT_JA['error'],
             'raw': None, 'model': models[0]}
     errors = []
     raw = None
@@ -356,28 +371,23 @@ def normalize(raw, ids, candidates=None):
     if len(set(stems)) < len(stems):
         ambiguous = True
         base['ambiguous'] = True
-        message = '個数を書いてください(1つ / 2つ)。'
+        message = '個数(1つ / 2つ)を入れて、書き直してください。'
     if not valid:
         return dict(base, decision='reject', tasks=[], reject_reason='invalid',
-                    message=message or REJECT_JA['invalid'] + '。この回の注文にある作業を書いてください。')
+                    message=soft_message(message, 'invalid'))
     if ambiguous or not tasks:
         return dict(base, decision='reject', tasks=[], reject_reason='ambiguous',
-                    message=message or REJECT_JA['ambiguous'] + '。料理や材料と個数を書いてください。')
+                    message=soft_message(message, 'ambiguous'))
     cap = size_check(tasks, candidates, exclude) or cap_check(tasks, candidates)
-    if cap == 'too_few':
-        return dict(base, decision='reject', tasks=[], reject_reason=cap,
-                    message=REJECT_JA[cap] + '。切る作業を複数まとめて頼むか、'
-                    '料理を煮る・提供するところまで頼んでください。')
     if cap:
-        return dict(base, decision='reject', tasks=[], reject_reason=cap,
-                    message=REJECT_JA[cap] + '。頼む量を減らしてください。')
+        return dict(base, decision='reject', tasks=[], reject_reason=cap, message=REJECT_JA[cap])
     # 指示は「AI に今すぐやってほしい作業」なので、鎖の下の工程(切る・煮る)を人に
     # 残して上の工程だけ頼むことはできない(上を頼んだら下も AI がやる)。
     # 除けるのは一番上(提供)だけ(2026-10-06)
     if any(e != 'serve' for e in exclude):
         return dict(base, decision='reject', tasks=[], reject_reason='invalid',
-                    message='AI に今すぐやってほしい作業の指示なので、料理を頼むときは材料を切るところから'
-                            '任せてください(煮るところまでで止めるなら「煮て」と書いてください)。')
+                    message='料理を頼むときは、材料を切るところから任せる形で書き直してください'
+                            '(煮るところまでで止めたいときは「煮て」と書けます)。')
     # 除く工程が、選んだ作業の全部(切るだけの指示で「切らないで」)なら、やることが無い。
     # 料理の指示は鎖(切る → 煮る → 提供)なので、提供を除いても切る・煮るが残る
     if exclude:
@@ -396,7 +406,7 @@ def normalize(raw, ids, candidates=None):
                 kinds |= {'chop', 'cook', 'serve'}
         if all(k in exclude for k in kinds):
             return dict(base, decision='reject', tasks=[], reject_reason='ambiguous',
-                        message='AI がやる工程が残りません。何をやってほしいかを書いてください。')
+                        message='AI がやる作業が残りませんでした。AI にやってほしい作業を書き直してください。')
     return dict(base, decision='accept', tasks=tasks, reject_reason=None, message=message)
 
 
