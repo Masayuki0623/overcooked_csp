@@ -2844,8 +2844,9 @@ class WebGamePlay:
             self.nl_model = r.get('model', '')
             ids = {str(d): i for i, (d, _p) in enumerate(cands)}
             steps = dict(instruction_nl.expand_steps(cands, r.get('tasks', []), r.get('exclude') or []))
+            stages = dict(instruction_nl.expand_stages(cands, r.get('tasks', []), r.get('exclude') or []))
             tasks = [{'index': ids[t], 'id': t, 'label': self._candidate_label(ids[t]),
-                      'steps': steps.get(t, [])}
+                      'steps': steps.get(t, []), 'stages': stages.get(t, [])}
                      for t in r.get('tasks', []) if t in ids]
             ok = r.get('decision') == 'accept' and bool(tasks)
             self.nl_log.append('%s=>%s(%s)' % (

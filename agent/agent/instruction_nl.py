@@ -458,6 +458,53 @@ def _step_kind(verb):
     return 'serve'
 
 
+def expand_stages(candidates, task_ids, exclude=()):
+    """選んだ候補を、画面の流れ図に出す段に分ける。
+
+    戻り値: [(候補の id, [段, ...]), ...]。段 = 同時に進められる作業の一覧
+    (切るは材料ごとに並列。計画の順序制約も、切る同士には順序を付けない)。
+      切る: [レタスを切る, トマトを切る] -> 煮る: [X を煮る] -> 提供: [提供する]
+    サラダは 盛り付ける -> 提供する の2段に分けて見せる。
+    exclude の工程(人がやる)には「(あなた)」を添える。
+    """
+    from agent.instruction_panel import INGREDIENT_JP, card_label
+    by_id = {str(d): p for d, p in candidates}
+    out = []
+    for tid in task_ids:
+        p = by_id.get(tid)
+        if not isinstance(p, dict):
+            continue
+        count = int(p.get('count') or 1)
+        groups = list(p.get('chains') or [p.get('chain') or []])[:count]
+        chop, cook, plate, serve = [], [], [], []
+        for g in groups:
+            for fid in g:
+                if len(fid) < 3:
+                    continue
+                verb, obj = str(fid[1]), str(fid[2])
+                tag = '(あなた)' if _step_kind(verb) in exclude else ''
+                if verb == 'chop':
+                    chop.append(f'{INGREDIENT_JP.get(obj, obj)}を切る{tag}')
+                elif verb == 'cook':
+                    cook.append(f'{card_label(verb, obj)}を煮る{tag}')
+                elif verb == 'mix':
+                    cook.append(f'{card_label(verb, obj)}を混ぜる{tag}')
+                elif verb == 'serve_salad':
+                    plate.append(f'{card_label(verb, obj)}を盛り付ける{tag}')
+                    serve.append(f'提供する{tag}')
+                elif verb in ('serve', 'serve_juice', 'serve_from_counter'):
+                    serve.append(f'提供する{tag}')
+                elif verb == 'handover':
+                    serve.append(f'{card_label(verb, obj)}を渡す{tag}')
+                else:
+                    serve.append(f'{verb} {obj}')
+        stages = [st for st in (chop, cook, plate, serve) if st]
+        # 同じ段に同じ文が並ぶ(「提供する」が2つ)のは、1つにまとめる
+        stages = [list(dict.fromkeys(st)) if st is not chop else st for st in stages]
+        out.append((tid, stages))
+    return out
+
+
 def compose(candidates, task_ids, exclude=()):
     """複数の候補を、1つの指示(鎖の指示)にまとめる。1つだけで除く工程も無ければ、その候補のまま。
 

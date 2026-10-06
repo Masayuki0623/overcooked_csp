@@ -204,6 +204,16 @@
   #instruct .nl .interp.ng { border: 1px solid #a1464f; }
   #instruct .nl .interp.ok { border: 1px solid #3f8a60; }
   #instruct .nl .interp ul { margin: 4px 0 0 18px; padding: 0; }
+  #instruct .nl .interp h4 { margin: 0 0 2px; font-size: 12.5px; color: var(--muted); font-weight: 600; }
+  #instruct .nl .interp h4 + h4 { margin-top: 8px; }
+  #instruct .nl .interp .reading { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+  /* 作業の流れ図。段(列)の中は並列、段と段の間は矢印 */
+  #instruct .nl .flow { display: flex; flex-wrap: nowrap; align-items: center; gap: 2px; margin: 2px 0 4px; text-align: center; }
+  #instruct .nl .flow .stage { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 0 1 auto; }
+  #instruct .nl .flow .node { background: #2b323b; border: 1px solid #3b4450; border-radius: 6px;
+    padding: 2px 6px; font-size: 12.5px; line-height: 1.4; }
+  #instruct .nl .flow .arrow { color: var(--muted); padding: 0 2px; font-size: 14px; flex: 0 0 auto; }
+  #instruct .nl .flow + .flow { margin-top: 6px; padding-top: 6px; border-top: 1px dashed #3b4450; }
   #instruct .nl .wait { color: var(--muted); font-size: 13px; margin-top: 6px; }
   /* 指示への自信(1〜5)。指示のカードを選ぶのと同じ場所で答える */
   #instruct .conf { margin-top: 8px; }
@@ -2975,12 +2985,18 @@
         S.label = r.tasks.map((t) => t.label).join('、') +
           (S.exclude ? `(${S.exclude.map((e) => exclJa[e] || e).join('・')}はあなた)` : '');
         S.via = 'text';
-        // 解釈した作業を、AI がやる工程(切る → 煮る → 提供)まで広げて見せる
+        // 上段: 指示の解釈(候補の言い方)。下段: AI がやる作業の流れ図。
+        // 段の中(切る同士)は並列で、計画でもどちらから切ってもよい。
+        const flow = (t) => {
+          const st = (t.stages || []).length ? t.stages : [(t.steps || [t.label])];
+          return '<div class="flow">' + st.map((nodes) =>
+            `<div class="stage">${nodes.map((n) => `<div class="node">${esc(n)}</div>`).join('')}</div>`
+          ).join('<div class="arrow">→</div>') + '</div>';
+        };
         result.innerHTML =
-          '<div class="interp ok">AIがやること:' +
-          `<ul>${r.tasks.map((t) => `<li>${esc(t.label)}` +
-            ((t.steps || []).length > 1 ? `<br><small>${esc(t.steps.join(' → '))}</small>` : '') +
-            '</li>').join('')}</ul>` +
+          '<div class="interp ok"><h4>指示の解釈</h4>' +
+          r.tasks.map((t) => `<div class="reading">${esc(t.label)}</div>`).join('') +
+          '<h4>AIがやる作業の流れ</h4>' + r.tasks.map(flow).join('') +
           '<div class="row2"><button type="button" class="primary" id="nl-yes">この内容にする</button>' +
           '<button type="button" id="nl-retry">書き直す</button></div></div>';
         document.getElementById('nl-yes').addEventListener('click', () => {
