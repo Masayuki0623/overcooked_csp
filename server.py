@@ -738,6 +738,38 @@ INSTRUCTION_COLUMNS = [
 ]
 INSTRUCTION_FIELDS = [name for name, _ in INSTRUCTION_COLUMNS]
 INSTRUCTION_NOTES = {name: note for name, note in INSTRUCTION_COLUMNS}
+
+# 文章で書いた指示。送った文 1 つにつき 1 行(書き直しも全部)、確定したときに
+# もう 1 行。ゲームの行(解釈の記録)はゲームを終えたときにしか書かれず、途中で
+# 抜けた回は残らないので、送った時点でここに書く(2026-10-07)。
+NL_TEXT_LOG_PATH = RESULTS_DIR / 'web_instruction_texts.csv'
+NL_TEXT_COLUMNS = [
+    ('記録時刻', '書いた時刻'),
+    ('参加者ID', 'debug はデバッグの回'),
+    ('パターン', ''),
+    ('セッション番号', ''),
+    ('エージェント', ''),
+    ('割り込み許容数', ''),
+    ('ゲーム番号', 'サーバー内の通し番号。ほかの記録との突き合わせ用'),
+    ('種類', 'send=文を送って解釈させた / confirm=解釈を確かめて指示を決めた'),
+    ('何回目', 'その回で文を送った何回目か(書き直しを含む)'),
+    ('送った文', '参加者が書いた文そのまま'),
+    ('結果', 'accept=受理(解釈を見せた) / reject=却下(書き直してもらった)'),
+    ('解釈した作業', '受理のとき、候補の id を | で区切る'),
+    ('画面に出した解釈', '受理のとき、参加者に見せた言い方を | で区切る'),
+    ('人に残す工程', '「提供は自分でやる」など、AI に頼まないと解釈した工程'),
+    ('却下の理由', 'invalid / ambiguous / too_few / too_many / error'),
+    ('却下の型', '場合分けの名前(instruction_nl.PATTERN_JA)'),
+    ('画面に出した文', '却下のときに見せた確認の文'),
+    ('有効か', 'LLM の判定(valid)'),
+    ('曖昧か', 'LLM の判定(ambiguous)'),
+    ('LLMの出力', 'LLM が返したもの(JSON)そのまま'),
+    ('モデル', ''),
+    ('応答時間_秒', ''),
+    ('エラー', '呼び出しに失敗したときの内容'),
+]
+NL_TEXT_FIELDS = [name for name, _ in NL_TEXT_COLUMNS]
+NL_TEXT_NOTES = {name: note for name, note in NL_TEXT_COLUMNS}
 _assign_lock = threading.Lock()
 # 参加者番号の採番。番号が重なると別人の記録が混ざるので、1人ずつにする。
 _roster_lock = threading.Lock()
@@ -994,7 +1026,9 @@ def instruction_scope_of(pattern):
 # 参加者ごとに進み方が変わらないよう、ここで固定する。
 # 2026-10-05〜 パターン6(リング・鍋2つ、料理を提供するまで任せる指示だけ、
 # 回ごとに固定した4注文、d は 0/1/2/inf、4ゲーム)。
-EXPERIMENT_PATTERN = 6
+# 2026-10-07〜 パターン7(パターン6と同じ進み方で、指示は文章で書き、LLM が
+# 解釈する。デバッグの「文章で書く」と同じ形式で、全工程を頼める)。
+EXPERIMENT_PATTERN = 7
 
 # 実験のセッションで、その回の条件(割り込み許容数・回・注文)と、指示の
 # 効き方(挟んだ数・残り・L)、CSP の計画表を画面に出すか。
@@ -1925,7 +1959,7 @@ class WebGamePlay:
             self._user_paused = on
             self.game._q_env.put(('Pause', {}) if on else ('Continue', {}))
             print(f"[server] #{self.game_id} ゲームを{'止めました' if on else '再開します'}"
-                  f"(バグ報告)")
+                  f"(遊び方・バグ報告)", flush=True)
 
     def human_mistake_record(self):
         """参加者のミス(種類・回数・時点)。拾い方は gym_cooking/utils/mistakes.py。"""
@@ -2273,6 +2307,8 @@ class WebGamePlay:
                                 'group': sel.get('group', '')},
                         'result': {'served': res.get('served'),
                                    'failed': res.get('failed'),
+                                   'success': res.get('success'),
+                                   'total': res.get('total'),
                                    'reward': res.get('reward'),
                                    'rank': res.get('rank'),
                                    'makespan_s': round(float(
@@ -2902,6 +2938,20 @@ class WebGamePlay:
             with self._instruction_lock:
                 self.instruction_request = None
 
+    def _log_nl_text(self, row):
+        """文章で書いた指示を 1 行残す(送った文・確定)。"""
+        sel = self.selection or {}
+        base = {
+            '記録時刻': datetime.now().isoformat(timespec='seconds'),
+            '参加者ID': sel.get('participant') or 'debug',
+            'パターン': sel.get('pattern', DEFAULT_PATTERN),
+            'セッション番号': sel.get('session') or '',
+            'エージェント': sel.get('agent') or '',
+            '割り込み許容数': sel.get('skip_budget', ''),
+            'ゲーム番号': self.game_id,
+        }
+        append_csv(NL_TEXT_LOG_PATH, NL_TEXT_FIELDS, dict(base, **row), NL_TEXT_NOTES)
+
     def _reset_nl(self):
         self.nl_text = ''
         self.nl_model = ''
@@ -2938,7 +2988,12 @@ class WebGamePlay:
         orders_ja = '、'.join(recipe_label(r) for r in ((self.selection or {}).get('recipes') or []))
 
         def work():
-            r = instruction_nl.interpret(text, cands, orders_ja, model=NL_MODEL)
+            try:
+                r = instruction_nl.interpret(text, cands, orders_ja, model=NL_MODEL)
+            except Exception as e:
+                r = {'decision': 'reject', 'tasks': [], 'reject_reason': 'error',
+                     'pattern': 'error', 'message': instruction_nl.PATTERN_JA['error'],
+                     'error': f'{type(e).__name__}: {e}'}
             self.nl_model = r.get('model', '')
             ids = {str(d): i for i, (d, _p) in enumerate(cands)}
             steps = dict(instruction_nl.expand_steps(cands, r.get('tasks', []), r.get('exclude') or []))
@@ -2951,6 +3006,20 @@ class WebGamePlay:
                 text.replace('|', '/'),
                 'accept:' + ','.join(t['id'] for t in tasks) if ok else 'reject:' + str(r.get('pattern') or ''),
                 r.get('reject_reason') or ''))
+            self._safe('文章の指示の記録', self._log_nl_text, {
+                '種類': 'send', '何回目': self.nl_attempts, '送った文': text,
+                '結果': 'accept' if ok else 'reject',
+                '解釈した作業': '|'.join(t['id'] for t in tasks) if ok else '',
+                '画面に出した解釈': '|'.join(t['label'] for t in tasks) if ok else '',
+                '人に残す工程': ','.join(r.get('exclude') or []),
+                '却下の理由': '' if ok else (r.get('reject_reason') or 'error'),
+                '却下の型': '' if ok else (r.get('pattern') or ''),
+                '画面に出した文': '' if ok else (r.get('message') or ''),
+                '有効か': r.get('valid'), '曖昧か': r.get('ambiguous'),
+                'LLMの出力': json.dumps(r.get('raw'), ensure_ascii=False, default=str) if r.get('raw') is not None else '',
+                'モデル': r.get('model', ''), '応答時間_秒': r.get('latency_s', ''),
+                'エラー': r.get('error') or '',
+            })
             print(f"[指示の解釈] #{self.game_id} {n}回目 {text!r} -> "
                   f"{'受理 ' + ','.join(t['id'] for t in tasks) if ok else '却下 ' + str(r.get('reject_reason'))} "
                   f"({r.get('model')} {r.get('latency_s')}s{' ' + str(r.get('error')) if r.get('error') else ''})",
@@ -2998,6 +3067,14 @@ class WebGamePlay:
                 else:
                     index = int(indices[0])
                 self.nl_tasks = '|'.join(ids) + ('|除く:' + ','.join(exclude) if exclude else '')
+                if via == 'text':
+                    self._safe('文章の指示の記録', self._log_nl_text, {
+                        '種類': 'confirm', '何回目': self.nl_attempts,
+                        '送った文': getattr(self, 'nl_text', ''), '結果': 'accept',
+                        '解釈した作業': '|'.join(ids),
+                        '画面に出した解釈': '|'.join(self._candidate_label(int(i)) for i in indices),
+                        '人に残す工程': ','.join(exclude),
+                    })
             if getattr(self, 'instruction_input', 'cards') == 'text':
                 self.nl_outcome = 'confirmed' if via == 'text' else 'cards'
                 if via != 'text':
@@ -3417,6 +3494,9 @@ class WebGamePlay:
                         'reward': getattr(order, 'reward', 0),
                         'aborted': bool(self._aborted),
                         'makespan_s': round(float(getattr(self.env, 'current_time', 0.0) or 0.0), 1),
+                        # 画面のスコアは「全部出し終えるまでにかかった時間」。出し終えたか
+                        # と注文の数を一緒に渡す(品数で決まる reward は画面に出さない)
+                        'total': len((self.selection or {}).get('recipes') or []) or None,
                     }
                     # 同じ地図での順位。結果と一緒に見せる。
                     _sel = self.selection or {}

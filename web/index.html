@@ -64,6 +64,10 @@
   .keyhint kbd { font-size: 11px; padding: 0 5px; }
   body.compact .keyhint { display: none; }
   /* バグ報告。設定の隣に置く。盤面や操作ボタンには重ねない */
+  /* 遊び方。遊んでいる間だけ出す */
+  #howto { border-color: #4a6b5a; color: #bfe8cf; }
+  #howto:hover { background: #24342b; }
+  #howto.hidden { display: none; }
   #bug { border-color: #6b4a4a; color: #ffbcbc; }
   #bug:hover { background: #3a2a2a; }
   .bar .title { color: var(--text); font-weight: 600; font-size: 14px; margin-right: 4px; }
@@ -146,6 +150,22 @@
   }
   #pad.hidden { display: none; }
   #instruct .lead { font-size: 14px; margin-bottom: 4px; }
+  /* 「今すぐやってほしい作業」を目立たせる(指示は先の段取りではなく、いま頼む作業) */
+  /* 遊び方(ゲーム中に見直す説明) */
+  #overlay .howto .ht-tabs { display: flex; gap: 8px; justify-content: center; margin: 10px 0 6px; }
+  #overlay .howto .ht-tabs button { margin: 0; padding: 6px 18px; border-radius: 999px; }
+  #overlay .howto .ht-tabs button.on { background: linear-gradient(180deg, #36805a, #2c6a4a); border-color: #4a9a6e; font-weight: 700; }
+  #overlay .howto .ht-body { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+  /* 結果のスコア(かかった時間) */
+  .score-time { margin: 6px 0 4px; text-align: center; }
+  .score-time .lab { font-size: 13px; color: var(--muted); letter-spacing: .04em; }
+  .score-time .val { font-size: 34px; font-weight: 700; line-height: 1.2; }
+  .score-time .val .u { font-size: 15px; font-weight: 400; margin-left: 4px; color: var(--muted); }
+  .now-em {
+    color: #ffd27a; font-weight: 700;
+    background: linear-gradient(transparent 62%, rgba(255, 196, 92, .28) 62%);
+    padding: 0 1px;
+  }
   #instruct .who {
     display: flex; gap: 14px; justify-content: center; align-items: center;
     font-size: 12.5px; color: var(--muted); margin-bottom: 8px;
@@ -310,6 +330,7 @@
   /* スマホでは短い字にする。絵文字だけだと何のボタンか分からない。
      バーが2段になると盤面がそのぶん下がり、下のボタンが見切れるので、
      字数を詰めて1段に収める。 */
+  body.compact #howto { font-size: 11.5px; padding: 4px 8px; }
   body.compact #bug { font-size: 0; padding: 4px 8px; }
   body.compact #bug::before { content: 'バグ報告'; font-size: 11.5px; }
   body.compact #stage {
@@ -662,6 +683,7 @@
   <span id="cur-instr" class="hidden">指示 <b id="cur-instr-text"></b></span>
   <span id="cfg"></span>
   <span class="keyhint"><kbd>↑↓←→</kbd>/<kbd>WASD</kbd> 移動 <kbd>Space</kbd> 手を出す <kbd>Enter</kbd> AIへの指示 <kbd>Esc</kbd> 閉じる</span>
+  <button id="howto" type="button" class="hidden" aria-label="遊び方を見る">遊び方</button>
   <button id="bug" type="button" aria-label="バグを報告">バグを報告</button>
   <button id="gear" type="button" aria-label="ボタンの設定">⚙ 設定</button>
 </div>
@@ -672,7 +694,7 @@
 </div>
 
 <div id="instruct">
-  <div class="lead" id="instruct-lead">AIに今すぐやってほしい作業を指示してください</div>
+  <div class="lead" id="instruct-lead">AIに<span class="now-em">今すぐやってほしい作業</span>を指示してください</div>
   <div class="who" id="instruct-who"></div>
   <div class="cards" id="instruct-cards"></div>
   <div class="conf hidden" id="instruct-conf">
@@ -1080,7 +1102,7 @@
                           map: 'exp_partition', skip_budget: 0, case: 0,
                           pattern: 3 },
                  result || { served: 3, failed: 0, reward: 45, makespan_s: 42.0 },
-                 '<div class="sub">提供 3 件 / 失敗 0 件<br>スコア 45</div>');
+                 resultSummaryHtml(result || { served: 3, total: 3, makespan_s: 42.0 }));
     },
     benchPaint(n = 100) {
       const t0 = performance.now();
@@ -1915,15 +1937,29 @@
     return surveyGate;
   }
 
+  // ゲームの結果。スコアは「全部の注文を出し終えるまでにかかった時間」。
+  // 品数で決まる点数(reward)は、この実験の評価と関係ないので出さない。
+  function resultSummaryHtml(res) {
+    res = res || {};
+    const t = Number(res.makespan_s);
+    // success は「ゲームが最後まで動いたか」で、全部出せたかではない。注文の数と比べる
+    const done = res.total != null && Number(res.served) >= Number(res.total);
+    const unknown = res.total == null;
+    if ((done || unknown) && isFinite(t)) {
+      return '<div class="score-time"><div class="lab">かかった時間</div>' +
+             `<div class="val">${t.toFixed(1)}<span class="u">秒</span></div></div>`;
+    }
+    const of = res.total ? `${res.total} 品中 ${Number(res.served) || 0} 品` : `${Number(res.served) || 0} 品`;
+    return `<div class="sub">時間内に作り終えられませんでした(${of})</div>`;
+  }
+
   // 出し忘れがあれば、それを先に片付ける。出したら true。
   function showOwedSurvey(owed) {
     if (!owed || !owed.exp) return false;
     const res = owed.result || {};
     sessionExp = owed.exp;
     settled = true;              // 切断の案内で上書きしない
-    showSurvey(owed.exp, res, owed.summary ||
-      `<div class="sub">提供 ${res.served} 件 / 失敗 ${res.failed} 件` +
-      `<br>スコア ${res.reward}</div>`, owed.answers || null);
+    showSurvey(owed.exp, res, resultSummaryHtml(res), owed.answers || null);
     return true;
   }
 
@@ -2111,7 +2147,9 @@
       lead: '切った野菜を皿にのせて出します',
       dishes: ['玉ねぎ・トマトのサラダ', 'トマト・レタスのサラダ'],
       steps: [
-        [['agent-blue-front'], '矢印キーで動き、Space で手を出します'],
+        // 操作はパソコンとスマホで違うので、両方書く
+        [['agent-blue-front'], 'パソコン: 矢印キーで動き、Space で手を出す\n' +
+                               'スマホ: 画面の ▲◀▶▼ で動き、「使う」で手を出す'],
         [['FreshOnionTile', '→', 'FreshOnion'], '箱から材料を取る'],
         [['cutboard', '→', 'ChoppedOnion'], 'まな板に置いて、何度か手を出して切る'],
         [['ChoppedOnion', '+', 'ChoppedTomato', '→', 'ChoppedOnion-ChoppedTomato'], '切った材料を重ねる'],
@@ -2144,7 +2182,7 @@
         [['agent-blue-front', '+', 'agent-magenta-front'], 'あなたと AI の二人で作ります'],
         [[], GOAL_NOTE],
         [[], AI_NOTE],
-        [[], '本番では、ゲームの始めに、AI に今すぐやってほしい作業を 1 つ指示します'],
+        [[], '本番では、ゲームの始めに、AI に今すぐやってほしい作業を、文章で書いて指示します'],
         [[], 'この回は、指示はありません'],
       ] },
   ];
@@ -2438,7 +2476,7 @@
       ? `<span class="t-op">${n}</span>`
       : `<img src="${G(n)}" alt="">`).join('');
     return (pics ? `<div class="t-pics">${pics}</div>` : '') +
-           `<div class="t-cap">${esc(cap)}</div>`;
+           `<div class="t-cap">${esc(cap).replace(/\n/g, '<br>')}</div>`;
   }
 
   function showTutorialCard() {
@@ -2656,9 +2694,7 @@
         // バグの報告でこちらから打ち切ったときは、案内を上書きしない
         if (reporting) return;
         settled = true;
-        const summary =
-          `<div class="sub">提供 ${msg.result.served} 件 / 失敗 ${msg.result.failed} 件` +
-          `<br>スコア ${msg.result.reward}</div>`;
+        const summary = resultSummaryHtml(msg.result);
         // 実験のセッション と 自由に遊ぶとき で、終わったあとの進み方が違う。
         //   セッション  : アンケート -> 出し終えたら次のセッションへ
         //   自由に遊ぶ  : 「もう一度遊ぶ」で選び直し
@@ -2749,6 +2785,55 @@
   // 遊んでいる最中に様子がおかしかったら、その場で書いて残してもらう。
   // 書いた内容とそこまでのリプレイをサーバーが保存し、その回は打ち切って
   // 同じ条件でやり直す(打ち切った回はセッション数に数えない)。
+  // ---- 遊び方(ゲーム中に、チュートリアルの説明を見直す) ------------------
+  // 見ている間はゲームの時間を止める(バグの報告と同じ)。読んでいる時間が
+  // かかった時間に入らないようにする。ボタンは遊んでいる間だけ出す。
+  const howtoBtn = document.getElementById('howto');
+  let howtoOpen = false;
+  let howtoClose = null;
+  setInterval(() => {
+    if (howtoBtn) howtoBtn.classList.toggle('hidden', !playing && !howtoOpen);
+  }, 300);
+  if (howtoBtn) howtoBtn.addEventListener('click', () => { if (!howtoOpen) showHowTo(); });
+  document.addEventListener('keydown', (e) => {
+    if (howtoOpen && e.key === 'Escape' && howtoClose) { e.preventDefault(); howtoClose(); }
+  }, true);
+  function showHowTo() {
+    if (!playing) return;
+    howtoOpen = true;
+    playing = false;
+    [...held].forEach(holdEnd);       // 押しっぱなしのキーは離しておく
+    sendNow({ type: 'pause', on: true });
+    // 実験の注文は野菜だけなので、ジュースは自由に遊ぶときだけ出す
+    const tabs = TUTORIALS.filter((t) => t.key === 'salad' || t.key === 'soup' ||
+      (t.key === 'juice' && !sessionExp && !inHonban()));
+    let cur = 0;
+    howtoClose = () => {
+      howtoOpen = false;
+      howtoClose = null;
+      hideOverlay();
+      playing = true;
+      sendNow({ type: 'pause', on: false });
+    };
+    const render = () => {
+      const t = tabs[cur];
+      showOverlay('<div class="tut howto">' +
+        '<div class="big">遊び方</div>' +
+        '<div class="t-lead">見ている間、ゲームは止まっています</div>' +
+        '<div class="ht-tabs">' + tabs.map((x, i) =>
+          `<button type="button" data-i="${i}" class="${i === cur ? 'on' : ''}">${esc(x.title)}</button>`).join('') +
+        '</div>' +
+        `<div class="ht-body"><div class="t-lead">${esc(t.lead)}</div>` +
+        t.steps.map((st) => `<div class="r-item">${tutStepHtml(st)}</div>`).join('') + '</div>' +
+        '<div class="go"><button class="primary" id="ht-close">ゲームに戻る</button></div></div>');
+      el.overlayText.querySelectorAll('.ht-tabs button').forEach((b) => b.addEventListener('click', () => {
+        cur = Number(b.dataset.i); render();
+      }));
+      document.getElementById('ht-close').addEventListener('click', () => howtoClose && howtoClose());
+    };
+    render();
+  }
+
   function showBugForm() {
     const wasPlaying = playing;
     playing = false;
@@ -3083,9 +3168,9 @@
       `${esc(p.name)}</span>`).join('');
     const lead = document.getElementById('instruct-lead');
     if (lead) {
-      lead.textContent = started
+      lead.innerHTML = started
         ? '選んでから「決定」を押してください'
-        : 'AIに今すぐやってほしい作業を指示してください';
+        : 'AIに<span class="now-em">今すぐやってほしい作業</span>を指示してください';
     }
     document.getElementById('instruct-who').innerHTML = who;
     // 指示を選ぶ間は移動・使うボタンを隠す。盤面の位置が動かないよう、
@@ -3155,7 +3240,8 @@
     refreshOk();
     box.innerHTML =
       '<div class="nl">' +
-      `<div class="hint">${esc(msg.hint || 'エージェントに今すぐやってほしい作業を、具体的に書いてください。')}</div>` +
+      `<div class="hint">${esc(msg.hint || 'エージェントに今すぐやってほしい作業を、具体的に書いてください。')
+        .replace('今すぐやってほしい作業', '<span class="now-em">今すぐやってほしい作業</span>')}</div>` +
       `<textarea id="nl-text" rows="2" maxlength="300" placeholder="例: トマトレタススープを1つと、たまねぎを1つ切って">${esc(prevText || '')}</textarea>` +
       '<div class="row2"><button type="button" class="primary" id="nl-send">送る</button></div>' +
       '<div id="nl-result"></div></div>';
