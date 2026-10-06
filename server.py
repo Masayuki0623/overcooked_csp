@@ -2964,13 +2964,18 @@ class WebGamePlay:
             here = cur.get(idx, 0) if isinstance(cur, dict) else 0
             # 指示の工程(chain)、その最後より前に入っている指示の外の工程
             # (inserted = 挟んだ工程)、それ以外(other)で色を分ける
-            last_chain = max((k for k, t in enumerate(lst)
-                              if tuple(t.get('id') or ()) in chain_ids), default=-1)
+            # 同名の工程(別の注文の id が付いた「レタスを切る」)も鎖の工程扱い
+            chain_names = {(str(c[0]), str(c[1])) for c in chain_ids}
+
+            def _is_chain(t):
+                tid = tuple(t.get('id') or ())
+                return tid in chain_ids or (len(tid) >= 2 and (str(tid[0]), str(tid[1])) in chain_names)
+            last_chain = max((k for k, t in enumerate(lst) if _is_chain(t)), default=-1)
             for k, t in enumerate(lst):
                 tid = t.get('id') or ('', '', '')
                 st = t.get('start')
                 en = t.get('end')
-                kind = ('chain' if tuple(tid) in chain_ids
+                kind = ('chain' if tuple(tid) in chain_ids or (str(tid[0]), str(tid[1])) in chain_names
                         else 'in_wait' if tuple(tid) in free_ids
                         else 'inserted' if k < last_chain else 'other')
                 rows.append({

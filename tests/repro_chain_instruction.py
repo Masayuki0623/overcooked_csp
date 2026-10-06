@@ -140,7 +140,11 @@ def main():
     ai2, sched, ids = plan_with(env, make, 0)
     print('  AI の計画:', [f'{t[0]} {t[1].split()[0]}' for t in ids])
     chain_tids = {(c[1], c[2], c[3]) for c in make['chain']}
-    n_ai = sum(1 for t in ids if t in chain_tids)
+    # 「切る」は同じ材料ならどの注文の id でも鎖の分になる(2026-10-06)ので、名前で数える
+    from collections import Counter
+    need = Counter((c[1], c[2]) for c in make['chain'])
+    have = Counter((t[0], t[1]) for t in ids)
+    n_ai = sum(min(have.get(n, 0), k) for n, k in need.items())
     check('鎖の工程が全部 AI の計画にある', n_ai == len(chain_tids), f'{n_ai}/{len(chain_tids)}')
     fb = foreign_before_chain_end(ids, chain_tids, sched, ai2.fps) if n_ai else ['x']
     check('煮える待ちの外には他の工程が挟まらない', not fb, str(fb))
