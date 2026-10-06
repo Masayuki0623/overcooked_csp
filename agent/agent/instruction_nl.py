@@ -446,16 +446,17 @@ def normalize(raw, ids, candidates=None):
             code = 'other' if message else 'no_task'
         return dict(base, decision='reject', tasks=[], reject_reason='ambiguous', pattern=code,
                     message=pattern_message(code, message, 'no_task'))
+    # 指示は「AI に今すぐやってほしい作業」なので、鎖の下の工程(切る・煮る)を人に
+    # 残して上の工程だけ頼むことはできない(上を頼んだら下も AI がやる)。
+    # 除けるのは一番上(提供)だけ(2026-10-06)。量の検査より先に見る
+    # (切るを除くと工程が減って too_few になり、理由が分かりにくい)
+    if any(e != 'serve' for e in exclude):
+        return dict(base, decision='reject', tasks=[], reject_reason='invalid', pattern='exclude_lower',
+                    message=PATTERN_JA['exclude_lower'])
     cap = size_check(tasks, candidates, exclude) or cap_check(tasks, candidates)
     if cap:
         return dict(base, decision='reject', tasks=[], reject_reason=cap, pattern=cap,
                     message=PATTERN_JA[cap])
-    # 指示は「AI に今すぐやってほしい作業」なので、鎖の下の工程(切る・煮る)を人に
-    # 残して上の工程だけ頼むことはできない(上を頼んだら下も AI がやる)。
-    # 除けるのは一番上(提供)だけ(2026-10-06)
-    if any(e != 'serve' for e in exclude):
-        return dict(base, decision='reject', tasks=[], reject_reason='invalid', pattern='exclude_lower',
-                    message=PATTERN_JA['exclude_lower'])
     # 除く工程が、選んだ作業の全部(切るだけの指示で「切らないで」)なら、やることが無い。
     # 料理の指示は鎖(切る → 煮る → 提供)なので、提供を除いても切る・煮るが残る
     if exclude:
