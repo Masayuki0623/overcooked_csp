@@ -195,6 +195,15 @@ class CSPAgent:
         # 内時間)経っていなければ、今回は再計算を見送り理由だけ保持する。
         self._min_reschedule_interval_seconds = 0.3
         self._last_reschedule_time = None
+        # まな板の上で合流させるか(_board_merge_options)。計画が選んだ注文 ->
+        # (1 つ目の材料を切る工程の id, まな板)。
+        # 既定は無効(2026-10-07)。有効にすると見込みは縮む(鍋 1 つ: 41.8 ->
+        # 40.6 秒)が、実際は縮まず(42.2 -> 42.2 秒)、鍋 2 つでは遅くなった
+        # (30.8 -> 33.8 秒)。計画が「手に物を持っていると他の作業ができない」
+        # ことを扱っておらず、手の材料をどの注文に充てるかが計画と実行で
+        # 食い違うため。そこを直してから有効にする。
+        self.merge_on_cutboard = False
+        self._board_merge_plan = {}
         self.stall_threshold = 8
         # --- 進捗監視 -------------------------------------------------
         # 同じタスクで、これだけの間まったく世界を動かせなければ、その
@@ -2967,7 +2976,11 @@ class CSPAgent:
             """
             out = deepcopy(task)
             uid = out.get('id', (None, None, None))[2]
-            if uid is not None and uid != -1:
+            # まな板の上で合流させる計画なら、合流先はそのまな板のまま
+            # (置き場の割り当てがまな板に切り替わるのは 1 つ目を置いた後)
+            planned_board = (out.get('assigned_counter') is not None
+                             and tuple(out['assigned_counter']) in self._cutboard_set(env))
+            if uid is not None and uid != -1 and not planned_board:
                 now = self._get_assigned_counter(uid)
                 if now is not None:
                     out['assigned_counter'] = now
@@ -4399,7 +4412,12 @@ class CSPAgent:
                 # 「切らずに運ぶだけ」の指定(既に切られた物が別テーブルにある場合)
                 ta.carry_from = task.get('carry_from') if verb == 'chop' else None
                 # 計画が選んだまな板。空いていればそこを使う(TaskAgent)。
-                ta.preferred_cutboard = self._planned_cutboard(task) if verb == 'chop' else None
+                # まな板の上で合流させる 1 つ目の材料は、必ずそのまな板で切る。
+                ta.merge_anchor = bool(task.get('merge_anchor')) and verb == 'chop'
+                if ta.merge_anchor and (task.get('res') or (None,))[0] == 'cutboard':
+                    ta.preferred_cutboard = tuple(task['res'][1])
+                else:
+                    ta.preferred_cutboard = self._planned_cutboard(task) if verb == 'chop' else None
 
                 # 置き場(assigned_counter)は「刻んだ材料を1か所に集める」ための
                 # 指定で、chop/cook/serve_salad/mix はこれを見て動く。単体エージェント
@@ -5124,10 +5142,20 @@ class CSPAgent:
         boards = self._get_resources(env).get('cutboards') or []
         anchor = tuple(boards[0]) if boards else None
         agents = list(getattr(env, 'agents', None) or [])
+        # 合流先にしたまな板に載っている材料は、その注文の分
+        merge_boards = {}
+        for _uid, _entry in (getattr(self, 'counter_policy_by_order', None) or {}).items():
+            _c = _entry.get('counter') if isinstance(_entry, dict) else None
+            if _c is not None and tuple(_c) in {tuple(b) for b in boards}:
+                merge_boards[tuple(_c)] = _uid
 
         def items(ing):
             if ing not in pool:
                 pool[ing] = list(self._raw_item_positions(env, ing))
+                for pos in list(pool[ing]):
+                    if pos in merge_boards and (ing, merge_boards[pos]) not in reserved:
+                        pool[ing].remove(pos)
+                        reserved[(ing, merge_boards[pos])] = pos
                 for k, ag in enumerate(agents[:2]):
                     tid = self._agent_exec_tid(k)
                     if not tid or len(tid) < 3 or tid[0] != 'chop' or tid[1] != ing:
@@ -5167,6 +5195,134 @@ class CSPAgent:
                     if best is None or d1 + d2 < best:
                         best = d1 + d2
         return best
+
+    # ------------------------------------------------------------------
+    # まな板の上で合流させる(2026-10-07)
+    #
+    # 鍋には材料を 1 つずつは入れられず、そろった山を一度に入れる。そのため
+    # 1 つ目の材料を切ったら合流用の台へ運び、2 つ目をそこへ重ねていた。
+    # まな板の上の物にも重ねられるので、1 つ目を切ったまな板に置いたままにして
+    # 2 つ目をそこへ重ねれば、1 つ目を運ぶ分(取る + 歩く + 置く)が要らない。
+    # ただしそのまな板は、山を取るまで次の材料を切るのに使えない。どちらが
+    # 速いかは CSP に選ばせる(_board_merge_options と solve_csp_scheduling)。
+    # 選んだ注文は、1 つ目の材料を切る工程が担当者の次の作業になった時点で、
+    # 合流先をそのまな板に固める(以後は台に戻さない。戻すと、まな板に
+    # 置いた物を取って台へ運び直す往復が起きた)。固めた後は普通の置き場と
+    # 同じ流れで、置き場がまな板である点だけ、所要と占有を別に見積もる。
+    # ------------------------------------------------------------------
+    def _cutboard_set(self, env):
+        try:
+            return {tuple(b) for b in (env.get_pos_by_obj_gs(gs='Cutboard') or [])}
+        except Exception:
+            return set()
+
+    def _chop_anchor_frames(self, env, ing_pos, board):
+        """1 つ目の材料を切ってそのまな板に置いたままにするまでの所要。
+
+        通常の「切る」(_task_duration_frames_raw)から、切った物を取って
+        置き場へ運ぶ分(歩く + 取る + 置く)を除いたもの。材料がもうその
+        まな板に載っているなら、残りを切るだけ。
+        """
+        board = tuple(board)
+        if tuple(ing_pos) == board:
+            rest = self._chop_rest_steps(env, board)
+            return None if rest is None else max(1, int(rest))
+        w = self._chop_walk_frames(env, ing_pos, board, board)
+        if w is None:
+            return None
+        return int(w + INTERACT_FRAMES * 1 + 1 + game_config.chopping_steps())
+
+    def _board_merge_options(self, env, tasks):
+        """まな板の上で合流させられる注文と、その選択肢。
+
+        対象: 鍋で煮るかサラダにする注文で、まだ何も集まっていない(置き場が
+        空の)もの、かつ供給口から切る材料が 2 つ以上あるもの。
+        合流先がもうまな板に固まっていて、そのまな板がまだ空の注文も含める
+        ('forced')。そのときは、どの材料を 1 つ目にするかだけを選ぶ。
+        戻り値: {注文 uid: {
+            'chops': [切る工程の添字], 'cons': 合流先から山を取る工程の添字,
+            'anchors': [(切る工程の添字, まな板, そこに置いたままにするときの所要)],
+            'to_b': {(切る工程, 自分のまな板, 合流先のまな板): 所要},
+            'cons_d': {合流先のまな板: 山を取る工程の所要},
+            'forced': 合流先がもうまな板に固まっているか,
+        }}
+        """
+        if not getattr(self, 'merge_on_cutboard', True) or not self.sc_2agent:
+            return {}
+        boards = self._cutboard_set(env)
+        if len(boards) < 2:
+            return {}
+
+        def board_opts(t):
+            if t.get('board_choices'):
+                return [(tuple(b), int(d)) for b, d in t['board_choices']]
+            res = t.get('fixed_res')
+            if res and res[0] == 'cutboard' and res[1] is not None:
+                return [(tuple(res[1]), int(t['dur']))]
+            return []
+
+        by_order = {}
+        for i, t in enumerate(tasks):
+            by_order.setdefault(t.get('order'), []).append(i)
+        out = {}
+        for uid, idxs in by_order.items():
+            cons = [i for i in idxs if tasks[i]['verb'] in ('cook', 'serve_salad')]
+            if len(cons) != 1:
+                continue
+            chops = [i for i in idxs if tasks[i]['verb'] == 'chop']
+            if (len(chops) < 2 or any(tasks[i].get('carry_from') or tasks[i].get('from_counter')
+                                      or tasks[i].get('held_by') is not None for i in chops)):
+                continue
+            counter = tasks[chops[0]].get('assigned_counter')
+            if counter is None:
+                continue
+            if env.pos_obj.get(tuple(counter)) is not None:
+                continue                      # もう置き場に集まり始めている
+            forced = tuple(counter) in boards
+            anchors = []
+            for k in chops:
+                sp = tasks[k].get('start_pos')
+                if sp is None:
+                    continue
+                for b, _d in board_opts(tasks[k]):
+                    if forced and b != tuple(counter):
+                        continue
+                    if tuple(sp) in boards and tuple(sp) != b:
+                        continue              # 別のまな板に載っている物は、そこで切るしかない
+                    ad = self._chop_anchor_frames(env, sp, b)
+                    if ad is not None:
+                        anchors.append((k, b, int(ad)))
+            if not anchors:
+                continue
+            targets = {b for _k, b, _d in anchors}
+            to_b = {}
+            for j in chops:
+                sp = tasks[j].get('start_pos')
+                if sp is None:
+                    continue
+                for b_j, d_j in board_opts(tasks[j]):
+                    w_c = self._chop_walk_frames(env, sp, b_j, counter)
+                    for B in targets:
+                        if B == b_j:
+                            continue          # 合流先のまな板は 1 つ目の材料で埋まっている
+                        w_b = self._chop_walk_frames(env, sp, b_j, B)
+                        if w_c is None or w_b is None:
+                            continue
+                        to_b[(j, b_j, B)] = max(1, int(d_j) - int(w_c) + int(w_b))
+            c = cons[0]
+            cons_d = {}
+            for B in targets:
+                d = None
+                if tasks[c]['verb'] == 'cook':
+                    d = self._task_duration_frames(
+                        env, 'cook', tasks[c]['obj'], tasks[c].get('slot_idx', 0) or 0, B)
+                # サラダは回り方(皿が先か材料が先か)で所要が変わる。合流先は
+                # 置き場の隣のまな板なので、置き場からの所要で近似する。
+                cons_d[B] = int(d) if d is not None else int(tasks[c]['dur'])
+            out[uid] = {'chops': chops, 'cons': c, 'anchors': anchors,
+                        'to_b': to_b, 'cons_d': cons_d, 'counter': tuple(counter),
+                        'forced': forced}
+        return out
 
     def _board_choices(self, env, t, base_board, boards, walk):
         """「切る」工程で選べるまな板と、そのときの所要。[(位置, 所要), ...]。
@@ -6352,6 +6508,14 @@ class CSPAgent:
                         if min_total is None or tot < min_total:
                             min_total = tot
             
+            # 合流先がそのまな板(まな板の上で合流させる注文)なら、切ったら
+            # そのまま置いておく。残りを切るだけ。
+            if (assigned_counter is not None
+                    and tuple(ing_pos) == tuple(assigned_counter)
+                    and tuple(ing_pos) in {tuple(c) for c in cutboard_pos_list}):
+                rest = self._chop_rest_steps(env, ing_pos)
+                if rest is not None:
+                    return max(1, int(rest))
             if min_total is None:
                 return None
             # 材料がもうまな板に載っている(置いたまま / 切りかけ)なら、
@@ -6767,7 +6931,9 @@ class CSPAgent:
         # 未カット食材が置き場に乗っていると、そこへは何もマージできない。
         # 期待食材と同じ種類に見えても使えないので、置き場ごと解除して
         # 別のカウンターへ retarget させる(人間が切らずに置いた場合の救済)。
-        if self._get_counter_blocking_food_names(env, assigned_counter):
+        # 合流先がまな板なら、そこで切っている最中なのが普通なので除く。
+        if (tuple(assigned_counter) not in self._cutboard_set(env)
+                and self._get_counter_blocking_food_names(env, assigned_counter)):
             return 'counter_blocked_by_unchopped_food'
 
         expected = {
@@ -7345,7 +7511,7 @@ class CSPAgent:
         'next_order_uid', 'order_display_labels', 'assigned_counters_display_map',
         '_predicted_human_task_id', 'predicted_human_tasks', '_human_prediction_doubt',
         'schedule', 'schedule_per_agent', '_last_solve_metrics', '_stock_contest',
-        '_claim_winner',
+        '_claim_winner', '_board_merge_plan',
     )
 
     @staticmethod
@@ -8656,6 +8822,36 @@ class CSPAgent:
             model.AddExactlyOne([lit for _b, lit, _d in lits])
             board_lits[i] = lits
 
+        # まな板の上で合流させるか(注文ごと)。anchor_lits[(k, B)]: 切る工程 k の
+        # 材料をまな板 B で切って置いたままにし、残りの材料をそこへ重ねる。
+        merge_opts = self._board_merge_options(env, tasks)
+        anchor_lits = {}          # (k, B) -> BoolVar
+        merged_by_order = {}      # uid -> BoolVar(どれかの anchor を選んだ)
+        for uid, mo in merge_opts.items():
+            lits_o = []
+            for k, B, _ad in mo['anchors']:
+                lit = model.NewBoolVar(f'merge_anchor_{tasks[k]["id"]}_{B}')
+                anchor_lits[(k, B)] = lit
+                lits_o.append(lit)
+                # 置いたままにするまな板は、その工程で使うまな板
+                if k in board_lits:
+                    blit = next((bl for bb, bl, _d in board_lits[k] if bb == B), None)
+                    if blit is None:
+                        model.Add(lit == 0)
+                    else:
+                        model.AddImplication(lit, blit)
+            merged = model.NewBoolVar(f'merged_{uid}')
+            model.Add(sum(lits_o) == merged)
+            if mo.get('forced'):
+                model.Add(merged == 1)        # 合流先はもうまな板に固まっている
+            merged_by_order[uid] = merged
+
+        def _board_lit(i, b):
+            """工程 i がまな板 b を使うことを表す条件(固定なら None = 常に真)。"""
+            if i in board_lits:
+                return next((bl for bb, bl, _d in board_lits[i] if bb == b), False)
+            return None
+
         # Debug: Check distances between task types
         self._emit_counter_debug("--- 距離行列サンプル ---")
         sample_chop = next((i for i, t in enumerate(tasks) if t['verb'] == 'chop'), None)
@@ -8675,7 +8871,63 @@ class CSPAgent:
         starts = {}
         ends = {}
         intervals = {}
-        
+        durs = {}
+
+        # まな板で合流させるかどうかで所要が変わる工程
+        merge_chop_of = {}        # 切る工程の添字 -> uid
+        merge_cook_of = {}        # 山を取って煮る工程の添字 -> uid
+        for uid, mo in merge_opts.items():
+            for j in mo['chops']:
+                merge_chop_of[j] = uid
+            if tasks[mo['cons']]['verb'] == 'cook':
+                merge_cook_of[mo['cons']] = uid
+
+        def _merge_chop_dur(i):
+            uid = merge_chop_of[i]
+            mo = merge_opts[uid]
+            merged = merged_by_order[uid]
+            if i in board_lits:
+                own = [(b, lit, d) for b, lit, d in board_lits[i]]
+            else:
+                res = tasks[i].get('fixed_res')
+                own = [(tuple(res[1]), None, int(tasks[i]['dur']))]
+            cases = []            # (条件のリテラル列, 所要)
+            for b, lit, d in own:
+                cases.append(([x for x in (lit, merged.Not()) if x is not None], int(d)))
+            for (k, B), alit in anchor_lits.items():
+                if merge_chop_of.get(k) != uid:
+                    continue
+                if k == i:
+                    ad = next(a for kk, bb, a in mo['anchors'] if kk == k and bb == B)
+                    cases.append(([alit], int(ad)))
+                    continue
+                for b, lit, _d in own:
+                    d_to = mo['to_b'].get((i, b, B))
+                    if d_to is None:
+                        # 合流先のまな板では切れない(1 つ目の材料で埋まっている)
+                        if lit is None:
+                            model.Add(alit == 0)
+                        else:
+                            model.AddBoolOr([lit.Not(), alit.Not()])
+                        continue
+                    cases.append(([x for x in (lit, alit) if x is not None], int(d_to)))
+            vals = [d for _c, d in cases]
+            dv = model.NewIntVar(min(vals), max(vals), f'dur_{tasks[i]["id"]}')
+            for conds, d in cases:
+                model.Add(dv == d).OnlyEnforceIf(conds)
+            return dv
+
+        def _merge_cook_dur(i):
+            uid = merge_cook_of[i]
+            mo = merge_opts[uid]
+            vals = [int(tasks[i]['dur'])] + [int(v) for v in mo['cons_d'].values()]
+            dv = model.NewIntVar(min(vals), max(vals), f'dur_{tasks[i]["id"]}')
+            model.Add(dv == int(tasks[i]['dur'])).OnlyEnforceIf(merged_by_order[uid].Not())
+            for (k, B), alit in anchor_lits.items():
+                if merge_chop_of.get(k) == uid:
+                    model.Add(dv == int(mo['cons_d'][B])).OnlyEnforceIf(alit)
+            return dv
+
         # タスクごとのInterval作成
         for i in range(num_tasks):
             t = tasks[i]
@@ -8683,7 +8935,11 @@ class CSPAgent:
 
             s_var = model.NewIntVar(0, horizon, f'start_{t["id"]}')
             e_var = model.NewIntVar(0, horizon, f'end_{t["id"]}')
-            if i in route_plate_first:
+            if i in merge_chop_of:
+                dur = _merge_chop_dur(i)
+            elif i in merge_cook_of:
+                dur = _merge_cook_dur(i)
+            elif i in route_plate_first:
                 # 回り方によって、この工程の中で歩く距離が変わる。
                 dur_ing, dur_plate = route_durations[i]
                 dur = model.NewIntVar(min(dur_ing, dur_plate),
@@ -8697,10 +8953,11 @@ class CSPAgent:
                 for _b, _lit, d in board_lits[i]:
                     model.Add(dur == d).OnlyEnforceIf(_lit)
             interval = model.NewIntervalVar(s_var, dur, e_var, f'interval_{t["id"]}')
-            
+
             starts[i] = s_var
             ends[i] = e_var
             intervals[i] = interval
+            durs[i] = dur
 
         
         # Startノード用のダミー変数（Circuit用）
@@ -9129,10 +9386,12 @@ class CSPAgent:
             t = tasks[i]
             if t['verb'] == 'chop' and i in board_lits:
                 # まな板を選べる工程は、選んだまな板のぶんだけ占有する。
+                # まな板で合流させるかで所要が変わる工程は、工程の所要(変数)を使う。
                 for b, lit, d in board_lits[i]:
                     cutboard_intervals.setdefault(b, []).append(
                         model.NewOptionalIntervalVar(
-                            starts[i], d, ends[i], lit, f'board_use_{t["id"]}_{b}'))
+                            starts[i], durs[i] if i in merge_chop_of else d, ends[i], lit,
+                            f'board_use_{t["id"]}_{b}'))
             elif t['verb'] == 'chop':
                 c_res = t.get('fixed_res')
                 if c_res and c_res[0] == 'cutboard':
@@ -9140,7 +9399,63 @@ class CSPAgent:
                     if c_loc not in cutboard_intervals:
                         cutboard_intervals[c_loc] = []
                     cutboard_intervals[c_loc].append(intervals[i])
-        
+
+        # まな板の上で合流させる注文: 1 つ目の材料を切り終えてから、山を
+        # 取るまで、そのまな板は埋まっている。残りの材料を重ねるのは、1 つ目を
+        # 切り終えた後。
+        for (k, B), alit in anchor_lits.items():
+            uid = merge_chop_of[k]
+            c = merge_opts[uid]['cons']
+            o_size = model.NewIntVar(0, horizon, f'merge_hold_dur_{tasks[k]["id"]}_{B}')
+            model.Add(o_size == starts[c] + INTERACT_FRAMES - ends[k]).OnlyEnforceIf(alit)
+            cutboard_intervals.setdefault(B, []).append(
+                model.NewOptionalIntervalVar(ends[k], o_size, starts[c] + INTERACT_FRAMES, alit,
+                                             f'merge_hold_{tasks[k]["id"]}_{B}'))
+            for j in merge_opts[uid]['chops']:
+                if j != k:
+                    model.Add(ends[j] >= ends[k] + 1).OnlyEnforceIf(alit)
+            # 同点なら前の計画の選択を続ける(優先度はいちばん下)
+            prev = (getattr(self, '_board_merge_plan', None) or {}).get(uid)
+            if prev is not None and prev == (tuple(tasks[k]['id']), B):
+                switch_penalty_terms.append(1 - alit)
+        for uid, merged in merged_by_order.items():
+            if (not merge_opts[uid].get('forced')
+                    and (getattr(self, '_board_merge_plan', None) or {}).get(uid) is None):
+                switch_penalty_terms.append(merged)
+
+        # 合流先がもうまな板に決まっている注文: 山を取るまでそのまな板は埋まって
+        # いる。そこで切っている 1 つ目の材料の工程は、この区間に含める。
+        _boards = self._cutboard_set(env)
+        _by_order = {}
+        for i in range(num_tasks):
+            _by_order.setdefault(tasks[i].get('order'), []).append(i)
+        for uid, idxs in _by_order.items():
+            if uid in merge_opts:
+                continue                      # まだ空のまな板。上の選択肢の側で扱う
+            B = next((tuple(tasks[i]['assigned_counter']) for i in idxs
+                      if tasks[i].get('assigned_counter') is not None
+                      and tuple(tasks[i]['assigned_counter']) in _boards), None)
+            if B is None:
+                continue
+            cons = [i for i in idxs if tasks[i]['verb'] in ('cook', 'serve_salad', 'mix')]
+            if not cons:
+                continue
+            chops = [i for i in idxs if tasks[i]['verb'] == 'chop']
+            k = next((i for i in chops if tasks[i].get('raw_source') is not None
+                      and tuple(tasks[i]['raw_source']) == B), None)
+            if k is not None and B in cutboard_intervals:
+                cutboard_intervals[B] = [iv for iv in cutboard_intervals[B]
+                                         if iv is not intervals[k]]
+            hold_end = starts[cons[0]] + INTERACT_FRAMES
+            h_size = model.NewIntVar(0, horizon, f'merge_board_dur_{uid}')
+            model.Add(h_size == hold_end)
+            cutboard_intervals.setdefault(B, []).append(
+                model.NewIntervalVar(0, h_size, hold_end, f'merge_board_{uid}'))
+            if k is not None:
+                for j in chops:
+                    if j != k:
+                        model.Add(ends[j] >= ends[k] + 1)
+
         for c_loc, intervals_list in cutboard_intervals.items():
             if len(intervals_list) > 1:
                 model.AddNoOverlap(intervals_list)
@@ -9464,6 +9779,39 @@ class CSPAgent:
                 self._emit_counter_debug("---------------------------------")
             else:
                 # 2エージェント: is_a1 変数から直接エージェント割り当てを読む
+                # まな板の上で合流させると決めた注文。1 つ目の材料の工程は
+                # そのまな板で切って置いたまま、残りの工程の合流先はそのまな板。
+                chosen_merge = {}
+                for (k, B), alit in anchor_lits.items():
+                    if solver.Value(alit):
+                        chosen_merge[merge_chop_of[k]] = (k, B)
+                self._board_merge_plan = {
+                    uid: (tuple(tasks[k]['id']), B) for uid, (k, B) in chosen_merge.items()}
+                self._last_solve_metrics['board_merges'] = len(chosen_merge)
+                # 合流先をまな板に固めるのは、1 つ目の材料を切る工程が担当者の
+                # 次の作業になったとき。それまでは計画の上だけの選択で、実行側は
+                # 今までどおり台を合流先にする(早く固めると、先の注文のために
+                # まな板を空けたままにすることになる)。
+                first_of_agent = {}
+                for i in range(num_tasks):
+                    a = 1 if solver.Value(is_a1[i]) else 0
+                    key = (solver.Value(starts[i]), i)
+                    if a not in first_of_agent or key < first_of_agent[a]:
+                        first_of_agent[a] = key
+                first_idx = {i for _s, i in first_of_agent.values()}
+                committed = {uid: kb for uid, kb in chosen_merge.items()
+                             if merge_opts[uid].get('forced') or kb[0] in first_idx}
+                for uid, (k, B) in committed.items():
+                    if not merge_opts[uid].get('forced'):
+                        self._set_assigned_counter(uid, B)
+                        self._log_counter_policy(uid, "assign", B, "reason=merge_on_cutboard")
+                        self._emit_counter_debug(
+                            f"[BoardMerge] 注文 {uid} の合流先をまな板 {B} に固める")
+                merge_counter_of = {}       # 工程の添字 -> 合流先のまな板
+                for uid, (k, B) in committed.items():
+                    for j in merge_opts[uid]['chops'] + [merge_opts[uid]['cons']]:
+                        merge_counter_of[j] = B
+                anchor_idx = {k: B for k, B in committed.values()}
                 schedule_per_agent = {0: [], 1: []}
                 for i in range(num_tasks):
                     t = tasks[i]
@@ -9472,8 +9820,10 @@ class CSPAgent:
                         'id': t['id'],
                         'start': solver.Value(starts[i]),
                         'end': solver.Value(ends[i]),
-                        'res': chosen_res(i),
-                        'assigned_counter': t.get('assigned_counter'),
+                        'res': (('cutboard', anchor_idx[i]) if i in anchor_idx
+                                else chosen_res(i)),
+                        'assigned_counter': merge_counter_of.get(i, t.get('assigned_counter')),
+                        'merge_anchor': i in anchor_idx,
                         'display_order': t.get('display_order', t.get('slot_idx', t['order'])),
                         'agent_idx': agent_idx,
                         # 実行側が要る指定は、ここで落とすと届かない。

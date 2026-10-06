@@ -32,7 +32,10 @@ class TaskAgent:
         # CSPAgent が毎フレーム設定する。
         self.serve_route = None
         self.protected_counters = set()
-        
+        # まな板の上で合流させる注文の、1 つ目の材料を切る工程か(CSPAgent が設定)。
+        # そうなら計画のまな板(preferred_cutboard)で切って、置いたままにする。
+        self.merge_anchor = False
+
         # 経路予約用（Cooperative A*）
         self.planned_path = []
         self.wait_count = 0  # 待機カウンターを追加
@@ -166,6 +169,13 @@ class TaskAgent:
                 out.add(normalized)
         return out
 
+    @staticmethod
+    def _is_cutboard_pos(env, pos):
+        try:
+            return tuple(pos) in {tuple(c) for c in env.get_pos_by_obj_gs(gs='Cutboard')}
+        except Exception:
+            return False
+
     def _resolve_assigned_counter_target(self, env, holding, assigned_counter, blocked_reason):
         if not assigned_counter:
             return None, None
@@ -178,6 +188,12 @@ class TaskAgent:
         counter_name = getattr(counter_obj, 'full_name', '') if counter_obj is not None else ''
         if not counter_name:
             return assigned_counter, None
+
+        # 合流先がまな板で、1 つ目の材料をまだ切っている最中。切り終えれば
+        # 重ねられるので、別の台へ回さずに待つ(回すと合流先が 2 か所に分かれる)。
+        if self._is_cutboard_pos(env, assigned_counter) and (
+                counter_name.startswith('Fresh') or counter_name.startswith('Chopping')):
+            return None, f"{blocked_reason}: 合流用のまな板で {counter_name} を切り終えるのを待つ"
 
         def extract_ingredients(name):
             if not name:
@@ -2003,7 +2019,18 @@ class TaskAgent:
         if holding_name and chopped_ing_name in holding_name:
             target_table = None
             counter_obj = env.pos_obj.get(assigned_counter) if assigned_counter else None
-            
+            # 合流先がまな板(まな板の上で合流させる注文)で、そこの 1 つ目の
+            # 材料がまだ切り終わっていなければ、重ねられない。隣で待つ。
+            # 別の台へ回すと、合流先が 2 か所に分かれる。
+            if assigned_counter is not None and self._is_cutboard_pos(env, assigned_counter):
+                _cname = getattr(counter_obj, 'full_name', '') or ''
+                if _cname.startswith('Fresh') or _cname.startswith('Chopping'):
+                    _d = abs(self_pos[0] - assigned_counter[0]) + abs(self_pos[1] - assigned_counter[1])
+                    if _d <= 1:
+                        return (0, 0), f"合流用のまな板で {_cname} を切り終えるのを待つ"
+                    return (self.move_to(env, assigned_counter, dynamic_obstacles=dynamic_obstacles),
+                            f"{chopped_ing_name} を合流用のまな板へ運ぶ")
+
             target_table, blocked_details = self._resolve_assigned_counter_target(
                 env,
                 holding,
@@ -2100,9 +2127,18 @@ class TaskAgent:
 
         # 1. Check Cutboards
         all_cutboards = self.reachable_positions(env, env.get_pos_by_obj_gs(gs='Cutboard'))
+        protected = {tuple(p) for p in (self.protected_counters or set()) if p is not None}
+        own_merge = tuple(assigned_counter) if assigned_counter is not None else None
         for loc in all_cutboards:
             obj = env.pos_obj[loc]
             if obj and chopped_ing_name in obj.full_name:
+                # 自分の注文の合流先のまな板なら、切ったらそのまま置いておく
+                # (まな板の上で合流させる)。取って運ばない。
+                if own_merge is not None and tuple(loc) == own_merge:
+                    return (0, 0), f"{chopped_ing_name} は合流用のまな板にある (完了)"
+                # 他の注文の合流先のまな板の物は取らない
+                if tuple(loc) in protected:
+                    continue
                 #print(f"  [まな板確認] {loc} で {chopped_ing_name} を発見")
                 if not holding:
                     self._log_chop_debug(env, ing_name, holding_name, assigned_cutboard, assigned_counter, "pickup_chopped", target=loc)
@@ -2120,6 +2156,9 @@ class TaskAgent:
         same_on_board = []
         for loc in cutboard_locs:
             obj = env.pos_obj[loc]
+            # 他の注文の合流先のまな板で切っている物は、その注文の分
+            if obj and tuple(loc) in protected and tuple(loc) != own_merge:
+                continue
             if obj:
                 if target_ing_name in obj.full_name or chopping_ing_name in obj.full_name:
                     if holding is not None:
@@ -2141,7 +2180,24 @@ class TaskAgent:
                 check_cbs = list(reversed(check_cbs))
 
             pref = getattr(self, 'preferred_cutboard', None)
-            empties = [tuple(loc) for loc in check_cbs if env.pos_obj[loc] is None]
+            # まな板の上で合流させる 1 つ目の材料は、計画のまな板で切る。
+            # ふさがっていれば空くのを待つ(別のまな板で切ると合流先が変わる)。
+            if getattr(self, 'merge_anchor', False) and pref is not None:
+                pref = tuple(pref)
+                if env.pos_obj.get(pref) is None:
+                    self._log_chop_debug(env, ing_name, holding_name, assigned_cutboard, assigned_counter, "place_fresh", target=pref)
+                    return self.move_to(env, pref, dynamic_obstacles=dynamic_obstacles), f"{target_ing_name} を置く(合流用のまな板)"
+                return (0, 0), f"合流用のまな板 {pref} が空くのを待つ"
+
+            def _usable_board(loc):
+                # 合流先のまな板(自分の注文の分は 1 つ目の材料の工程だけが使う)
+                # と、他の注文の合流先のまな板は、切るのに使わない
+                loc = tuple(loc)
+                if own_merge is not None and loc == own_merge:
+                    return False
+                return loc not in protected
+            empties = [tuple(loc) for loc in check_cbs
+                       if env.pos_obj[loc] is None and _usable_board(loc)]
             # まな板の選び方(2026-10-06):
             #   1. 前のフレームで選んだまな板がまだ空いていれば、それを使い続ける
             #      (毎フレーム近い順に選び直すと、島の反対側へ回る途中で近い方が
@@ -2201,7 +2257,8 @@ class TaskAgent:
             else:
                 # まな板が全部ふさがっている。関係ない物が置きっぱなしなら、
                 # どかせば使える。まず手を空けてから片付けに向かう。
-                if self._blocked_cutboards(env, check_cbs, target_ing_name, chopping_ing_name):
+                if [b for b in self._blocked_cutboards(env, check_cbs, target_ing_name, chopping_ing_name)
+                        if tuple(b) not in protected and tuple(b) != own_merge]:
                     self._log_chop_debug(env, ing_name, holding_name, assigned_cutboard, assigned_counter, "free_hands_to_clear", reason="cutboard_blocked")
                     return self.drop_unwanted_item(
                         env, holding, reason="まな板を空けるために一度置く",
@@ -2212,7 +2269,9 @@ class TaskAgent:
         # 2.5 手ぶらで、まな板が関係ない物でふさがっている -> どかしに行く。
         #     置きっぱなしを片付けないと、その側では誰も何も切れなくなる。
         if not holding_name:
-            blocked = self._blocked_cutboards(env, cutboard_locs, target_ing_name, chopping_ing_name)
+            # 合流先のまな板に載っている山は「置きっぱなし」ではない。どかさない。
+            blocked = [b for b in self._blocked_cutboards(env, cutboard_locs, target_ing_name, chopping_ing_name)
+                       if tuple(b) not in protected and tuple(b) != own_merge]
             free = [loc for loc in cutboard_locs if env.pos_obj[loc] is None]
             if blocked and not free:
                 self._log_chop_debug(env, ing_name, holding_name, assigned_cutboard, assigned_counter, "clear_cutboard", target=blocked[0])
