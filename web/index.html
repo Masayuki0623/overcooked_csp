@@ -1022,11 +1022,18 @@
           if (im.complete && im.naturalWidth) c.drawImage(im, e[2], e[3], e[4], e[5]);
           break;
         }
-        case 'T':   // ['T', 文字, r, g, b, x, y, 大きさ]
+        case 'T':   // ['T', 文字, r, g, b, x, y, 大きさ(, 最大幅, 寄せ)]
           c.fillStyle = rgb(e, 2);
           c.font = `${e[7]}px Times, "Times New Roman", serif`;
           c.textBaseline = 'top';
-          c.fillText(e[1], e[5], e[6]);
+          if (e.length > 8) {
+            // 枠に収める文字(注文の名前)。最大幅を超える分は縮めて描く
+            c.textAlign = e[9] === 'c' ? 'center' : 'left';
+            c.fillText(e[1], e[5], e[6], e[8]);
+            c.textAlign = 'left';
+          } else {
+            c.fillText(e[1], e[5], e[6]);
+          }
           break;
       }
     }

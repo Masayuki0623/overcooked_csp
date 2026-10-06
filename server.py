@@ -1649,7 +1649,7 @@ def normalize_elements(elements):
       ['F', r, g, b]                   塗りつぶし
       ['R', r, g, b, x, y, w, h, 線幅]  四角(線幅 0 は塗り)
       ['I', 絵の名前, x, y, w, h]        画像
-      ['T', 文字, r, g, b, x, y, 大きさ] 文字
+      ['T', 文字, r, g, b, x, y, 大きさ(, 最大幅, 寄せ)] 文字
     """
     out = []
     for kind, a in elements:
@@ -1665,8 +1665,11 @@ def normalize_elements(elements):
             out.append(['I', a['path'], _num(x), _num(y), _num(w), _num(h)])
         elif kind == 'Text':
             x, y = a['location']
-            out.append(['T', str(a['text'])] + _rgb(a['color'])
-                       + [_num(x), _num(y), _num(a.get('px', 12))])
+            row = ['T', str(a['text'])] + _rgb(a['color']) + [_num(x), _num(y), _num(a.get('px', 12))]
+            if a.get('maxw'):
+                # 枠に収める文字: 最大幅と寄せ方(注文の名前)
+                row += [_num(a['maxw']), 'c' if a.get('align') == 'center' else 'l']
+            out.append(row)
     return out
 
 

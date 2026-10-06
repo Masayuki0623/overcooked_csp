@@ -244,10 +244,18 @@ class Game:
         # 包んで、font ごとに決めた大きさを書き足している(_font_px)。
         # ここで引数を増やすと、その包みと形が合わなくなって描画が全部
         # 止まる(実測: 画面が真っ暗になった)。形は変えないこと。
+        # 枠に収めたい文字(注文の名前)は、呼ぶ前に _text_box を入れておく
+        # (最大幅と寄せ方)。ブラウザはそれを見て枠からはみ出さないように描く。
         t = font.render(text, True, color)
-        self.screen.blit(t, loc)
-        self.__plot_elements.append(
-            ('Text', {'text': text, 'color': color, 'location': loc}))
+        box = getattr(self, '_text_box', None)
+        if box and box.get('align') == 'center':
+            self.screen.blit(t, (loc[0] - t.get_width() // 2, loc[1]))
+        else:
+            self.screen.blit(t, loc)
+        el = {'text': text, 'color': color, 'location': loc}
+        if box:
+            el.update(box)
+        self.__plot_elements.append(('Text', el))
 
     # 向きごとの絵。無ければ元の1枚を使う。
     FACING_SUFFIX = {(0, 1): 'front', (0, -1): 'back',
@@ -428,25 +436,81 @@ class Game:
                 self.draw_current_order(i, copy.deepcopy(order), restTime,
                                         time_limit=timeLimit)
 
-        # draw success and failed ones
-        self.put_text(self.small_font, "Score", (40, 80, 180),
-                      ((0 + 0.15) * self.tile_size[0], (current_world.height + 1.6) * self.tile_size[1]))
-        self.put_text(self.font, str(current_order_scheduler.reward), (40, 80, 180),
-                      ((0.5 + 0.3) * self.tile_size[0], (current_world.height + 1.4) * self.tile_size[1]))
+        # 得点は出さない(2026-10-06)。注文の絵と名前だけ。
+
+    # 注文の表示(下の帯)。注文ごとに ORDER_SLOT マス幅の枠を取り、上に皿の絵、
+    # 下に名前を 2 行まで出す。名前は枠の幅に収める(ブラウザ側で縮める)。
+    ORDER_SLOT = 2.3          # 枠の幅(マス)
+    ORDER_IMG = 1.2           # 皿の絵の大きさ(マス)。名前 2 行と合わせて帯(2 マス)に収まる大きさ
+    ORDER_NAME_PX = 12        # 名前の文字の大きさ
+    ORDER_NAME_CHARS = 8      # 1 行に入れる文字数の目安(枠 92px / 12px)
+    ORDER_ING_JP = {'Lettuce': 'レタス', 'Onion': 'たまねぎ', 'Tomato': 'トマト',
+                    'Apple': 'ブルーベリー', 'Orange': 'オレンジ', 'Banana': 'バナナ'}
+
+    def order_name_lines(self, obj):
+        """注文の日本語の名前を、枠に収まる行に分けて返す(例: レタス・たまねぎ / トマトサラダ)。"""
+        ings, kind = [], 'サラダ'
+        for c in getattr(obj, 'contents', []):
+            name = getattr(c, 'name', '') or ''
+            if name in ('Plate', 'Cup'):
+                continue
+            state = ''
+            try:
+                state = type(c.state).__name__
+            except Exception:
+                pass
+            if state in ('Cooked', 'Cooking'):
+                kind = 'スープ'
+            elif state in ('Mixed', 'Mixing'):
+                kind = 'ジュース'
+            ings.append(self.ORDER_ING_JP.get(name, name))
+        if not ings:
+            return [kind]
+        lines, cur = [], ''
+        for ing in ings:
+            piece = ing if not cur else '・' + ing
+            if cur and len(cur + piece) > self.ORDER_NAME_CHARS:
+                lines.append(cur)
+                cur = ing
+            else:
+                cur += piece
+        if len(cur + kind) > self.ORDER_NAME_CHARS and cur:
+            lines.append(cur)
+            cur = kind
+        else:
+            cur += kind
+        lines.append(cur)
+        return lines[:2]
+
+    def order_slot_x(self, idx):
+        return int(idx * self.ORDER_SLOT * self.tile_size[0])
 
     def draw_current_order(self, idx, obj, t, time_limit=None):
-        # order
-        obj_loc = (idx, self.world.height)
+        # 皿の絵: 枠の中央上に、ORDER_IMG マスの大きさで
+        tw, th = self.tile_size
+        slot_w = int(self.ORDER_SLOT * tw)
+        img = int(self.ORDER_IMG * tw)
+        x0 = self.order_slot_x(idx)
+        y0 = int(self.world.height * th + 0.05 * th)
+        img_loc = (x0 + (slot_w - img) // 2, y0)
         if any([isinstance(c, Plate) for c in obj.contents]):
-            self.draw('Plate', self.tile_size, self.scaled_location(obj_loc))
+            self.draw('Plate', (img, img), img_loc)
             if len(obj.contents) > 1:
                 plate = obj.unmerge('Plate')
-                self.draw(obj.full_name, self.container_size,
-                          self.container_location(obj_loc))
+                inner = int(img * self.container_scale)
+                self.draw(obj.full_name, (inner, inner),
+                          (img_loc[0] + (img - inner) // 2, img_loc[1] + (img - inner) // 2))
                 obj.merge(plate)
         else:
-            self.draw(obj.full_name, self.tile_size,
-                      self.scaled_location(obj_loc))
+            self.draw(obj.full_name, (img, img), img_loc)
+        # 名前: 絵の下に 2 行まで。中央寄せ、枠の幅に収める
+        self._text_box = {'maxw': slot_w - 4, 'align': 'center'}
+        try:
+            for k, line in enumerate(self.order_name_lines(obj)):
+                self.put_text(self.small_font, line, (40, 40, 60),
+                              (x0 + slot_w // 2, y0 + img + 1 + k * (self.ORDER_NAME_PX + 1)))
+        finally:
+            self._text_box = None
         colors = {
             0: (220, 70, 1),
             0.25: (249, 168, 37),
@@ -464,8 +528,8 @@ class Game:
             return
         ratio = max(0.0, min(1.0, float(t) / float(time_limit)))
         key = min(colors, key=lambda k: abs(k - ratio))
-        x, y = self.scaled_location((idx, self.world.height))
-        w, h = self.tile_size
+        x, y = self.order_slot_x(idx), int(self.world.height * self.tile_size[1])
+        w, h = int(self.ORDER_SLOT * self.tile_size[0]), int(self.ORDER_IMG * self.tile_size[1])
         # 隣の注文のバーと繋がって1本に見えないよう、左右に余白を取る。
         bar_h = max(3, int(h * 0.14))
         pad = max(2, int(w * 0.12))
