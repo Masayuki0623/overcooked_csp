@@ -2096,6 +2096,8 @@ class WebGamePlay:
             out['instruction_input'] = choice['instruction_input']
         # デバッグ画面からの上書き。参加者IDのある回や、チュートリアル・
         # 練習には効かせない(上の分岐で先に返している)。
+        # デバッグ画面で条件を選んだ回の印(記録に '参加者ID=debug' で残す)
+        out['custom'] = True
         debug = sanitize_debug(choice.get('debug'))
         if debug:
             out['debug'] = debug
@@ -2148,14 +2150,20 @@ class WebGamePlay:
         突き合わせる。
         """
         sel = self.selection or {}
-        if not sel.get('participant'):
+        # デバッグの回(参加者IDなし)も残す(2026-10-06)。参加者IDは 'debug'、
+        # 正式な回か=0。名簿・割り当て・アンケートには触らない
+        is_debug = not sel.get('participant') and bool(sel.get('custom'))
+        if not sel.get('participant') and not is_debug:
             return
+        pid = sel.get('participant') or 'debug'
         res = self.result or {}
         env = self.env
         # 注文に合っていた提供だけを「出せた」と数える(注文にない皿も
         # 提供口には置けてしまうため)。
         reason = getattr(self, 'discard_reason', '') or (
             'quit' if res.get('aborted') else '')
+        if is_debug and not reason:
+            reason = 'debug'
         deliveries = [d for d in (getattr(env, 'delivery_log', None) or [])
                       if d.get('ok', True)]
         misserved = len([d for d in (getattr(env, 'delivery_log', None) or [])
@@ -2168,7 +2176,7 @@ class WebGamePlay:
             'group': sel.get('group', ''),
             'agent': sel.get('agent') or '',
             'game_in_block': sel.get('game_in_block') or 1,
-            'participant_id': sel['participant'],
+            'participant_id': pid,
             'pattern': sel.get('pattern', DEFAULT_PATTERN),
             'session': sel.get('session'),
             'map': sel.get('map'), 'skip_budget': sel.get('skip_budget'),
@@ -2200,6 +2208,8 @@ class WebGamePlay:
         }
         append_csv(SESSION_LOG_PATH, SESSION_JA_FIELDS, session_row_ja(_row), SESSION_NOTES)
         self._safe('指示の記録', self._log_instructions, reason)
+        if is_debug:
+            return
         if not reason:
             # 正式に受理した回だけ数える。バグ報告の出た回と途中で抜けた回は
             # 同じ条件でやり直しになり、やり直した回が正式な1回になる。
@@ -2243,8 +2253,10 @@ class WebGamePlay:
         (実測: 90秒で5回)、それを全部残さないと L も挿入順も追えない。
         """
         sel = self.selection or {}
-        if not sel.get('participant'):
+        is_debug = not sel.get('participant') and bool(sel.get('custom'))
+        if not sel.get('participant') and not is_debug:
             return
+        pid = sel.get('participant') or 'debug'
         env = self.env
         pend = list(getattr(env, '_pending_instructions', []) or []) if env else []
         res = self.result or {}
@@ -2252,7 +2264,7 @@ class WebGamePlay:
         now = datetime.now().isoformat(timespec='seconds')
         cond = {
             '記録時刻': now,
-            '参加者ID': sel['participant'],
+            '参加者ID': pid,
             'パターン': sel.get('pattern', DEFAULT_PATTERN),
             'グループ': sel.get('group', ''),
             'セッション番号': sel.get('session'),
@@ -2309,7 +2321,7 @@ class WebGamePlay:
             }
             append_csv(INSTRUCTION_LOG_PATH, INSTRUCTION_FIELDS, {
                 '記録時刻': now,
-                '参加者ID': sel['participant'],
+                '参加者ID': pid,
                 'パターン': sel.get('pattern', DEFAULT_PATTERN),
                 'グループ': sel.get('group', ''),
                 'セッション番号': sel.get('session'),
@@ -2396,7 +2408,7 @@ class WebGamePlay:
             }, notes=QUANT_NOTES)
             return
         print(f"[server] 指示の記録を {len(pend)} 件残しました "
-              f"({sel['participant']} session={sel.get('session')})", flush=True)
+              f"({pid} session={sel.get('session')})", flush=True)
 
     def _ai_errors_so_far(self):
         """この回で AI の判断が落ちた回数と、その中身。"""
