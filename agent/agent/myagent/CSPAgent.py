@@ -3338,7 +3338,14 @@ class CSPAgent:
         デッドロックになる。取り出せる状態の鍋があるなら serve を先に行う。
         """
         pots = self._get_resources(env).get('pots', [])
-        for candidate in self.schedule_per_agent.get(agent_idx, []):
+        # 自分の担当に無ければ、相手の担当の serve も見る(2026-10-06)。
+        # 相手(人)が煮上がったスープを出してくれないと、鍋は空かず、こちらの
+        # 煮る工程は永久に「鍋が空くまで待機」になる(実測: 2人の CSP のデモで
+        # 互いに相手が出すと思って 80 秒止まった)。鍋を空けるのは誰でもよい。
+        own_list = list(self.schedule_per_agent.get(agent_idx, []))
+        other_list = (list(self.schedule_per_agent.get(1 - agent_idx, []))
+                      if (self.human_counterpart_mode or getattr(self, 'partner_is_external', False)) else [])
+        for candidate in own_list + other_list:
             task_id = candidate.get('id')
             if not (isinstance(task_id, tuple) and len(task_id) >= 3):
                 continue
