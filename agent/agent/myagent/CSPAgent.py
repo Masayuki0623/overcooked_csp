@@ -4321,7 +4321,13 @@ class CSPAgent:
                     _own_stuck = not self._finished_dish_exists(env, obj)
                 else:
                     _own_stuck = not self._cook_dependency_ready_from_world(env, obj)
+                # 2人とも計画どおりに動かす(1つの脳)ときは引き取らない。相手は
+                # 計画どおりに自分の担当をやるので、引き取ると同じ作業を2人で
+                # やることになる(実測: 相手がいま盛っているサラダを、余った皿を
+                # 持った側も作りに行き、スープ用に刻んだレタスを皿に載せて
+                # スープが作れなくなった)。
                 if (getattr(self, 'two_agent_assignment', False)
+                        and (self.human_counterpart_mode or self.partner_is_external)
                         and verb in ('cook', 'mix', 'serve', 'serve_salad',
                                      'serve_juice', 'handover',
                                      'serve_from_counter')
@@ -8834,6 +8840,7 @@ class CSPAgent:
         burn_margin = int(3 * self.fps)
         pot_deadline = {}
         pot_ready = {}      # 煮ている最中の鍋が煮上がるまでのフレーム数
+        pot_occupant = {}   # 煮ている/煮上がったスープが入っている鍋 -> 中身
         for pot_pos in env.get_pos_by_obj_gs(gs='Pot') or []:
             obj = env.pos_obj.get(pot_pos)
             name = getattr(obj, 'full_name', '') or ''
@@ -8841,6 +8848,8 @@ class CSPAgent:
                 continue
             key = tuple(sorted(c.name for c in getattr(obj, 'contents', [])
                                if getattr(c, 'name', '') not in ('Plate', 'Fire')))
+            if 'Cooking' in name or 'Cooked' in name:
+                pot_occupant[tuple(pot_pos)] = key
             try:
                 if 'Cooked' in name:
                     left = obj.rest_turn_time()
@@ -8940,6 +8949,32 @@ class CSPAgent:
                     model.Add(p_size == p_end - p_start)
                     p_interval = model.NewIntervalVar(p_start, p_size, p_end, f'pot_usage_{order_idx}')
                     pot_usage_intervals[pot_loc].append(p_interval)
+
+        # いま鍋に入っているスープ(煮る工程は済み、出す工程だけ残っている)も、
+        # 出すまでその鍋を埋めている。以前はこの区間が無く、別のスープの
+        # 「煮る」をその鍋で先に始める計画が出ていた。実行側は鍋が空くのを
+        # 待てずに「先に出す」へ切り替え、手に持っていた材料を捨てていた
+        # (実測: 刻んだレタスを持って鍋待ち -> 出しに行くためレタスを置き、
+        #  そのレタスがサラダに使われて担当が何度も入れ替わった)。
+        claimed_pots = set()
+        for i in range(num_tasks):
+            t = tasks[i]
+            if (t['verb'] not in ('serve', 'handover', 'clear_pot')
+                    or dish_kind_of(t['obj']) != KIND_SOUP):
+                continue
+            order_vars = vars_by_order.get(t['order'], [])
+            if any(v['task']['verb'] == 'cook' for v in order_vars):
+                continue
+            key = tuple(sorted(p.capitalize() for p in dish_ingredients(t['obj'])))
+            pot_loc = next((p for p, k in pot_occupant.items()
+                            if k == key and p not in claimed_pots), None)
+            if pot_loc is None:
+                continue
+            claimed_pots.add(pot_loc)
+            o_size = model.NewIntVar(0, horizon, f'pot_occupied_dur_{i}')
+            model.Add(o_size == ends[i])
+            pot_usage_intervals.setdefault(pot_loc, []).append(
+                model.NewIntervalVar(0, o_size, ends[i], f'pot_occupied_{i}'))
 
         # ミキサーの占有制約。鍋とまったく同じ形で、
         # 「入れてから取り出すまで」を1区間として重複を禁じる。
