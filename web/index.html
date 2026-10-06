@@ -3029,6 +3029,9 @@
   // 全部終わったときの画面。条件を変えていたことなどは伝えない(2026-10-07)。
   function showFinish() {
     try { sessionStorage.removeItem(HONBAN_STORE); } catch (e) {}
+    // 読み込み直したら最初の選択に戻す。実験の状態のままだと、次の人の前に
+    // 前の人の「全部終わっています」とスタートのボタンが出てしまう。
+    setMode('');
     revealSteps({
       head: '<div class="big">ご協力ありがとうございました</div>',
       items: [

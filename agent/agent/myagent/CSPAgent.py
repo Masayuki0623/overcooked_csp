@@ -3230,6 +3230,24 @@ class CSPAgent:
         if carry_task and matches_single_chopped(carry_task):
             return fresh(carry_task)
 
+        # 切った材料を 1 つ持っていて、覚えている「切る」の注文がまだあり、
+        # 計画がその分を「もう切った(手の中)」と数えているなら、行き先は
+        # その注文のまま。計画の先頭に同じ材料を切る別の注文の工程があっても
+        # 乗り換えない。乗り換えると、指示の料理のために切ったレタスを別の
+        # 注文の台へ置き、指示の料理の分をもう 1 度切ることになる(実測: d=0 で
+        # レタス玉ねぎスープを指示したのに、レタスを 2 回切って 1 つ挟んだ)。
+        if (carry_task and scheduled_task and carried_ing
+                and not carried_ing_is_fresh and not chopped_combo_parts):
+            c_verb, c_obj, c_uid = carry_task.get('id') or (None, None, None)
+            s_verb, s_obj, s_uid = scheduled_task.get('id') or (None, None, None)
+            active = {e.get('uid') for e in (getattr(self, 'active_order_entries', None) or [])}
+            live = {tuple(t.get('id') or ()) for ts in (getattr(self, 'schedule_per_agent', None) or {}).values()
+                    for t in (ts or [])}
+            if (c_verb == 'chop' and s_verb == 'chop' and c_obj == carried_ing == s_obj
+                    and c_uid not in (None, -1) and c_uid != s_uid and c_uid in active
+                    and tuple(carry_task['id']) not in live):
+                return fresh(carry_task)
+
         if scheduled_task:
             verb, obj, _ = scheduled_task['id']
             if verb in ('cook', 'serve_salad') and chopped_combo_parts:
@@ -3731,6 +3749,15 @@ class CSPAgent:
             return task
         prev = self._last_action_tid.get(agent_idx)
         tid = task.get('id')
+        # 指示の料理の分へ付け替わったのなら、そちらへ移る。前のまま続けると、
+        # 指示の料理のために持っている物を別の注文の台へ置き、指示の料理の分を
+        # もう 1 度作ることになる(実測: d=0 でレタス玉ねぎスープを指示したら、
+        # 指示の前に切り始めたレタスをトマトレタスのスープの台へ置き、レタスを
+        # もう 1 つ切って「挟んだ数」が 1 になった)。
+        protected = set(self._chain_protected_uids()) if prev and tid else set()
+        if (prev and tid and tid[2] in protected and prev[2] not in protected):
+            self._last_action_tid[agent_idx] = tid
+            return task
         if (prev and tid and prev != tid and prev[:2] == tid[:2]
                 and prev not in self.completed_task_ids):
             # 前の分は、立て直しで相手の担当へ移っていることがある。
