@@ -1574,7 +1574,12 @@
           `<button type="button" data-key="two_agent" data-val="1" class="${pick.two_agent ? 'on' : ''}">2人で分担して最適化</button>` +
           '</div><div class="hint">2人で分担すると、どちらがどの作業をやると' +
           '速いかを位置と移動時間から計算します。相手が計画どおり動かないと' +
-          '止まることがあります</div></div>'
+          '止まることがあります</div></div>' +
+          // 指示の入れ方。文章にすると、LLM が候補に対応づけて確認を求める(パターン7と同じ)
+          '<div class="pick"><div class="lab">指示の入れ方</div><div class="opts">' +
+          `<button type="button" data-key="instruction_input" data-val="cards" class="${pick.instruction_input === 'text' ? '' : 'on'}">一覧から選ぶ</button>` +
+          `<button type="button" data-key="instruction_input" data-val="text" class="${pick.instruction_input === 'text' ? 'on' : ''}">文章で書く</button>` +
+          '</div><div class="hint">文章で書くと、LLM が解釈して確認を求めます。合わなければ一覧から選べます</div></div>'
         : '') +
       '<div class="go"><button class="primary" id="start" disabled>スタート</button> ' +
       '<button id="pick-back">最初に戻る</button>' +
@@ -1630,6 +1635,7 @@
              // では 2人で分担する側を使う。
              show_plan: custom,
              two_agent: custom ? !!pick.two_agent : true,
+             instruction_input: custom ? (pick.instruction_input || 'cards') : undefined,
              case: pick.case === '' ? null : Number(pick.case),
              instruction: pick.instruction,
              skip_budget: Number(pick.skip_budget) || 0,

@@ -918,8 +918,9 @@ EXPERIMENT_PATTERNS = {
 }
 DEFAULT_PATTERN = 1
 
-# 文章の指示を解釈するモデル。tools/llm_instruction_bench.py で測って決める。
-NL_MODEL = instruction_nl.DEFAULT_MODEL
+# 文章の指示を解釈するモデル。None なら instruction_nl.DEFAULT_MODELS を先頭から
+# 順に試す(OpenAI が呼べなければ Gemini)。tools/llm_instruction_bench.py で測って決める。
+NL_MODEL = None
 NL_HINT = ('AIに今すぐやってほしい作業を、具体的に書いてください。'
            '例: トマトレタススープを1つと、たまねぎを1つ切って')
 
@@ -2072,6 +2073,9 @@ class WebGamePlay:
                'instruct_every': instruct_every,
                # デバッグで選んだパターン(指示の入れ方を決めるのに使う)
                'pattern': pattern_of(choice.get('pattern'))}
+        # デバッグ画面の「指示の入れ方」。指定があればパターンより優先。
+        if choice.get('instruction_input') in ('cards', 'text'):
+            out['instruction_input'] = choice['instruction_input']
         # デバッグ画面からの上書き。参加者IDのある回や、チュートリアル・
         # 練習には効かせない(上の分岐で先に返している)。
         debug = sanitize_debug(choice.get('debug'))
@@ -3122,7 +3126,9 @@ class WebGamePlay:
                     ai.two_agent_assignment = bool(getattr(self, '_two_agent', False))
         # 指示の入れ方(一覧から選ぶ / 文章で書く)。実験の回はそのパターンの、
         # 練習は本番のパターンの、デバッグは画面で選んだパターンのもの。
-        if sel and sel.get('mode') == 'practice':
+        if sel and sel.get('instruction_input') in ('cards', 'text'):
+            self.instruction_input = sel['instruction_input']
+        elif sel and sel.get('mode') == 'practice':
             self.instruction_input = instruction_input_of(EXPERIMENT_PATTERN)
         elif sel and sel.get('pattern') is not None:
             self.instruction_input = instruction_input_of(sel.get('pattern'))
@@ -4298,6 +4304,7 @@ async def ws(sock: WebSocket):
                 # デバッグの回だけ。ここに並べないと落ちる。
                 'show_plan': msg.get('show_plan'),
                 'two_agent': msg.get('two_agent'),
+                'instruction_input': msg.get('instruction_input'),
                 'participant': msg.get('participant')})
         elif kind == 'ack':
             try:

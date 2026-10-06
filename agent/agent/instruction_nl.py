@@ -19,8 +19,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 
-# 既定のモデル。tools/llm_instruction_bench.py で測って決める。
-DEFAULT_MODEL = 'gemini-3.5-flash-lite'
+# 使うモデル。先頭から順に試し、呼べなければ次へ(鍵が無い・残高が無い・
+# 混雑など)。tools/llm_instruction_bench.py で測って決める。
+#   gpt-5.4-nano          : OpenAI のいちばん軽いモデル(本命。残高が要る)
+#   gemini-3.5-flash-lite : 63件中61件、応答 1.3 秒(無料枠。混むと10秒超)
+DEFAULT_MODELS = ['gpt-5.4-nano', 'gemini-3.5-flash-lite']
+DEFAULT_MODEL = DEFAULT_MODELS[0]
 # 1回の指示で AI に任せてよい量の上限。None なら上限なし(仕様: 当てはまる
 # 作業はすべて返す。「全部やって」は全部)。数を入れると、超えたら reject。
 MAX_DISHES = None       # serve / cook 系(料理まるごと)
@@ -223,7 +227,9 @@ def call_model(model, system, schema, text, timeout_s=25.0, retries=2):
         except Exception as e:
             last = e
             msg = str(e)
-            if attempt < retries and ('429' in msg or '503' in msg or 'overloaded' in msg.lower()):
+            # 残高切れ(insufficient_quota)は待っても直らないので、やり直さず次のモデルへ
+            retryable = ('429' in msg or '503' in msg or 'overloaded' in msg.lower())                 and 'insufficient_quota' not in msg and 'credit' not in msg.lower()
+            if attempt < retries and retryable:
                 m = re.search(r'retry in ([\d.]+)s', msg)
                 time.sleep(min(float(m.group(1)) + 0.5 if m else 2.0 * (attempt + 1), 8.0))
                 continue
@@ -244,19 +250,26 @@ def interpret(text, candidates, orders_ja, model=None, timeout_s=25.0):
         raw           : LLM の出力そのもの
         model, latency_s
     """
-    model = model or DEFAULT_MODEL
+    models = [model] if model else [m for m in DEFAULT_MODELS if read_key(provider_of(m))]
+    if not models:
+        models = [DEFAULT_MODEL]
     menu = menu_of(candidates)
     ids = [i for i, _ in menu]
     system = system_prompt(menu, orders_ja)
     t0 = time.perf_counter()
     fail = {'decision': 'reject', 'valid': None, 'ambiguous': None, 'tasks': [], 'reject_reason': 'error',
             'message': '解釈できませんでした。もう一度書くか、一覧から選んでください。',
-            'raw': None, 'model': model}
-    try:
-        raw = call_model(model, system, schema_for(ids), str(text or '').strip(), timeout_s)
-    except Exception as e:
-        return dict(fail, error='%s: %s' % (type(e).__name__, str(e)[:200]),
-                    latency_s=round(time.perf_counter() - t0, 2))
+            'raw': None, 'model': models[0]}
+    errors = []
+    raw = None
+    for model in models:
+        try:
+            raw = call_model(model, system, schema_for(ids), str(text or '').strip(), timeout_s)
+            break
+        except Exception as e:
+            errors.append('%s: %s: %s' % (model, type(e).__name__, str(e)[:160]))
+    if raw is None:
+        return dict(fail, error=' / '.join(errors), latency_s=round(time.perf_counter() - t0, 2))
     out = {'raw': raw, 'model': model, 'latency_s': round(time.perf_counter() - t0, 2), 'error': None}
     if not isinstance(raw, dict):
         out.update(fail)
