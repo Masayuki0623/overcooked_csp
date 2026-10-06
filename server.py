@@ -2094,6 +2094,9 @@ class WebGamePlay:
         # デバッグ画面の「指示の入れ方」。指定があればパターンより優先。
         if choice.get('instruction_input') in ('cards', 'text'):
             out['instruction_input'] = choice['instruction_input']
+        # デバッグ画面の「相方」。csp なら人の席も CSP が動かす(2人の CSP のデモ)
+        if choice.get('partner') == 'csp':
+            out['partner'] = 'csp'
         # デバッグ画面からの上書き。参加者IDのある回や、チュートリアル・
         # 練習には効かせない(上の分岐で先に返している)。
         # デバッグ画面で条件を選んだ回の印(記録に '参加者ID=debug' で残す)
@@ -2409,6 +2412,36 @@ class WebGamePlay:
             return
         print(f"[server] 指示の記録を {len(pend)} 件残しました "
               f"({pid} session={sel.get('session')})", flush=True)
+
+    def _attach_partner_csp(self, sel):
+        """人の席を動かす CSP(デモ用)。本番の AI と同じ設定で、自分を 1 番とする。
+
+        指示は AI(0 番)にだけ出る。相方の CSP は指示を持たず、再計画の
+        タイミングと判断の作りは本番の AI と同じ(人の出来事で再計算、
+        2人ぶんの割り当て、まな板の選択など)。
+        """
+        from agent.myagent.CSPAgent import CSPAgent
+        from gym_cooking.utils.replay import Replay as _Replay
+        base = getattr(self.game, 'ai', None)
+        partner = CSPAgent(10, _Replay(), sc_2agent=True,
+                           skip_budget=getattr(base, 'skip_budget', None))
+        partner.human_counterpart_mode = True
+        partner.own_agent_idx = 1
+        partner.priority_weights = {}
+        partner.gui_text_input = ''
+        partner.gui_constraint_input = ''
+        partner.active_constraints = []
+        partner.debug_counter_trace = False
+        partner.deadline_seconds = None
+        for name in ('two_agent_assignment', 'time_limit_seconds', 'choose_cutboard',
+                     'follow_planned_cutboard', 'instruction_scope'):
+            if base is not None and hasattr(base, name):
+                try:
+                    setattr(partner, name, getattr(base, name))
+                except Exception:
+                    pass
+        self.game.partner_ai = partner
+        print('[server] 相方の席を CSP が動かします(2人の CSP のデモ)', flush=True)
 
     def _ai_errors_so_far(self):
         """この回で AI の判断が落ちた回数と、その中身。"""
@@ -3185,6 +3218,8 @@ class WebGamePlay:
         if sel:
             # 何を選んで遊んだかをリプレイにも残す
             self.replay['web_selection'] = dict(sel)
+        if sel and sel.get('partner') == 'csp':
+            self._safe('相方の CSP の用意', self._attach_partner_csp, sel)
         if sel and sel.get('skip_budget') is not None:
             # AI が指示を後回しにできる量。実験では条件として割り当て、
             # 自由に遊ぶときはステージ選択で選ぶ。時間の締め切り
@@ -4386,6 +4421,7 @@ async def ws(sock: WebSocket):
                 'show_plan': msg.get('show_plan'),
                 'two_agent': msg.get('two_agent'),
                 'instruction_input': msg.get('instruction_input'),
+                'partner': msg.get('partner'),
                 'participant': msg.get('participant')})
         elif kind == 'ack':
             try:

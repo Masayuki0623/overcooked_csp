@@ -200,6 +200,10 @@ class GamePlay(Game):
         self._success = False
         self._finalized = False
         self._latest_env_state = None
+        # 相方(人の席)を動かす CSP。デモ用。None なら人が動かす。
+        # 本番の AI と同じ設定で、自分を 1 番として判断し、行動は人の操作と
+        # 同じ経路(resolve_action)で環境へ入る。
+        self.partner_ai = None
         # 指示パネル表示中は _run_env スレッド側の描画を止める。
         # on_render は screen.fill -> display.flip まで行うため、パネルの描画と
         # 交互に画面全体を上書きし合って激しく点滅してしまう。
@@ -888,6 +892,25 @@ class GamePlay(Game):
         # 条件が成立した瞬間に選ばせるモードなので、選択肢のない入力欄は意味がない。
         self._request_instruction(trigger='enable_cook', allow_text_fallback=False)
 
+    def _partner_action(self):
+        """相方の席の CSP に、いまの盤面(自分を 1 番として)を見せて行動をもらう。"""
+        try:
+            own = int(getattr(self.partner_ai, 'own_agent_idx', 1))
+            # EnvState は作るときに「自分」を基準に持ち物・通れる升を計算する
+            # ので、1 番を自分として作り直す(0 番の写しを書き換えてはいけない)
+            info = self.env.get_ai_info()
+            st = EnvState(world=info['world'], agents=info['sim_agents'], agent_idx=own,
+                          order=info['order_scheduler'], event_history=info['event_history'],
+                          time=info['current_time'], chg_grid=info['chg_grid'])
+            move, _reason = self.partner_ai(dcopy(st))
+            act = move.get(f'ai_{own}') if isinstance(move, dict) else move
+            return tuple(act) if act else None
+        except Exception as err:
+            if not getattr(self, '_partner_error_shown', False):
+                self._partner_error_shown = True
+                print(f'[GamePlay] 相方の CSP の判断に失敗: {type(err).__name__} {err}', flush=True)
+            return None
+
     def _queue_human_input(self, action, paused):
         """人の操作を1つ受け取る。指示を選んでいる間のぶんは捨てる。
 
@@ -993,7 +1016,18 @@ class GamePlay(Game):
                 ai_sent = {k: v for k, v in action_dict.items()}
                 self._translate_ai_actions(action_dict, idx_human)
                 me = self.sim_agents[idx_human] if idx_human is not None else None
-                if me is not None:
+                if me is not None and getattr(self, 'partner_ai', None) is not None:
+                    # 相方の席を CSP が動かす(デモ)。人の入力は使わない。
+                    pact = self._partner_action()
+                    if pact is not None:
+                        try:
+                            action_dict[me.name] = resolve_action(me, self.env.world, pact)
+                        except Exception:
+                            action_dict[me.name] = pact
+                    # 手を出す回数の制限(押しっぱなし対策)は人向けなので外す
+                    self.interact_held = False
+                    self.interact_used = False
+                elif me is not None:
                     nxt = self._take_human_action()
                     if nxt is not None:
                         action_dict[me.name] = nxt

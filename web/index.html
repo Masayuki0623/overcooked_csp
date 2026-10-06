@@ -1613,7 +1613,11 @@
           '<div class="pick"><div class="lab">指示の入れ方</div><div class="opts">' +
           `<button type="button" data-key="instruction_input" data-val="cards" class="${pick.instruction_input === 'text' ? '' : 'on'}">一覧から選ぶ</button>` +
           `<button type="button" data-key="instruction_input" data-val="text" class="${pick.instruction_input === 'text' ? 'on' : ''}">文章で書く</button>` +
-          '</div><div class="hint">文章で書くと、LLM が解釈して確認を求めます。合わなければ書き直します</div></div>'
+          '</div><div class="hint">文章で書くと、LLM が解釈して確認を求めます。合わなければ書き直します</div></div>' +
+          '<div class="pick"><div class="lab">相方</div><div class="opts">' +
+          `<button type="button" data-key="partner" data-val="human" class="${pick.partner === 'csp' ? '' : 'on'}">あなた</button>` +
+          `<button type="button" data-key="partner" data-val="csp" class="${pick.partner === 'csp' ? 'on' : ''}">CSP(デモ)</button>` +
+          '</div><div class="hint">CSP にすると、あなたの席も本番と同じ設定の CSP が動かします(見るだけ。指示は AI に出せます)</div></div>'
         : '') +
       '<div class="go"><button class="primary" id="start" disabled>スタート</button> ' +
       '<button id="pick-back">最初に戻る</button>' +
@@ -1669,6 +1673,7 @@
              show_plan: custom,
              two_agent: custom ? !!pick.two_agent : true,
              instruction_input: custom ? (pick.instruction_input || 'cards') : undefined,
+             partner: custom ? (pick.partner || 'human') : undefined,
              case: pick.case === '' ? null : Number(pick.case),
              instruction: pick.instruction,
              skip_budget: pick.skip_budget === 'inf' ? 'inf' : (Number(pick.skip_budget) || 0),
