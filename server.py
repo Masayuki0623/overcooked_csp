@@ -2414,34 +2414,22 @@ class WebGamePlay:
               f"({pid} session={sel.get('session')})", flush=True)
 
     def _attach_partner_csp(self, sel):
-        """人の席を動かす CSP(デモ用)。本番の AI と同じ設定で、自分を 1 番とする。
+        """人の席も本番の AI(CSP)が動かす(デモ用)。脳は 1 つ。
 
-        指示は AI(0 番)にだけ出る。相方の CSP は指示を持たず、再計画の
-        タイミングと判断の作りは本番の AI と同じ(人の出来事で再計算、
-        2人ぶんの割り当て、まな板の選択など)。
+        本番の AI が 2 人ぶんの計画を立て、2 人とも計画どおりに動かす
+        (human_counterpart_mode を外す)。以前は人の席に別の CSP を置いて
+        2 つの脳で動かしていたが、互いの予測がずれるたびに担当を決め直し、
+        計画がよく入れ替わっていた(2026-10-06)。
+        指示は今までどおり AI(0 番)に出る。
         """
-        from agent.myagent.CSPAgent import CSPAgent
-        from gym_cooking.utils.replay import Replay as _Replay
-        base = getattr(self.game, 'ai', None)
-        partner = CSPAgent(10, _Replay(), sc_2agent=True,
-                           skip_budget=getattr(base, 'skip_budget', None))
-        partner.human_counterpart_mode = True
-        partner.own_agent_idx = 1
-        partner.priority_weights = {}
-        partner.gui_text_input = ''
-        partner.gui_constraint_input = ''
-        partner.active_constraints = []
-        partner.debug_counter_trace = False
-        partner.deadline_seconds = None
-        for name in ('two_agent_assignment', 'time_limit_seconds', 'choose_cutboard',
-                     'follow_planned_cutboard', 'instruction_scope'):
-            if base is not None and hasattr(base, name):
-                try:
-                    setattr(partner, name, getattr(base, name))
-                except Exception:
-                    pass
-        self.game.partner_ai = partner
-        print('[server] 相方の席を CSP が動かします(2人の CSP のデモ)', flush=True)
+        ai = getattr(self.game, 'ai', None)
+        if ai is None:
+            return
+        ai.human_counterpart_mode = False
+        ai.partner_is_external = False
+        self.game.partner_ai = None
+        self.game.single_brain = True
+        print('[server] 人の席も AI が動かします(1 つの脳で 2 人のデモ)', flush=True)
 
     def _ai_errors_so_far(self):
         """この回で AI の判断が落ちた回数と、その中身。"""

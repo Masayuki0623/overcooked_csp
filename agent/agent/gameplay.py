@@ -204,6 +204,9 @@ class GamePlay(Game):
         # 本番の AI と同じ設定で、自分を 1 番として判断し、行動は人の操作と
         # 同じ経路(resolve_action)で環境へ入る。
         self.partner_ai = None
+        # True なら人の席も本番の AI が動かす(1 つの脳で 2 人。デモ用)。
+        # AI が返す ai_1 の行動を人の席に使う。
+        self.single_brain = False
         # 指示パネル表示中は _run_env スレッド側の描画を止める。
         # on_render は screen.fill -> display.flip まで行うため、パネルの描画と
         # 交互に画面全体を上書きし合って激しく点滅してしまう。
@@ -1016,7 +1019,17 @@ class GamePlay(Game):
                 ai_sent = {k: v for k, v in action_dict.items()}
                 self._translate_ai_actions(action_dict, idx_human)
                 me = self.sim_agents[idx_human] if idx_human is not None else None
-                if me is not None and getattr(self, 'partner_ai', None) is not None:
+                if me is not None and getattr(self, 'single_brain', False):
+                    # 人の席も AI が動かす(1 つの脳のデモ)。AI が送ってきた
+                    # その席の行動を、AI の席と同じ読み替えで使う。人の入力は使わない。
+                    try:
+                        action_dict[me.name] = resolve_action(
+                            me, self.env.world, action_dict.get(me.name))
+                    except Exception:
+                        pass
+                    self.interact_held = False
+                    self.interact_used = False
+                elif me is not None and getattr(self, 'partner_ai', None) is not None:
                     # 相方の席を CSP が動かす(デモ)。人の入力は使わない。
                     pact = self._partner_action()
                     if pact is not None:
@@ -1211,7 +1224,8 @@ class GamePlay(Game):
         といった不具合が起きていた。(0,0) は状態を変えないため対象外。
         """
         target_idx = self._target_idx_for_agent_id(agent_id)
-        if self.human_agent_idx is not None and target_idx == self.human_agent_idx:
+        if (self.human_agent_idx is not None and target_idx == self.human_agent_idx
+                and not getattr(self, 'single_brain', False)):
             return
         pending = awaiting_confirm.get(agent_id)
         if action != (0, 0) and pending is not None:
