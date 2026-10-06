@@ -921,8 +921,8 @@ DEFAULT_PATTERN = 1
 # 文章の指示を解釈するモデル。None なら instruction_nl.DEFAULT_MODELS を先頭から
 # 順に試す(OpenAI が呼べなければ Gemini)。tools/llm_instruction_bench.py で測って決める。
 NL_MODEL = None
-NL_HINT = ('AIに今すぐやってほしい作業を、具体的に書いてください。'
-           '例: トマトレタススープを1つと、たまねぎを1つ切って')
+# 例は入力欄の placeholder に出すので、ここには書かない(重複していた)
+NL_HINT = 'エージェントに今すぐやってほしい作業を、具体的に書いてください。'
 
 
 def instruction_input_of(pattern):
@@ -2937,6 +2937,14 @@ class WebGamePlay:
                'two_agent': bool(getattr(ai, 'two_agent_assignment', False)),
                'agents': []}
         chain_ids = self._instruction_chain_ids(ai)
+        # 鎖の煮える待ちの中に丸ごと入る工程(挟んでも割り込み許容数を減らさない)
+        free_ids = set()
+        try:
+            pend = list(getattr(ai, '_pending_instructions', None) or [])
+            if pend and chain_ids:
+                free_ids = set(ai._chain_free_task_ids(pend[0]) or ())
+        except Exception:
+            free_ids = set()
         for idx in (own, 1 - own):
             rows = []
             lst = sched.get(idx) or []
@@ -2950,6 +2958,7 @@ class WebGamePlay:
                 st = t.get('start')
                 en = t.get('end')
                 kind = ('chain' if tuple(tid) in chain_ids
+                        else 'in_wait' if tuple(tid) in free_ids
                         else 'inserted' if k < last_chain else 'other')
                 rows.append({
                     'n': k + 1,

@@ -51,21 +51,23 @@ REJECT_REASONS = ['invalid', 'ambiguous', 'too_few', 'too_many', 'error']
 # こちらで決める種類:
 #   both_counts, too_few, too_many, exclude_lower, no_ai_steps, error
 REASON_CODES = ['none', 'not_in_orders', 'not_instruction', 'no_task', 'count_missing', 'count_over', 'other']
+# 参加者向けの文では AI を「エージェント」と呼ぶ(2026-10-06)
 PATTERN_JA = {
     'not_in_orders': 'この回の注文に無い料理や材料が含まれています。画面の下に出ている注文の中から、'
-                     'AI にやってほしい作業を書いてください。',
-    'not_instruction': 'AI への作業の指示として読み取れませんでした。「〜を作って」「〜を切って」のように、'
+                     'エージェントにやってほしい作業を書いてください。',
+    'not_instruction': 'エージェントへの作業の指示として読み取れませんでした。「〜を作って」「〜を切って」のように、'
                        'やってほしい作業を書いてください。',
     'no_task': 'どの料理・材料の作業かが読み取れませんでした。料理か材料の名前を入れて書いてください。',
-    'count_missing': '切る個数が読み取れませんでした。1つか 2つかを入れて書いてください。',
+    'count_missing': '個数を入力してください(エージェントへ指示する作業が 2つ以上になるように)。',
     'count_over': 'この回に必要な数より多い個数が指定されています。必要な数の範囲で書いてください。',
-    'both_counts': '切る個数が 1つと 2つの両方に読めました。どちらかを入れて書いてください。',
+    'both_counts': '個数が 1つと 2つの両方に読めました。個数を入力してください'
+                   '(エージェントへ指示する作業が 2つ以上になるように)。',
     'too_few': '指示の量が少なすぎます。切る作業を 2つ以上頼むか、料理を煮る・提供するところまで任せる形で'
                '書いてください。',
     'too_many': '一度に頼める量は全体の半分までです。頼む量を減らして書いてください。',
     'exclude_lower': '料理を頼むときは、材料を切るところから任せる形で書いてください'
                      '(煮るところまでで止めたいときは「煮て」と書けます)。',
-    'no_ai_steps': 'AI がやる作業が残りません。AI にやってほしい作業を書いてください。',
+    'no_ai_steps': 'エージェントがやる作業が残りません。エージェントにやってほしい作業を書いてください。',
     'error': '解釈の処理がうまくいきませんでした。もう一度送ってください。',
 }
 # 古い呼び方との互換(reject_reason -> 定型文)
@@ -87,6 +89,7 @@ def pattern_message(code, llm_message='', fallback='no_task'):
     m = (llm_message or '').strip()
     if not m or any(w in m for w in HARSH_WORDS):
         return PATTERN_JA[fallback]
+    m = m.replace('AI', 'エージェント')
     return m if m.endswith('。') else m + '。'
 
 

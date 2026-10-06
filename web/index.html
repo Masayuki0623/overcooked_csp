@@ -400,10 +400,12 @@
   /* 指示の工程 / 指示の最後より前に挟んだ工程 / それ以外 */
   #plan tr.chain td.task { color: #f3c969; }
   #plan tr.inserted td.task { color: #ef8f8f; }
+  #plan tr.in_wait td.task { color: #8fb8ef; }
   #plan tr.done.chain td.task { color: #8a7a4a; }
   #plan tr.done.inserted td.task { color: #8a5a5a; }
+  #plan tr.done.in_wait td.task { color: #4f6a8a; }
   #plan .legend { font-size: 11px; color: var(--muted); margin: 2px 0; }
-  #plan .legend .c { color: #f3c969; } #plan .legend .i { color: #ef8f8f; }
+  #plan .legend .c { color: #f3c969; } #plan .legend .i { color: #ef8f8f; } #plan .legend .w { color: #8fb8ef; }
   #plan .now-t { color: var(--muted); }
   #plan .now-t .ok { color: #8fd3a8; }
   #plan .now-t .ng { color: var(--bad); }
@@ -1872,7 +1874,8 @@
       `割り当て: ${msg.two_agent ? '2人で分担' : 'AIが全部やる前提'}</span></div>` +
       (msg.instruction
         ? '<div class="legend"><span class="c">■ 指示した工程</span>　' +
-          '<span class="i">■ 指示の前に挟んだ工程</span>　■ それ以外</div>' : '') +
+          '<span class="i">■ 指示の前に挟んだ工程</span>　' +
+          '<span class="w">■ 煮える待ちの中で挟んだ工程</span>　■ それ以外</div>' : '') +
       (msg.agents || []).map((a) =>
         `<h4>${esc(a.who)}</h4><table>` +
         '<tr><th>順</th><th style="text-align:left">作業</th>' +
@@ -2971,7 +2974,7 @@
     refreshOk();
     box.innerHTML =
       '<div class="nl">' +
-      `<div class="hint">${esc(msg.hint || 'AIに今すぐやってほしい作業を、具体的に書いてください')}</div>` +
+      `<div class="hint">${esc(msg.hint || 'エージェントに今すぐやってほしい作業を、具体的に書いてください。')}</div>` +
       `<textarea id="nl-text" rows="2" maxlength="300" placeholder="例: トマトレタススープを1つと、たまねぎを1つ切って">${esc(prevText || '')}</textarea>` +
       '<div class="row2"><button type="button" class="primary" id="nl-send">送る</button></div>' +
       '<div id="nl-result"></div></div>';
@@ -3015,7 +3018,7 @@
         result.innerHTML =
           '<div class="interp ok"><h4>指示の解釈</h4>' +
           r.tasks.map((t) => `<div class="reading">${esc(t.label)}</div>`).join('') +
-          '<h4>AIがやる作業の流れ</h4>' + r.tasks.map(flow).join('') +
+          '<h4>エージェントがやる作業の流れ</h4>' + r.tasks.map(flow).join('') +
           '<div class="row2"><button type="button" class="primary" id="nl-yes">この内容にする</button>' +
           '<button type="button" id="nl-retry">書き直す</button></div></div>';
         document.getElementById('nl-yes').addEventListener('click', () => {
@@ -3032,7 +3035,7 @@
         result.innerHTML =
           '<div class="interp ng"><div class="sys">システムからの確認</div>' +
           `${esc(r.message || '解釈の処理がうまくいきませんでした。もう一度送ってください。')}` +
-          '<div class="sysnote">※ AI が断ったのではなく、指示の文を確かめています。</div>' +
+          '<div class="sysnote">※ エージェントが断ったのではなく、指示の文を確かめています。</div>' +
           '<div class="row2"><button type="button" class="primary" id="nl-retry">書き直す</button></div></div>';
       }
       document.getElementById('nl-retry').addEventListener('click', () => {
