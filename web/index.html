@@ -6,8 +6,15 @@
      盤面と操作ボタンの位置がずれて遊べなくなる。 -->
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Overcooked CSP</title>
+<!-- 字は BIZ UDPゴシック にそろえる(読みやすさを考えて作られたユニバーサルデザインの書体)。
+     Windows には入っているのでそれを使い、無い端末だけここから読み込む。 -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=BIZ+UDPGothic:wght@400;700&display=swap">
 <style>
   :root {
+    --font: "BIZ UDPGothic", "BIZ UDPゴシック", "Hiragino Sans", "Hiragino Kaku Gothic ProN",
+            "Yu Gothic UI", "Meiryo", sans-serif;
     --bg: #14161a;
     --panel: #1e2229;
     --text: #e8eaed;
@@ -20,6 +27,8 @@
     --lift: 16px;
   }
   * { box-sizing: border-box; }
+  /* ボタン・入力欄は既定では端末の書体になるので、本文と同じ書体にそろえる */
+  button, input, select, textarea { font-family: inherit; }
   html, body {
     margin: 0; background: var(--bg);
     /* ダブルタップでの拡大を止める(iOS は viewport の user-scalable を
@@ -31,7 +40,7 @@
   }
   body {
     color: var(--text);
-    font-family: "Segoe UI", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", sans-serif;
+    font-family: var(--font);
     padding: 16px 24px 32px;
     /* ボタンを連打したときに、文字選択やダブルタップ拡大が起きないように */
     -webkit-user-select: none;
@@ -719,6 +728,9 @@
 
 <script>
 (function () {
+  // 盤面(canvas)の字の書体。CSS の --font と同じものを使う。
+  const BOARD_FONT = (getComputedStyle(document.documentElement)
+    .getPropertyValue('--font') || '').trim() || 'sans-serif';
   const gameCv = document.getElementById('game');
   const panelCv = document.getElementById('panel');
   const stage = document.getElementById('stage');
@@ -1116,7 +1128,8 @@
         }
         case 'T':   // ['T', 文字, r, g, b, x, y, 大きさ(, 最大幅, 寄せ)]
           c.fillStyle = rgb(e, 2);
-          c.font = `${e[7]}px Times, "Times New Roman", serif`;
+          // 盤面の字(注文の名前・残り時間など)も画面と同じ書体にそろえる
+          c.font = `${e[7]}px ${BOARD_FONT}`;
           c.textBaseline = 'top';
           if (e.length > 8) {
             // 枠に収める文字(注文の名前)。最大幅を超える分は縮めて描く
