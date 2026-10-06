@@ -796,16 +796,28 @@ class CSPAgent:
                 # 「消えた」は全体(2人ぶん)の個数が減ったときだけ。AI の前の計画に
                 # あった名前の分を AI がやったとみなす。
                 from collections import Counter
-                # 鎖と同名の工程(動詞, 材料)は割り込みと数えない(2026-10-06)。
-                # 切った材料はどの注文にも使えるので、別の注文の id が付いた
-                # 「レタスを切る」も鎖のレタスを切ったのと同じ。相手が切った物を
-                # 持っていって切り直す分も同じ扱い。計画側も同名の工程は鎖の分に
-                # 選ぶか鎖のあとに回すかのどちらかで、割り込ませない
-                skip_names = set(self._pending_chain_names(pending)) if chain_tids else set()
-                if not chain_tids:
+                # 鎖の「切る」は同じ材料ならどの注文の id でも鎖の分(必要数まで。
+                # 切った材料はどの注文にも使える)。必要数を超えた同名の「切る」は
+                # 割り込みとして数える(quota。2026-10-06)。切る以外の鎖の工程
+                # (煮る・盛る)は名前が一意なので数えない
+                skip_names = set()
+                quota = pending.get('_same_name_quota')
+                if chain_tids:
+                    groups, cnt = self._pending_chain_groups(pending)
+                    quota_init = Counter()
+                    for g in (groups or [])[:cnt]:
+                        for c in g:
+                            if len(c) >= 3 and str(c[1]) == 'chop':
+                                quota_init[(str(c[1]), str(c[2]))] += 1
+                            elif len(c) >= 3:
+                                skip_names.add((str(c[1]), str(c[2])))
+                    if quota is None:
+                        quota = quota_init
+                else:
                     for tid in targets | deps:
                         if tid and len(tid) >= 2:
                             skip_names.add((str(tid[0]), str(tid[1])))
+                quota = Counter(quota or {})
 
                 def name_of(tid):
                     return (str(tid[0]), str(tid[1])) if tid and len(tid) >= 2 else None
@@ -860,9 +872,15 @@ class CSPAgent:
                             continue
                         if name in skip_names:
                             continue
+                        # 鎖の分(同名の必要数)に先に充てる
+                        chain_part = min(done_by_ai, quota.get(name, 0))
+                        if chain_part:
+                            quota[name] -= chain_part
+                            done_by_ai -= chain_part
                         in_wait = min(done_by_ai, free_prev.get(name, 0))
                         pending['inserted_in_wait'] = pending.get('inserted_in_wait', 0) + in_wait
                         pending['_consumed_tasks'] = pending.get('_consumed_tasks', 0) + (done_by_ai - in_wait)
+                pending['_same_name_quota'] = quota
                 ai_now = [t.get('id') for t in (getattr(self, 'schedule_per_agent', None) or {}).get(own, [])]
                 pending['_watched_ai_names'] = Counter(
                     name_of(tid) for tid in ai_now
@@ -1236,10 +1254,9 @@ class CSPAgent:
         for j, pk in picks_of.items():
             if len(pk) > 1:
                 model.AddAtMostOne(pk)
-        # 割り込めるのは鎖と同名でない工程だけ(2026-10-06)。同名の工程
-        # (別の注文の「レタスを切る」)は、鎖の分に選ばれるか、鎖が終わった
-        # あとにやるかのどちらか(煮える待ちの中でも割り込ませない)
-        chain_names = self._pending_chain_names(pending)
+        # 同名の工程(別の注文の「レタスを切る」)は、鎖の分に選ばれなければ
+        # 他の工程と同じに扱う(鎖の前に入れれば割り込みとして数える。2026-10-06:
+        # 「必要より多く切るなら、それは割り込みに含めてよい」)
         counts = []
         hcounts = []
         for j in range(len(tasks)):
@@ -1247,8 +1264,6 @@ class CSPAgent:
                 continue
             if j in in_group and in_group[j] is None:
                 continue                  # 無条件に鎖の工程
-            _tid = tasks[j].get('id') or ()
-            same_name = len(_tid) >= 2 and (str(_tid[0]), str(_tid[1])) in chain_names
             if any_human and is_a1 is not None and is_a1[j] is not None:
                 hl = []
                 if j in in_group:
@@ -1275,10 +1290,6 @@ class CSPAgent:
             after = model.NewBoolVar(f'chain_after_{j}')
             model.Add(starts[j] >= ce).OnlyEnforceIf(after)
             lits.append(after)
-            if same_name:
-                # 鎖の分 / 相手の担当 / 鎖のあと のどれか。数えもしない
-                model.AddBoolOr(lits)
-                continue
             for k, (w0, w1, glit) in enumerate(waits):
                 b = model.NewBoolVar(f'chain_wait_{j}_{k}')
                 model.Add(starts[j] >= w0).OnlyEnforceIf(b)
