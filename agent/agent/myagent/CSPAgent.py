@@ -862,6 +862,49 @@ class CSPAgent:
                 has_events = hasattr(env, 'event_history') and hasattr(env, 'agents')
                 pending.setdefault('_consumed_tasks', 0)
                 pending.setdefault('inserted_in_wait', 0)
+                # 鎖の料理(提供まで任せた料理)が提供口に出たら、指示は終わり。
+                # 工程の id は (動詞, 料理, 注文番号) で、料理を 1 つ出すと残りの
+                # 注文の番号が詰め直される。id のままだと、出し終えた後に別の注文の
+                # 工程を鎖の工程と取り違え、指示も終わらず、終わった後の作業まで
+                # 挟んだ数に数えていた(実測 2026-10-07: d=0 なのに 2)。
+                # 出来事(何が提供されたか)で見分け、その時刻より後は数えない。
+                chain_dish = next((str(t[1]) for t in (chain_tids or ())
+                                   if str(t[0]) in ('serve', 'serve_salad', 'serve_juice')), None)
+                dish_pref = {KIND_SOUP: 'Cooked', KIND_SALAD: 'Chopped',
+                             KIND_JUICE: 'Mixed'}.get(dish_kind_of(chain_dish)) if chain_dish else None
+                dish_want = sorted(p.lower() for p in dish_ingredients(chain_dish)) if chain_dish else None
+                delivered_at, delivered_by_ai = None, False
+                # 鎖のスープ(ジュース)が煮えて(混ざって)いる間は「煮える待ち」。
+                # その間にした作業は割り込み許容数を減らさない(計画の制約と同じ
+                # 決まり)。以前は計画が待ちの中に置いた工程の id で判定していたため、
+                # 実際の動きとずれ、待ちの中の作業まで挟んだ数に入っていた
+                # (実測: スープの指示で、煮えている間に切った分が数えられた)。
+                # 時刻で判定する: 鎖の料理が鍋に入った時刻から、煮える時間のあいだ。
+                wait_hits = Counter()     # 待ちの中でした作業(名前ごと)
+
+                def _ings_of(text, pref):
+                    parts = [x for x in text.split('-') if x not in ('Plate', 'Cup')]
+                    got = [x[len(pref):].lower() for x in parts if x.startswith(pref)]
+                    return sorted(got) if parts and len(got) == len(parts) else None
+
+                # 鎖に要る「切る」の数(材料ごと)。AI が切った分は、この数までは鎖の
+                # 作業、超えた分は挟んだ作業として数える。切った材料はどの注文にも
+                # 使えるので、そのとき手がけていた工程の注文番号では見分けない
+                # (実行側は注文番号だけ違う同じ作業を前の番号のまま続けるので、
+                #  鎖のサラダ用に切ったトマトが別の注文の番号で記録されていた)。
+                chop_need = Counter()
+                if chain_tids:
+                    _groups, _cnt = self._pending_chain_groups(pending)
+                    _per = [Counter(str(f[2]) for f in g if len(f) >= 4 and str(f[1]) == 'chop')
+                            for g in (_groups or [])]
+                    for _ing in {i for c in _per for i in c}:
+                        chop_need[_ing] = sum(sorted((c.get(_ing, 0) for c in _per),
+                                                     reverse=True)[:max(1, _cnt)])
+                chain_done_chops = Counter(pending.get('_chain_chops_by_ai') or {})
+
+                def _in_wait(t):
+                    c0 = pending.get('_chain_cook_at')
+                    return c0 is not None and c0 < t <= c0 + COOKING_TIME_SECONDS
                 try:
                     my_name = getattr(env.agents[own], 'name', None)
                     last_t = pending.get('_events_last_time')
@@ -871,22 +914,58 @@ class CSPAgent:
                         if t_ev is None or (last_t is not None and t_ev <= last_t):
                             continue
                         newest = t_ev if newest is None else max(newest, t_ev)
+                        if delivered_at is not None:
+                            continue          # 指示が終わった後の出来事は数えない
                         name_ev = str(getattr(ev, 'event', '') or '')
+                        if dish_pref and name_ev.startswith('Deliver_'):
+                            parts = [x for x in name_ev[len('Deliver_'):].split('-')
+                                     if x not in ('Plate', 'Cup')]
+                            got = sorted(x[len(dish_pref):].lower() for x in parts
+                                         if x.startswith(dish_pref))
+                            if parts and len(got) == len(parts) and got == dish_want:
+                                delivered_at = float(t_ev)
+                                delivered_by_ai = getattr(ev, 'playerA', None) == my_name
+                                continue
+                        # 鎖の料理が鍋(ミキサー)に入った時刻(誰が入れても)
+                        if (dish_want and pending.get('_chain_cook_at') is None
+                                and name_ev.startswith(('Cook_', 'Mix_'))
+                                and _ings_of(name_ev.split('_', 1)[1], 'Chopped') == dish_want):
+                            pending['_chain_cook_at'] = float(t_ev)
+                            if getattr(ev, 'playerA', None) == my_name:
+                                ai_cooks += 1
+                            continue
                         if getattr(ev, 'playerA', None) != my_name:
                             continue
+                        waiting = _in_wait(float(t_ev))
                         if name_ev.startswith('Pickup_Chopped') and name_ev.endswith('_from_Cutboard'):
                             ing = name_ev[len('Pickup_Chopped'):-len('_from_Cutboard')]
                             if '-' not in ing:
-                                # そのとき手がけていた工程が鎖の id なら鎖の分(数えない)
-                                exec_tid = self._exec_tid_at(float(t_ev))
-                                if exec_tid is not None and tuple(exec_tid) in chain_tids:
-                                    chain_chops[ing.lower()] += 1
+                                key = ing.lower()
+                                # 鎖に要る数までは鎖の作業(数えない)
+                                if chain_tids and (chain_done_chops[key] + chain_chops[key]) < chop_need.get(key, 0):
+                                    chain_chops[key] += 1
                                     continue
-                                ai_chops[('chop', ing.lower())] += 1
+                                ai_chops[('chop', key)] += 1
+                                if waiting:
+                                    wait_hits[('chop', ing.lower())] += 1
                         elif name_ev.startswith(('Cook_', 'Mix_')):
                             ai_cooks += 1
+                            ings = _ings_of(name_ev.split('_', 1)[1], 'Chopped')
+                            if waiting and ings:
+                                suffix = SOUP_SUFFIX if name_ev.startswith('Cook_') else JUICE_SUFFIX
+                                verb = 'cook' if name_ev.startswith('Cook_') else 'mix'
+                                wait_hits[(verb, '-'.join(ings) + suffix)] += 1
                         elif name_ev.startswith('Deliver_'):
                             ai_delivers += 1
+                            if waiting:
+                                body = name_ev[len('Deliver_'):]
+                                for pref, verb, suffix in (('Cooked', 'serve', SOUP_SUFFIX),
+                                                           ('Chopped', 'serve_salad', SALAD_SUFFIX),
+                                                           ('Mixed', 'serve_juice', JUICE_SUFFIX)):
+                                    ings = _ings_of(body, pref)
+                                    if ings:
+                                        wait_hits[(verb, '-'.join(ings) + suffix)] += 1
+                                        break
                     if pending.get('_events_last_time') is None:
                         # 最初の呼び出しでは、それまでの出来事は数えない
                         ai_chops = Counter()
@@ -924,6 +1003,13 @@ class CSPAgent:
                                       f"鎖の {ing} を切り直した +{extra}(鎖に要る数 {need}, 切った数 {n_done})",
                                       flush=True)
                     pending['_chain_chops_redone'] = dict(lost)
+                if delivered_at is not None and pending.get('_events_last_time') is not None:
+                    pending['status'] = 'done'
+                    pending['delivered_env_time'] = delivered_at
+                    pending['delivered_by'] = 'AI' if delivered_by_ai else '人'
+                    if not delivered_by_ai and pending.get('human_done_env_time') is None:
+                        pending['human_done_env_time'] = delivered_at
+                    continue          # 計画の差分で数える分は、もう数えない
                 total_now = Counter(name_of(tid) for tid in current_ids if name_of(tid))
                 total_prev = pending.get('_watched_total_names')
                 prev_ids = pending.get('_watched_all_ids') or set()
@@ -956,7 +1042,7 @@ class CSPAgent:
                             continue
                         if name in skip_names:
                             continue
-                        in_wait = min(done_by_ai, free_prev.get(name, 0))
+                        in_wait = min(done_by_ai, free_prev.get(name, 0) + wait_hits.get(name, 0))
                         pending['inserted_in_wait'] = pending.get('inserted_in_wait', 0) + in_wait
                         pending['_consumed_tasks'] = pending.get('_consumed_tasks', 0) + (done_by_ai - in_wait)
                         if getattr(self, 'debug_count_trace', False):
