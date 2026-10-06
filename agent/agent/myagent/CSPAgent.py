@@ -856,6 +856,7 @@ class CSPAgent:
                 # 材料はどの注文にも使えるので、計画から消えた id では誰が何個
                 # 切ったか分からない(相手が切った分を AI の分に数えていた)
                 ai_chops = Counter()
+                chain_chops = Counter()   # AI が鎖の工程として切った回数(材料ごと)
                 ai_cooks = 0          # AI が鍋(ミキサー)に入れた回数
                 ai_delivers = 0       # AI が提供した回数
                 has_events = hasattr(env, 'event_history') and hasattr(env, 'agents')
@@ -879,6 +880,7 @@ class CSPAgent:
                                 # そのとき手がけていた工程が鎖の id なら鎖の分(数えない)
                                 exec_tid = self._exec_tid_at(float(t_ev))
                                 if exec_tid is not None and tuple(exec_tid) in chain_tids:
+                                    chain_chops[ing.lower()] += 1
                                     continue
                                 ai_chops[('chop', ing.lower())] += 1
                         elif name_ev.startswith(('Cook_', 'Mix_')):
@@ -888,10 +890,35 @@ class CSPAgent:
                     if pending.get('_events_last_time') is None:
                         # 最初の呼び出しでは、それまでの出来事は数えない
                         ai_chops = Counter()
+                        chain_chops = Counter()
                         ai_cooks = ai_delivers = 0
                     pending['_events_last_time'] = newest if newest is not None else float(getattr(env, 'time', 0.0) or 0.0)
                 except Exception:
                     ai_chops = Counter()
+                    chain_chops = Counter()
+                # 鎖の工程として切った回数が、鎖に要る数を超えた分は割り込みと数える。
+                # 鎖のために切った物が別の料理に混ぜられて使えなくなると、切り
+                # 直しは鎖の工程(同じ id)としてやる。実際には 1 回ぶん別の注文の
+                # ために切ったのと同じなので、挟んだ数に入れる(2026-10-07)。
+                if chain_tids and chain_chops:
+                    groups, cnt = self._pending_chain_groups(pending)
+                    per_group = [Counter(str(f[2]) for f in g if len(f) >= 4 and str(f[1]) == 'chop')
+                                 for g in (groups or [])]
+                    done_chain = Counter(pending.get('_chain_chops_by_ai') or {})
+                    done_chain.update(chain_chops)
+                    pending['_chain_chops_by_ai'] = dict(done_chain)
+                    lost = Counter(pending.get('_chain_chops_redone') or {})
+                    for ing, n_done in done_chain.items():
+                        need = sum(sorted((pg.get(ing, 0) for pg in per_group), reverse=True)[:max(1, cnt)])
+                        extra = max(0, n_done - need) - lost.get(ing, 0)
+                        if extra > 0:
+                            lost[ing] += extra
+                            pending['_consumed_tasks'] = pending.get('_consumed_tasks', 0) + extra
+                            if getattr(self, 'debug_count_trace', False):
+                                print(f"[挟んだ] t={float(getattr(env, 'time', 0.0) or 0.0):.1f} "
+                                      f"鎖の {ing} を切り直した +{extra}(鎖に要る数 {need}, 切った数 {n_done})",
+                                      flush=True)
+                    pending['_chain_chops_redone'] = dict(lost)
                 total_now = Counter(name_of(tid) for tid in current_ids if name_of(tid))
                 total_prev = pending.get('_watched_total_names')
                 prev_ids = pending.get('_watched_all_ids') or set()
@@ -7430,12 +7457,38 @@ class CSPAgent:
 
         return best_counter
 
+    def _chain_protected_uids(self):
+        """いま進行中の指示(工程の鎖)の対象の注文。
+
+        この注文は在庫を最優先で確保し、その置き場の物は他の注文に回さない。
+        回すと、指示のために切った物が別の料理に使われ、同じ工程(レタスを
+        切る等)をもう一度やることになる。しかもその 2 回目は鎖の工程として
+        数えられ、実際には別の注文の分を切ったのに「挟んだ数」に入らない
+        (実測 2026-10-07: d=0 でレタス玉ねぎサラダを指示したのに、切った
+        レタスが在庫の取り合いでトマトレタスのスープに回り、レタスを 2 回切った)。
+        """
+        out = []
+        for p in (getattr(self, '_pending_instructions', None) or []):
+            if p.get('status') not in ('pending', 'started'):
+                continue
+            groups, _count = self._pending_chain_groups(p)
+            if not groups:
+                continue
+            for uid in (self._pending_payload(p) or {}).get('order_uids') or []:
+                if uid not in out:
+                    out.append(uid)
+        return out
+
     def _claim_sequence(self, order_uids, claim_priority=None):
         """注文を「刻み済みの在庫を確保する順」に並べた slot 番号の列を返す。
 
         先に回ってきた注文が在庫を取る。指定が無ければ従来どおり注文の並び順。
+        指示の対象の注文は、どの案でも先頭(_chain_protected_uids)。
         """
         priority = claim_priority if claim_priority is not None else self._claim_priority
+        protected = self._chain_protected_uids()
+        if protected:
+            priority = protected + [u for u in (priority or order_uids) if u not in protected]
         seq = []
         if priority:
             for uid in priority:
@@ -8030,6 +8083,7 @@ class CSPAgent:
 
         # 取り合いが決着している材料は、取る注文が決まっている。
         claim_winner = dict(getattr(self, '_claim_winner', None) or {})
+        chain_uids = set(self._chain_protected_uids())
 
         def reserved_needs(pos, ingredient_name, asking_uid=None):
             owner = counter_owner.get(pos)
@@ -8038,6 +8092,9 @@ class CSPAgent:
             ing_key = ingredient_name.lower()
             if ing_key not in ings_by_uid.get(owner, set()):
                 return False
+            # 指示の対象の注文の置き場の物は、取り合いの裁定にかかわらず渡さない
+            if owner in chain_uids and asking_uid != owner:
+                return True
             # 取り合いを makespan で裁いた結果、その材料はこの注文が取ると
             # 決まっている。決めた側は、置き場の持ち主が誰であれ取りに行ける。
             # ここを塞いだままだと、前に取った注文が持ち場ごと抱え込んで
