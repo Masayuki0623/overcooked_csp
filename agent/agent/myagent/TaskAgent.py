@@ -1413,6 +1413,22 @@ class TaskAgent:
         # 3. 必要な全てを持っていれば鍋へ
         if set(held_ings) == set(missing_ings):
             # print(f"[DEBUG] cook:to_pot held_ings={held_ings} missing={missing_ings} target_pot={target_pot_loc}")
+            # 決められた鍋の入口(接する床)を相手が全部ふさいでいて、ほかに空いた
+            # 鍋があるなら、そちらへ入れる。入口が 1 マスの鍋の前で相手が盛り付けを
+            # 待っていると、一式を持ったまま試合の終わりまで立ち尽くしていた
+            # (実測: 人の役が鍋 (0,7) の入口 (1,7) に立ち、隣の鍋 (0,6) は空いていた)。
+            obstacles = set(dynamic_obstacles or ())
+            access = set(self.station_access_tiles(env, target_pot_loc))
+            if (access and access <= obstacles
+                    and env.self_pos not in access):
+                for alt in self.reachable_positions(env, env.get_pos_by_obj_gs(gs=appliance)):
+                    alt = tuple(alt)
+                    if alt == tuple(target_pot_loc) or env.pos_obj.get(alt) is not None:
+                        continue
+                    alt_access = set(self.station_access_tiles(env, alt))
+                    if alt_access and not alt_access <= obstacles:
+                        return (self.move_to(env, alt, dynamic_obstacles=dynamic_obstacles),
+                                f"完成した食材を鍋に入れる(入口がふさがっているので {alt} へ)")
             return self.move_to(env, target_pot_loc, dynamic_obstacles=dynamic_obstacles), "完成した食材を鍋に入れる"
             
         # 4. 手に一部の食材だけを持っている -> 他の未調理食材の場所に行き、それを置いてマージする！

@@ -1579,8 +1579,11 @@ def _append_csv_locked(path, fields, row, notes=None):
         w.writerow(row)
 
 
-# 枠を取ってからスタートを押すまでの猶予(秒)。
-START_TIMEOUT_S = 120
+# 枠を取ってからスタートを押すまでの猶予(秒)。画面に触るたびに数え直す。
+# 説明・同意・チュートリアルの説明を読んでいる間も枠は取ったままなので、
+# 枠を取った時から数えると、ゆっくり読む人が途中で追い出され、同意から
+# やり直しになっていた(実測: 本番の流れで、同意のあとの質問中に出た)。
+START_TIMEOUT_S = 300
 # 操作している人の端末から、これだけ何も届かなければ居なくなったとみなす(秒)。
 # ブラウザは1秒ごとに ping を送る。スマホは電波が切れても「閉じた」とは
 # 知らせてこないので、待っているだけでは枠が永久に空かない。
@@ -4390,18 +4393,25 @@ async def ws(sock: WebSocket):
 
     async def handle_input(kind, msg):
         """入力を1つ処理する。"""
+        nonlocal acquired_at
         if kind == 'key':
             session.post_key(msg.get('code'), up=bool(msg.get('up')))
         elif kind == 'mousemove':
             session.post_mouse_move(msg.get('x', 0), msg.get('y', 0))
         elif kind == 'mousedown':
             session.post_mouse_down(msg.get('x', 0), msg.get('y', 0))
+        elif kind == 'active':
+            # 画面を操作している(説明を読み進めている)。追い出しの計測をやり直す。
+            acquired_at = time.time()
         elif kind == 'start':
             # 前の回が終わって枠が空いているなら取り直す。アンケートの
             # 間も接続を保つようにしたので、同じ接続で次の回を始める
             # ことがある。
             if session.player is not token:
                 session.try_acquire(token)
+            # 数えるのはここから。前の回の終わりから数えると、アンケートに
+            # 時間をかけた人は、次の回のカウントダウンを飛ばされる。
+            acquired_at = time.time()
             session.start(token, {
                 'mode': msg.get('mode'), 'step': msg.get('step'),
                 'map': msg.get('map'), 'preset': msg.get('preset'),
