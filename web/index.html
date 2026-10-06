@@ -514,6 +514,93 @@
   #overlay .survey textarea:focus { outline: none; border-color: #8fd3a8; }
   #overlay .survey .err { color: #ffb4b4; font-size: 13.5px; min-height: 1.4em; margin-top: 10px; }
 
+  /* ---- 表示のしかた(2026-10-07) ----
+     参加者は、文章が何か所にも同時に出ると読み切れない。画面が切り替わる
+     ときは、中身を上から少しずつずらして、うっすらと浮かび上がらせる。
+     1 回のクリックで情報を 1 つだけ足す画面(revealSteps)では、足した
+     項目だけがこの動きで出てくる。 */
+  @keyframes ovIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: none; }
+  }
+  #overlay.show { animation: ovFade .35s ease both; }
+  @keyframes ovFade { from { opacity: 0; } to { opacity: 1; } }
+  #overlay-text .anim-in { animation: ovIn .55s ease both; }
+  @media (prefers-reduced-motion: reduce) {
+    #overlay.show, #overlay-text .anim-in { animation: none; }
+  }
+  /* ---- 画面の見た目(主張しすぎない程度に) ----
+     説明・アンケート・チュートリアルの枠は、薄い光の入った面に載せる。 */
+  #overlay.show:not(.countdown) {
+    background:
+      radial-gradient(1200px 600px at 50% -10%, rgba(80,140,110,.10), transparent 60%),
+      rgba(10,12,15,.88);
+  }
+  #overlay.solid.show {
+    background:
+      radial-gradient(1200px 600px at 50% -10%, rgba(80,140,110,.10), transparent 60%),
+      var(--bg);
+  }
+  #overlay .consent, #overlay .stage-pick, #overlay .survey, #overlay .tut {
+    background: linear-gradient(180deg, rgba(38,44,53,.92), rgba(28,32,39,.92));
+    border: 1px solid rgba(255,255,255,.06);
+    border-radius: 16px; padding: 22px 24px 20px;
+    box-shadow: 0 12px 40px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.04);
+  }
+  #overlay .big { letter-spacing: .02em; }
+  #overlay button { transition: background .2s, border-color .2s, transform .08s; }
+  #overlay button:active:not(:disabled) { transform: translateY(1px); }
+  #overlay button.primary {
+    background: linear-gradient(180deg, #36805a, #2c6a4a);
+    box-shadow: 0 2px 10px rgba(47,111,75,.25);
+  }
+  #overlay button.primary:hover:not(:disabled) { background: linear-gradient(180deg, #3d8e64, #317553); }
+
+  /* 1 問ずつのアンケート */
+  #overlay .qrun { width: min(560px, 100%); text-align: left; }
+  .qrun .q-card { min-height: 190px; display: flex; flex-direction: column; justify-content: center; }
+  .qrun .q-ctx { font-size: 12.5px; color: var(--muted); margin-bottom: 10px; letter-spacing: .02em; }
+  .qrun .q-text { font-size: 17px; line-height: 1.8; margin-bottom: 18px; }
+  .qrun .q-info .q-text { margin-bottom: 4px; }
+  .qrun .q-info .big { text-align: center; }
+  .qrun .q-five { display: flex; gap: 8px; }
+  .qrun .q-five .q-opt { flex: 1 1 0; margin: 0; padding: 14px 0; font-size: 17px; border-radius: 12px; }
+  .qrun .q-pick { display: flex; flex-direction: column; gap: 8px; }
+  .qrun .q-pick .q-opt { margin: 0; text-align: left; padding: 12px 16px; border-radius: 12px; }
+  .qrun .q-opt.on {
+    background: linear-gradient(180deg, #36805a, #2c6a4a) !important;
+    border-color: #4a9a6e !important; font-weight: 700;
+  }
+  .qrun .anchors { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .qrun .q-input {
+    width: 100%; padding: 12px 14px; font-size: 17px; border-radius: 10px;
+    background: #20252d; color: var(--text); border: 1px solid #47505d;
+  }
+  .qrun .q-input:focus { outline: none; border-color: #5aa77c; }
+  .qrun .q-note { font-size: 12.5px; color: var(--muted); margin-top: 8px; }
+  .qrun .q-nav { display: flex; justify-content: space-between; align-items: center; margin-top: 18px; }
+  .qrun .q-nav button { margin-top: 0; }
+  .qrun .q-count { text-align: center; font-size: 12px; color: var(--muted); margin-top: 10px; }
+  .qrun .q-final { text-align: center; }
+  .qrun .err { color: #ffb4b4; font-size: 13.5px; min-height: 1.4em; margin-top: 10px; }
+
+  /* チュートリアル。絵を大きく、文は短く */
+  #overlay .tut { width: min(560px, 100%); text-align: center; }
+  .tut .t-no { font-size: 12px; color: var(--muted); letter-spacing: .08em; }
+  .tut .t-lead { font-size: 15px; color: var(--muted); margin-top: 2px; }
+  .tut .r-item { padding: 12px 8px; border-radius: 12px; background: rgba(255,255,255,.03); }
+  .tut .t-pics { display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; }
+  .tut .t-pics img { width: 72px; height: 72px; image-rendering: pixelated;
+                     background: rgba(255,255,255,.04); border-radius: 10px; padding: 4px; }
+  .tut .t-op { font-size: 22px; color: var(--muted); }
+  .tut .t-cap { font-size: 16px; line-height: 1.7; margin-top: 8px; }
+  .tut .dishes { font-size: 13px; color: var(--muted); margin-top: 6px; }
+  /* 1 クリックで 1 つずつ増える説明 */
+  .reveal .r-item { margin: 14px 0; }
+  .reveal .r-item.old { opacity: .62; transition: opacity .4s; }
+  .reveal .r-next { text-align: center; }
+  .reveal .r-count { font-size: 12px; color: var(--muted); text-align: center; margin-top: 6px; }
+
   #toast {
     position: fixed; left: 50%; top: 64px; transform: translateX(-50%);
     background: var(--btn-bg); border: 1px solid var(--btn-line); border-radius: 8px;
@@ -579,7 +666,7 @@
   <div class="who" id="instruct-who"></div>
   <div class="cards" id="instruct-cards"></div>
   <div class="conf hidden" id="instruct-conf">
-    <div class="conf-q">この指示に自信がある</div>
+    <div class="conf-q">選んだ指示は、3 つの注文を早く終えるのに適していると思う</div>
     <div class="conf-scale" id="instruct-conf-scale"></div>
     <div class="conf-anchors"><span>全くそう思わない</span><span>強くそう思う</span></div>
   </div>
@@ -1478,12 +1565,17 @@
     participantId = v.trim();
     try { localStorage.setItem(PID_STORE, participantId); } catch (e) {}
   }
-  function loadAssignment() {
-    if (!participantId) { assignment = null; renderPick(); return; }
+  // render=false なら読み込むだけで画面は描き直さない(本番の流れで、
+  // 登録のあと練習の画面を出しているときに、開始画面で上書きしないため)。
+  function loadAssignment(render = true) {
+    if (!participantId) { assignment = null; if (render) renderPick(); return; }
     fetch(`/api/assignment?participant=${encodeURIComponent(participantId)}`
           + `&pattern=${Number(pick.pattern) || 1}`)
       .then(r => r.json())
-      .then((a) => { if (a.ok && a.participant_id === participantId) assignment = a; renderPick(); })
+      .then((a) => {
+        if (a.ok && a.participant_id === participantId) assignment = a;
+        if (render) renderPick();
+      })
       .catch(() => {});
   }
   let options = null;
@@ -1766,16 +1858,12 @@
   // 時点で付くので、入り直すと次のセッションへ進んでしまい、その回の
   // アンケートは二度と取れない。書いた端末に残しておいて、次に開いたとき
   // 続きから出せるようにする。
-  const SURVEY_DRAFT_STORE = 'overcooked-survey-draft-v1';
+  const SURVEY_DRAFT_STORE = 'overcooked-survey-draft-v2';   // v2: 項目を仕様書(最終版)に変えた
   let surveyChecked = false;     // この表示で一度確かめたか
 
   function readSurveyAnswers() {
-    const out = {};
-    el.overlayText.querySelectorAll('input[type="radio"]:checked')
-      .forEach((i) => { out[i.name] = i.value; });
-    el.overlayText.querySelectorAll('textarea')
-      .forEach((t) => { if (t.value) out[t.id] = t.value; });
-    return out;
+    // 1 問ずつ出すので、答えは画面ではなく入れ物(surveyAnswers)にある
+    return Object.assign({}, surveyAnswers || {});
   }
 
   function saveSurveyDraft(exp, result, summary) {
@@ -1990,61 +2078,79 @@
   // レシピ表。本家のレシピカードと同じで、材料から提供までを絵で並べる。
   // 絵はゲームで使っているものをそのまま使う(遊び始めて迷わないように)。
   const G = (n) => gfxUrl(n);
-  // AI についての事前の説明。AI の能力についての予想を全員でそろえ、
-  // 後回しを故障ではなく段取りの結果と受け取れるようにする。
-  // 「計算できる」と書く(「常に最善に動く」とは書かない。割り込み許容数が
-  // 0 の回は、効率の悪い指示にもそのまま従うため)。
-  const AI_NOTE = 'AIは、いちばん早く作り終える段取りを計算できます。' +
-                  'ただし、あなたの考えを推し量ることはしません。';
   // 何を目指すゲームか。完了時間を効率の指標にするので、「協力して早く
   // 終える」が目的だと全員に伝えておく。
   const GOAL_NOTE = 'AIと二人で協力して、できるだけ早く3品を作り終えてください。';
+  // AI についての事前の説明。実験前の質問(A2・A3: AI の能力の予想)に答えて
+  // もらったあとに出す。後回しを故障ではなく段取りの結果と受け取れるようにする。
+  // 「計算できる」と書く(「常に最善に動く」とは書かない)。
+  const AI_NOTE = 'AIは、いちばん早く作り終える段取りを計算できます。' +
+                  'ただし、あなたの考えを推し量ることはしません。';
+  // チュートリアル(2026-10-07 作り直し)。文は短く、手順は 1 クリックで 1 つずつ。
+  // 絵はゲームで使っているものをそのまま使う(遊び始めて迷わないように)。
+  //   steps: [[絵の並び, 説明]]。絵の並びは 'A', '→', '+' を並べた配列
   const TUTORIALS = [
     { key: 'salad', title: 'サラダ',
-      lead: '切った野菜を皿に乗せて出します。火は使いません。',
+      lead: '切った野菜を皿にのせて出します',
       dishes: ['玉ねぎ・トマトのサラダ', 'トマト・レタスのサラダ'],
       steps: [
-        [G('FreshOnion'), '材料を取る'],
-        [G('cutboard'), 'まな板に置いて、<br>もう一度使うで切る'],
-        [G('ChoppedOnion-ChoppedTomato'), '切った材料を<br>重ねる'],
-        [G('PlateTile'), '皿置き場で<br>皿に乗せる'],
-        [G('delivery'), '提供口へ運ぶ'],
+        [['agent-blue-front'], '矢印キーで動き、Space で手を出します'],
+        [['FreshOnionTile', '→', 'FreshOnion'], '箱から材料を取る'],
+        [['cutboard', '→', 'ChoppedOnion'], 'まな板に置いて、何度か手を出して切る'],
+        [['ChoppedOnion', '+', 'ChoppedTomato', '→', 'ChoppedOnion-ChoppedTomato'], '切った材料を重ねる'],
+        [['plate', '→', 'delivery'], '皿にのせて、提供口へ'],
       ] },
     { key: 'soup', title: 'スープ',
-      lead: '切った野菜を鍋で煮てから、皿に取って出します。',
+      lead: '切った野菜を鍋で煮てから出します',
       dishes: ['玉ねぎ・レタスのスープ', 'トマト・レタスのスープ'],
       steps: [
-        [G('cutboard'), '材料を切る'],
-        [G('pot'), '鍋に入れる<br>(2つ同時に)'],
-        [G('CookedLettuce-CookedOnion'), '煮えるまで待つ'],
-        [G('PlateTile'), '空の皿を持って<br>鍋から取る'],
-        [G('delivery'), '提供口へ運ぶ'],
+        [['ChoppedLettuce', '+', 'ChoppedOnion', '→', 'pot'], '2つ重ねてから、鍋に入れる'],
+        [['CookedLettuce-CookedOnion'], '煮えるまで待つ'],
+        [['plate', '→', 'pot'], '空の皿を持って、鍋から取る'],
+        [['delivery'], '提供口へ'],
       ] },
     { key: 'juice', title: 'ジュース',
-      lead: '切った果物をミキサーで混ぜ、コップに注いで出します。',
+      lead: '切った果物をミキサーで混ぜて出します',
       dishes: ['ブルーベリー・オレンジのジュース', 'バナナ・オレンジのジュース'],
       steps: [
-        [G('FreshApple'), '果物を切って、<br>2つ重ねる'],
-        [G('blender'), 'ミキサーに入れ、<br>何度も混ぜる'],
-        [G('Cup-MixedApple-MixedOrange'), '空のコップを持って<br>ミキサーから注ぐ'],
-        [G('delivery'), '提供口へ運ぶ'],
+        [['ChoppedApple', '+', 'ChoppedOrange', '→', 'blender'], '2つ重ねてから、ミキサーに入れる'],
+        [['blender'], '何度か手を出して混ぜる'],
+        [['Cup', '→', 'Cup-MixedApple-MixedOrange'], '空のコップを持って注ぐ'],
+        [['delivery'], '提供口へ'],
       ] },
     { key: 'ai', title: 'AI と一緒に',
       // この回は指示を出さない(指示ありで遊ぶと、そのときの条件だけ余分に
       // 経験することになる)。本番で指示を求められることは、ここで伝える。
-      lead: 'AI が相方として一緒に料理します。地図は本番と同じです。' +
-            '<br><b>' + GOAL_NOTE + '</b>' +
-            '<br>この回は、AI への指示はありません。' +
-            '<br>本番では、ゲームが始まる前に、AI に今すぐやってほしい作業を 1 つ指示します。' +
-            '<br>' + AI_NOTE,
+      lead: 'AI が相方として一緒に料理します',
       dishes: ['注文は3つ。サラダとスープが混ざります'],
       steps: [
-        [G('agent-blue-front'), 'あなた'],
-        [G('agent-magenta-front'), 'AI'],
-        [G('cutboard'), '手分けして作る'],
-        [G('delivery'), '3品とも出せたら<br>終わり'],
+        [['agent-blue-front', '+', 'agent-magenta-front'], 'あなたと AI の二人で作ります'],
+        [[], GOAL_NOTE],
+        [[], AI_NOTE],
+        [[], '本番では、ゲームの始めに、AI に今すぐやってほしい作業を 1 つ指示します'],
+        [[], 'この回は、指示はありません'],
       ] },
   ];
+  // 本番の流れの中でやるチュートリアル。実験の注文は野菜だけなので、
+  // ジュースは飛ばす。
+  const HONBAN_STORE = 'overcooked-honban-v1';
+  function inHonban() {
+    try { return sessionStorage.getItem(HONBAN_STORE) === '1'; } catch (e) { return false; }
+  }
+  function setHonban(on) {
+    try {
+      if (on) sessionStorage.setItem(HONBAN_STORE, '1');
+      else sessionStorage.removeItem(HONBAN_STORE);
+    } catch (e) {}
+  }
+  function tutorialOrder() {
+    return inHonban() ? [0, 1, 3] : [0, 1, 2, 3];
+  }
+  function tutorialPos() {
+    const order = tutorialOrder();
+    const k = order.indexOf(tutorialStep);
+    return k < 0 ? 0 : k;
+  }
 
   // ---- 同意と参加者情報 ---------------------------------------------
   // 同意する前は、いかなるデータも記録しない。同意を飛ばす隠し口は作らない。
@@ -2053,20 +2159,19 @@
   // 行は配列で持つ。文字列の中に改行の記号を書くと、書き出しのときに
   // 実際の改行に化けて JS が壊れることがある(実際に一度壊した)。
   const CONSENT_TEXT = [
-    ['■ この実験について', [
+    ['この実験について', [
       'AIと協力して料理を作るゲームをプレイしていただき、',
       '協力のしやすさについてお伺いします。']],
-    ['■ 所要時間', [
-      '約25分',
-      '・操作説明と練習：約10分',
-      '・本番のプレイ：ゲーム4回（4人のAIと1回ずつ。注文3品を出し切るまで、1回あたり1〜2分）とアンケート4回',
-      '・終了後の説明：約5分']],
-    ['■ データの取り扱い', [
+    ['所要時間', [
+      '約30分',
+      '・操作の練習：約10分',
+      '・本番：ゲーム4回（1回あたり1〜2分）と、そのたびの質問']],
+    ['データの取り扱い', [
       '・回答は参加者番号で管理し、お名前は分析に使用しません',
       '・研究発表や論文において、個人が特定される形で公表することはありません',
       '・お名前と参加者番号の対応表は、分析終了後に破棄します',
-      '・記録するのは、ゲーム中の操作履歴とアンケートの回答のみです']],
-    ['■ 参加は任意です', [
+      '・記録するのは、ゲーム中の操作履歴と質問への回答のみです']],
+    ['参加は任意です', [
       '・途中でやめたいと思われた場合、いつでも中断できます',
       '・中断・辞退によって不利益を受けることは一切ありません',
       '・中断された場合、それまでのデータは破棄します']],
@@ -2077,54 +2182,8 @@
     'データの取り扱いについて理解し、同意します',
     '上記に同意し、実験に参加します',
   ];
-  const DEBRIEF_TEXT = [
-    'この実験では、AIが指示にどれだけ早く応じるかを',
-    '4段階で変えていました。',
-    '',
-    '指示がすぐ反映される回と、なかなか反映されない回が',
-    'あったはずです。その違いによって、AIとの協力の感じ方が',
-    'どう変わるかを調べています。',
-    '',
-    '事前にお伝えしなかったのは、意識して違いを探してしまうと',
-    '自然な感想が得られなくなるためです。ご理解いただければ幸いです。',
-    '',
-    'ご質問があれば、いつでもお尋ねください。',
-  ];
 
   let consentInfo = null;
-
-  // 使っていない(最初の画面に4つ並べる形にした)。戻り先として残す。
-  function renderExperimentEntry() {
-    const item = (id, name, why) =>
-      `<button type="button" data-go="${id}">` +
-      `<div class="name">${name}</div><div class="why">${why}</div></button>`;
-    showOverlay(
-      '<div class="stage-pick">' +
-      '<div class="big">実験セッション</div>' +
-      '<div class="modes">' +
-      item('new', 'はじめて参加する',
-           '説明と同意から始めます。参加者番号はこちらで用意します。') +
-      item('resume', '続きから',
-           '前に参加した方はこちら。参加者番号を入れると、<br>' +
-           '続きのセッションから始まります。') +
-      '</div>' +
-      '<div class="go"><button id="exp-back">最初に戻る</button></div></div>');
-    el.overlayText.querySelectorAll('.modes button').forEach((b) => {
-      b.addEventListener('click', () => {
-        if (b.dataset.go === 'tutorial') {
-          setMode('tutorial'); setStep(0); showTutorialCard();
-        } else if (b.dataset.go === 'new') {
-          // 端末に残っている番号は捨てる。別人の続きにしないため。
-          saveParticipant('');
-          assignment = null;
-          showConsent();
-        } else renderResume();
-      });
-    });
-    document.getElementById('exp-back').addEventListener('click', () => {
-      setMode(''); renderModePick();
-    });
-  }
 
   function renderResume() {
     showOverlay(
@@ -2169,92 +2228,120 @@
     fetch('/api/consent').then(r => r.json()).then((info) => {
       consentInfo = info;
       renderConsent();
-    }).catch(() => { consentInfo = { contact: {}, experience: [] }; renderConsent(); });
+    }).catch(() => { consentInfo = { contact: {}, experience: [], gender: [] }; renderConsent(); });
   }
 
+  // 説明は 1 項目ずつ。「次へ」を押すたびに 1 つ増える。
   function renderConsent() {
     const c = (consentInfo && consentInfo.contact) || {};
     const lines = (a) => a.map(esc).join('<br>');
-    const body = CONSENT_TEXT.map(([head, ls]) =>
+    const items = CONSENT_TEXT.map(([head, ls]) =>
       `<div class="c-sec"><div class="c-h">${esc(head)}</div>` +
-      `<div class="c-t">${lines(ls)}</div></div>`).join('');
-    const contact =
-      '<div class="c-sec"><div class="c-h">■ 連絡先</div><div class="c-t">' +
-      [c.name, c.affiliation, c.email].filter(Boolean).map(esc).join('<br>') +
-      '</div></div>';
+      `<div class="c-t">${lines(ls)}</div></div>`);
+    const who = [c.name, c.affiliation, c.email].filter(Boolean).map(esc).join('<br>');
+    items.push('<div class="c-sec"><div class="c-h">連絡先</div><div class="c-t">' +
+               (who || '実験の担当者にお尋ねください') +
+               '<br>ご不明な点がありましたら、いつでもお尋ねください。</div></div>');
     const checks = CONSENT_CHECKS.map((t, i) =>
       `<label class="c-chk"><input type="checkbox" data-i="${i}">` +
       `<span>${esc(t)}</span></label>`).join('');
-    showOverlay(
-      '<div class="consent">' +
-      '<div class="big">実験へのご協力のお願い</div>' +
-      body + contact +
-      '<div class="c-t">ご不明な点がありましたら、いつでもお尋ねください。</div>' +
-      `<div class="c-checks">${checks}</div>` +
-      '<div class="err" id="c-err"></div>' +
-      '<div class="go"><button class="primary" id="c-go" disabled>同意して開始する</button> ' +
-      '<button id="c-no">同意しない（終了）</button></div>' +
-      '</div>');
-    const boxes = [...el.overlayText.querySelectorAll('.c-chk input')];
-    const go = document.getElementById('c-go');
-    const sync = () => { go.disabled = !boxes.every(b => b.checked); };
-    boxes.forEach(b => b.addEventListener('change', sync));
-    go.addEventListener('click', () => renderProfile(boxes.map(b => b.checked)));
-    document.getElementById('c-no').addEventListener('click', () => {
-      // 何も記録せずに終わる。
-      showOverlay('<div class="big">ありがとうございました</div>' +
-        '<div class="sub">このまま画面を閉じてください。<br>' +
-        'データは記録していません。</div>');
+    revealSteps({
+      head: '<div class="big">実験へのご協力のお願い</div>',
+      items,
+      final: `<div class="c-checks">${checks}</div>` +
+             '<div class="err" id="c-err"></div>' +
+             '<div class="go"><button class="primary" id="c-go" disabled>同意して進む</button> ' +
+             '<button id="c-no">同意しない（終了）</button></div>',
+      onReady: (root) => {
+        const boxes = [...root.querySelectorAll('.c-chk input')];
+        const go = root.querySelector('#c-go');
+        const sync = () => { go.disabled = !boxes.every(b => b.checked); };
+        boxes.forEach(b => b.addEventListener('change', sync));
+        go.addEventListener('click', () => renderProfile(boxes.map(b => b.checked)));
+        root.querySelector('#c-no').addEventListener('click', () => {
+          // 何も記録せずに終わる。
+          setHonban(false);
+          showOverlay('<div class="consent"><div class="big">ありがとうございました</div>' +
+            '<div class="sub">このまま画面を閉じてください。<br>' +
+            'データは記録していません。</div></div>');
+        });
+      },
     });
   }
 
+  // 参加者情報と、実験前の質問(アンケート仕様書 A)。1 問ずつ出す。
+  // A は AI についての説明を読む前に答えてもらう(説明を読んだ後だと、
+  // AI の能力の予想が説明の影響を受ける)。
   function renderProfile(agreed) {
-    const exps = ((consentInfo && consentInfo.experience) || []).map((x, i) =>
-      `<label class="c-chk"><input type="radio" name="exp" value="${esc(x.id)}">` +
-      `<span>${esc(x.label)}</span></label>`).join('');
-    showOverlay(
-      '<div class="consent">' +
-      '<div class="big">参加者情報の入力</div>' +
-      '<div class="c-sec"><div class="c-h">お名前（必須）</div>' +
-      '<div class="c-t">名簿にのみ記録し、分析には使用しません。</div>' +
-      '<input type="text" id="pf-name" autocomplete="off" spellcheck="false"></div>' +
-      '<div class="c-sec"><div class="c-h">年齢（任意）</div>' +
-      '<input type="number" id="pf-age" min="1" max="119" inputmode="numeric"></div>' +
-      '<div class="c-sec"><div class="c-h">料理ゲームの経験（必須）</div>' +
-      '<div class="c-t">Overcooked などの協力型料理ゲームを' +
-      'プレイしたことがありますか。</div>' +
-      `<div class="c-checks">${exps}</div></div>` +
-      '<div class="err" id="c-err"></div>' +
-      '<div class="go"><button class="primary" id="pf-go">この内容で始める</button></div>' +
-      '</div>');
-    document.getElementById('pf-go').addEventListener('click', () => {
-      const err = document.getElementById('c-err');
-      const name = (document.getElementById('pf-name').value || '').trim();
-      const age = (document.getElementById('pf-age').value || '').trim();
-      const exp = el.overlayText.querySelector('input[name="exp"]:checked');
-      if (!name) { err.textContent = 'お名前を入れてください'; return; }
-      if (!exp) { err.textContent = 'ゲーム経験を選んでください'; return; }
-      err.textContent = '登録しています...';
-      const isTest = new URLSearchParams(location.search).has('test');
-      fetch('/api/consent', { method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ agreed, name, age, game_experience: exp.value,
-                               test: isTest }) })
-        .then(r => r.json())
-        .then((r) => {
-          if (!r.ok) throw new Error(r.error || '登録できませんでした');
-          saveParticipant(r.participant_id);
-          if (r.resumed) {
-            // 同じ名前で途中の人。番号を引き継いで続きから。
-            showOverlay('<div class="big">前回の続きから始めます</div>' +
-              `<div class="sub">参加者番号 ${esc(r.participant_id)} / セッション ${r.session} / ${r.total}</div>`);
-            setTimeout(() => { loadAssignment(); showStart(); }, 1800);
-            return;
-          }
-          loadAssignment();
-          showStart();
-        })
-        .catch((e) => { err.textContent = String(e.message || e); });
+    const exps = ((consentInfo && consentInfo.experience) || [])
+      .map((x) => [x.id, x.label]);
+    const genders = ((consentInfo && consentInfo.gender) || [])
+      .map((x) => [x.id, x.label]);
+    const steps = [
+      { kind: 'info', html: '<div class="big">はじめに</div>' +
+        '<div class="sub">あなたについて、いくつか質問します</div>' },
+      { kind: 'input', name: 'name', input: 'text', text: 'お名前',
+        note: '名簿にのみ記録し、分析には使用しません' },
+      { kind: 'input', name: 'age', input: 'number', text: '年齢', optional: true,
+        note: '答えなくてもかまいません' },
+    ];
+    if (genders.length) {
+      steps.push({ kind: 'pick', name: 'gender', text: '性別', choices: genders });
+    }
+    steps.push(
+      { kind: 'pick', name: 'game_experience',
+        text: '「Overcooked」やそれに似た協力型の料理ゲームを遊んだことがある',
+        choices: exps.length ? exps : [['yes', 'はい'], ['no', 'いいえ']] },
+      { kind: 'info', html: '<div class="q-text">ここからは、このあと一緒にゲームをする AI について、' +
+        'いまの予想を答えてください</div>' },
+      { kind: 'five', name: 'ai_expect_plan', ctx: 'AI についての予想',
+        text: 'ゲームの相手をする AI は、作業を効率よく進める段取りを立てられると思う' },
+      { kind: 'five', name: 'ai_expect_intent', ctx: 'AI についての予想',
+        text: 'ゲームの相手をする AI は、人が何をしたいのかを理解できると思う' },
+    );
+    runQuestions({
+      steps, answers: {}, cls: 'survey',
+      finishText: 'ありがとうございます。この内容で登録します',
+      finishLabel: '登録して進む',
+      onFinish: (a, fail) => {
+        const isTest = new URLSearchParams(location.search).has('test');
+        fetch('/api/consent', { method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ agreed, name: String(a.name || '').trim(),
+                                 age: String(a.age || '').trim(),
+                                 gender: a.gender || 'na',
+                                 game_experience: a.game_experience,
+                                 ai_expect_plan: a.ai_expect_plan,
+                                 ai_expect_intent: a.ai_expect_intent,
+                                 test: isTest }) })
+          .then(r => r.json())
+          .then((r) => {
+            if (!r.ok) throw new Error(r.error || '登録できませんでした');
+            saveParticipant(r.participant_id);
+            if (r.resumed) {
+              // 同じ名前で途中の人。番号を引き継いで続きから(練習は済んでいる)。
+              setHonban(false);
+              showOverlay('<div class="consent"><div class="big">前回の続きから始めます</div>' +
+                `<div class="sub">参加者番号 ${esc(r.participant_id)} / ゲーム ${r.session} / ${r.total}</div></div>`);
+              setTimeout(() => { loadAssignment(); showStart(); }, 2200);
+              return;
+            }
+            loadAssignment(!inHonban());
+            if (inHonban()) {
+              // 本番の流れ: 続けて操作の練習(チュートリアル)へ
+              showOverlay('<div class="consent"><div class="big">登録しました</div>' +
+                `<div class="sub">参加者番号 ${esc(r.participant_id)}</div>` +
+                '<div class="sub">続けて、操作の練習をします</div>' +
+                '<div class="go"><button class="primary" id="hb-tut">練習を始める</button></div></div>');
+              document.getElementById('hb-tut').addEventListener('click', () => {
+                setMode('tutorial'); setStep(0); showTutorialCard();
+              });
+              return;
+            }
+            showStart();
+          })
+          .catch((e) => fail(String(e.message || e)));
+      },
     });
   }
 
@@ -2267,12 +2354,12 @@
       '<div class="big">どれをやりますか</div>' +
       '<div class="modes">' +
       item('tutorial', 'チュートリアル（約5分）',
-           'はじめての人はこちら。サラダ → スープ → ジュースの順に<br>' +
-           '1人で作り方を覚えてから、AI と一緒に遊びます。') +
+           'はじめての人はこちら。1人で作り方を覚えてから、<br>' +
+           'AI と一緒に遊びます。') +
       // 「新たに始める」は最初から選べる(以前はチュートリアルを終えた
       // 端末でだけ選べるようにしていたが、やめた)。
       item('exp_new', '実験セッションを新たに始める（約20分）',
-           'ゲーム4回とアンケート4回。はじめに説明と同意があります。') +
+           'ゲーム4回と質問。はじめに説明と同意があります。') +
       item('exp_resume', '実験セッションを続きから',
            '前に参加した方はこちら。参加者番号を入れると、<br>' +
            '続きのセッションから始まります。') +
@@ -2285,12 +2372,18 @@
         ? item('practice', '練習（確認用）',
                '本番と同じ条件で遊びます。記録は残りません。')
         : '') +
+      // 実験に参加する人が、最初から最後まで通しでやる流れ(2026-10-07)。
+      //   説明・同意 → あなたについての質問 → 操作の練習 → ゲームと質問 × 4 → 終わり
+      item('honban', '本番',
+           '参加者の方はこちら。説明と同意、操作の練習、<br>' +
+           'ゲームと質問を、最初から最後まで通しで行います。') +
       '</div></div>');
     el.overlayText.querySelectorAll('.modes button').forEach((b) => {
       b.addEventListener('click', () => {
         // 選べないものは何もしない。disabled でも押せる環境があるので、
         // ここでも止める。
         if (b.disabled) return;
+        setHonban(false);
         setMode(b.dataset.mode);
         if (b.dataset.mode === 'tutorial') { setStep(0); showTutorialCard(); }
         else if (b.dataset.mode === 'practice') startPractice();
@@ -2299,10 +2392,12 @@
           pick.debug = Object.assign({}, pick.debug || DEBUG_DEFAULT, { on: true });
           savePick();
           showStart();
-        } else if (b.dataset.mode === 'exp_new') {
+        } else if (b.dataset.mode === 'exp_new' || b.dataset.mode === 'honban') {
           // 端末に前の人の番号が残っていることがある。捨ててから始める。
+          setHonban(b.dataset.mode === 'honban');
           setMode('experiment');
           pick.pattern = 3;
+          pick.debug = Object.assign({}, pick.debug || DEBUG_DEFAULT, { on: false });
           savePick();
           saveParticipant('');
           assignment = null;
@@ -2317,29 +2412,42 @@
     });
   }
 
+  // 手順の絵の並び。'→' と '+' は記号として出す。
+  function tutStepHtml([imgs, cap]) {
+    const pics = (imgs || []).map((n) => (n === '→' || n === '+')
+      ? `<span class="t-op">${n}</span>`
+      : `<img src="${G(n)}" alt="">`).join('');
+    return (pics ? `<div class="t-pics">${pics}</div>` : '') +
+           `<div class="t-cap">${esc(cap)}</div>`;
+  }
+
   function showTutorialCard() {
-    const t = TUTORIALS[Math.min(tutorialStep, TUTORIALS.length - 1)];
-    const steps = t.steps.map(([src, cap]) =>
-      `<div class="step"><img src="${src}" alt=""><div class="cap">${cap}</div></div>`)
-      .join('<div class="arrow">→</div>');
-    showOverlay(
-      '<div class="stage-pick">' +
-      `<div class="big">${tutorialStep + 1} / ${TUTORIALS.length}　${t.title}</div>` +
-      `<div class="sub">${t.lead}</div>` +
-      `<div class="recipe">${steps}</div>` +
-      `<div class="dishes">${t.dishes.map((d) => '・' + esc(d)).join('<br>')}</div>` +
-      '<div class="go"><button class="primary" id="start" data-label="はじめる" ' +
-      'disabled>はじめる</button> ' +
-      '<button id="tut-quit">やめる</button></div></div>');
-    document.getElementById('tut-quit').addEventListener('click', () => {
-      setMode(''); renderModePick();
-    });
-    updateStartButton();
-    document.getElementById('start').addEventListener('click', () => {
-      if (!spritesAllLoaded) return;
-      resetForNewGame();
-      send({ type: 'start', mode: 'tutorial', step: tutorialStep });
-      showOverlay('<div class="big">準備しています</div><div class="sub">数秒かかります</div>');
+    const order = tutorialOrder();
+    if (!order.includes(tutorialStep)) setStep(order[0]);
+    const t = TUTORIALS[tutorialStep];
+    const pos = tutorialPos();
+    revealSteps({
+      cls: 'tut',
+      head: `<div class="t-no">${pos + 1} / ${order.length}</div>` +
+            `<div class="big">${esc(t.title)}</div>` +
+            `<div class="t-lead">${esc(t.lead)}</div>`,
+      items: t.steps.map(tutStepHtml),
+      final: `<div class="dishes">${t.dishes.map((d) => esc(d)).join('<br>')}</div>` +
+             '<div class="go"><button class="primary" id="start" data-label="はじめる" ' +
+             'disabled>はじめる</button>' +
+             (inHonban() ? '' : ' <button id="tut-quit">やめる</button>') + '</div>',
+      onReady: (root) => {
+        const quit = root.querySelector('#tut-quit');
+        if (quit) quit.addEventListener('click', () => { setMode(''); renderModePick(); });
+        updateStartButton();
+        root.querySelector('#start').addEventListener('click', () => {
+          if (!spritesAllLoaded) return;
+          resetForNewGame();
+          send({ type: 'start', mode: 'tutorial', step: tutorialStep });
+          showOverlay('<div class="consent"><div class="big">準備しています</div>' +
+                      '<div class="sub">数秒かかります</div></div>');
+        });
+      },
     });
   }
 
@@ -2574,35 +2682,46 @@
   // 同じ段階をもう一度。最後まで行ったら最初の選択へ戻す。
   function showTutorialResult(result, summary) {
     if (result.aborted) {
-      showOverlay('<div class="big">途中で終わりました</div>' + summary +
+      showOverlay('<div class="consent"><div class="big">途中で終わりました</div>' + summary +
                   '<div class="go"><button class="primary" id="tut-next">' +
-                  'もう一度やる</button></div>');
+                  'もう一度やる</button></div></div>');
       document.getElementById('tut-next').addEventListener('click', showTutorialCard);
       return;
     }
-    const last = tutorialStep >= TUTORIALS.length - 1;
+    const order = tutorialOrder();
+    const pos = tutorialPos();
+    const last = pos >= order.length - 1;
     if (last) {
       setStep(0);
-      setMode('');
       markTutorialDone();
-      showOverlay('<div class="big">チュートリアルは終わりです</div>' + summary +
-                  '<div class="sub">おつかれさまでした。<br>' +
-                  '続けて練習するか、実験に進んでください。</div>' +
+      if (inHonban()) {
+        // 本番の流れ: 練習が終わったら、そのまま本番のゲームへ
+        setMode('experiment');
+        showOverlay('<div class="consent"><div class="big">練習はここまでです</div>' + summary +
+                    '<div class="sub">おつかれさまでした。次から本番です</div>' +
+                    '<div class="go"><button class="primary" id="tut-next">本番に進む</button></div></div>');
+        document.getElementById('tut-next').addEventListener('click', () => {
+          loadAssignment(); showStart();
+        });
+        return;
+      }
+      setMode('');
+      showOverlay('<div class="consent"><div class="big">チュートリアルは終わりです</div>' + summary +
+                  '<div class="sub">おつかれさまでした</div>' +
                   '<div class="go"><button class="primary" id="tut-next">' +
-                  '最初に戻る</button></div>');
+                  '最初に戻る</button></div></div>');
       document.getElementById('tut-next').addEventListener('click', renderModePick);
       return;
     }
     const done = TUTORIALS[tutorialStep].title;
-    setStep(tutorialStep + 1);
-    showOverlay(`<div class="big">${done}はここまで</div>` + summary +
+    setStep(order[pos + 1]);
+    showOverlay(`<div class="consent"><div class="big">${esc(done)}はここまで</div>` + summary +
                 '<div class="go"><button class="primary" id="tut-next">' +
-                `次へ (${TUTORIALS[tutorialStep].title})</button> ` +
-                '<button id="tut-stop">やめる</button></div>');
+                `次へ (${esc(TUTORIALS[tutorialStep].title)})</button>` +
+                (inHonban() ? '' : ' <button id="tut-stop">やめる</button>') + '</div></div>');
     document.getElementById('tut-next').addEventListener('click', showTutorialCard);
-    document.getElementById('tut-stop').addEventListener('click', () => {
-      setMode(''); renderModePick();
-    });
+    const stop = document.getElementById('tut-stop');
+    if (stop) stop.addEventListener('click', () => { setMode(''); renderModePick(); });
   }
 
   // ---- バグの報告 --------------------------------------------------------
@@ -2659,28 +2778,138 @@
     });
   }
 
-  // ---- アンケート(セッション直後) --------------------------------------
-  // パートA: 協調感(5段階・6項目)、パートB: 信頼感(8段階+「あてはまらない」・8項目)。
-  // 項目も順番もセッションごとに変えない(順序の影響を一定に保つため)。
-  // ラポールは CCR 短縮版(8項目)。Connection 4 + Coordination 4。
-  //   Lin, Chen, Mutlu, Trafton, Sebo (2026)
-  //   "The Reduced-Length Connection-Coordination Rapport (CCR) Scale"
-  //   ACM Trans. Hum.-Robot Interact. 15(3), Article 57.
-  // 原文の項目は短い名詞(Connection, Empathy …)。英語の尺度ではそれで
-  // 通るが、日本語で名詞だけ並べると、誰と誰の話なのかが読み取れない。
-  // かといって「あなたとAIは、おたがいに共感していた」のように主語述語を
-  // きっちり書くと、堅くて読みづらい。短い言い方にして、相手が誰かは
-  // 設問文(「AIとのやりとりは、どうでしたか」)で一度だけ示す。
-  //
-  // 原文との対応(論文と突き合わせるとき用。画面には出さない):
-  //   conn_1  Connection      つながりを感じた
-  //   conn_2  Getting along   打ち解けられた
-  //   conn_3  Empathy         気持ちが通じ合った
-  //   conn_4  Respect         おたがいのやり方を大事にしていた
-  //   coord_1 Coordination    息が合っていた
-  //   coord_2 Engagement      おたがいに積極的だった
-  //   coord_3 Smooth flow     やりとりがスムーズだった
-  //   coord_4 Attentiveness   おたがいに気を配っていた
+  // ---- 質問を 1 問ずつ出す仕組み ---------------------------------------
+  // 参加者は、文章が何か所にも同時に出ると読み切れない。質問は 1 画面に
+  // 1 問だけ出し、答えると次の質問がうっすらと出てくる。教示(どう答えるか
+  // の説明)は、それだけで 1 枚にする。戻って直すこともできる。
+  //   steps: [{kind:'info', html, ctx?}, {kind:'five', name, text, ctx?},
+  //           {kind:'pick', name, text, choices:[[value,label]], ctx?},
+  //           {kind:'input', name, text, input:'text'|'number', optional, note}]
+  //   ctx は質問の上に小さく出す見出し(いま何について答えているか)
+  const FIVE_ENDS = ['全くそう思わない', '強くそう思う'];
+  function runQuestions({ steps, answers = {}, head = '', onChange = null,
+                          onFinish, finishText = 'これで質問は終わりです',
+                          finishLabel = '送信する', cls = 'survey' }) {
+    const qCount = steps.filter((s) => s.kind !== 'info').length;
+    // 前に答えた分があれば、最初の未回答から始める
+    let i = 0;
+    if (Object.keys(answers).length) {
+      const k = steps.findIndex((s) => s.kind !== 'info' && !s.optional &&
+                                        (answers[s.name] === undefined || answers[s.name] === ''));
+      i = k < 0 ? steps.length : Math.max(0, k);
+    }
+    const qNo = (idx) => steps.slice(0, idx + 1).filter((s) => s.kind !== 'info').length;
+    const render = () => {
+      const s = steps[i];
+      let body = '';
+      let canNext = false;
+      if (!s) {
+        body = `<div class="q-final"><div class="q-text">${esc(finishText)}</div>` +
+               '<div class="err" id="q-err"></div>' +
+               `<div class="go"><button type="button" class="primary" id="q-send">${esc(finishLabel)}</button></div></div>`;
+      } else if (s.kind === 'info') {
+        body = `<div class="q-info">${s.html}</div>`;
+        canNext = true;
+      } else {
+        const v = answers[s.name];
+        const ctx = s.ctx ? `<div class="q-ctx">${esc(s.ctx)}</div>` : '';
+        let field = '';
+        if (s.kind === 'five') {
+          field = '<div class="q-five">' + [1, 2, 3, 4, 5].map((k) =>
+            `<button type="button" class="q-opt${v === k ? ' on' : ''}" data-v="${k}">${k}</button>`).join('') +
+            '</div>' +
+            `<div class="anchors"><span>${esc(FIVE_ENDS[0])}</span><span>${esc(FIVE_ENDS[1])}</span></div>`;
+        } else if (s.kind === 'pick') {
+          field = '<div class="q-pick">' + s.choices.map(([val, lab]) =>
+            `<button type="button" class="q-opt${v === val ? ' on' : ''}" data-v="${esc(val)}">${esc(lab)}</button>`)
+            .join('') + '</div>';
+        } else if (s.kind === 'input') {
+          field = `<input type="${s.input === 'number' ? 'number' : 'text'}" class="q-input" ` +
+                  `autocomplete="off" spellcheck="false" value="${esc(v === undefined ? '' : String(v))}">` +
+                  (s.note ? `<div class="q-note">${esc(s.note)}</div>` : '');
+          canNext = !!s.optional || (v !== undefined && String(v).trim() !== '');
+        }
+        body = ctx + `<div class="q-text">${esc(s.text)}</div>` + field;
+        if (s.kind === 'input') canNext = canNext;
+      }
+      const nav = s ? (
+        '<div class="q-nav">' +
+        (i > 0 ? '<button type="button" class="q-back">戻る</button>' : '<span></span>') +
+        ((s.kind === 'info' || s.kind === 'input')
+          ? `<button type="button" class="primary q-next"${canNext ? '' : ' disabled'}>次へ</button>`
+          : '<span></span>') +
+        '</div>' +
+        (s.kind !== 'info' ? `<div class="q-count">${qNo(i)} / ${qCount}</div>` : '')
+      ) : (i > 0 ? '<div class="q-nav"><button type="button" class="q-back">戻る</button><span></span></div>' : '');
+      showOverlay(`<div class="${cls} qrun">${head}<div class="q-card">${body}</div>${nav}</div>`);
+      const root = el.overlayText.firstElementChild;
+      const go = (d) => { i = Math.max(0, Math.min(steps.length, i + d)); render(); };
+      const back = root.querySelector('.q-back');
+      if (back) back.addEventListener('click', () => go(-1));
+      const next = root.querySelector('.q-next');
+      if (next) next.addEventListener('click', () => go(1));
+      root.querySelectorAll('.q-opt').forEach((b) => b.addEventListener('click', () => {
+        const val = s.kind === 'five' ? Number(b.dataset.v) : b.dataset.v;
+        answers[s.name] = val;
+        root.querySelectorAll('.q-opt').forEach((x) => x.classList.toggle('on', x === b));
+        if (onChange) onChange(answers);
+        // 押したことが見えてから次へ(すぐ消えると、押せたか分からない)
+        setTimeout(() => { if (steps[i] === s) go(1); }, 280);
+      }));
+      const inp = root.querySelector('.q-input');
+      if (inp) {
+        inp.addEventListener('input', () => {
+          answers[s.name] = inp.value;
+          if (next) next.disabled = !(s.optional || inp.value.trim() !== '');
+          if (onChange) onChange(answers);
+        });
+        inp.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' && next && !next.disabled) next.click();
+        });
+        setTimeout(() => inp.focus(), 50);
+      }
+      const send = root.querySelector('#q-send');
+      if (send) {
+        send.addEventListener('click', () => {
+          const err = root.querySelector('#q-err');
+          const miss = steps.findIndex((x) => x.kind !== 'info' && !x.optional &&
+                                              (answers[x.name] === undefined || answers[x.name] === ''));
+          if (miss >= 0) { i = miss; render(); return; }
+          send.disabled = true;
+          onFinish(answers, (msg) => { err.textContent = msg; send.disabled = false; });
+        });
+      }
+    };
+    render();
+  }
+
+  // 人ごとに決まった順に並べる(同じ人ならどのゲームでも同じ順)。
+  function seededShuffle(list, seedText) {
+    let h = 2166136261;
+    for (const ch of String(seedText || '')) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); }
+    let x = h >>> 0;
+    const rnd = () => {           // mulberry32
+      x |= 0; x = (x + 0x6D2B79F5) | 0;
+      let t = Math.imul(x ^ (x >>> 15), 1 | x);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const a = list.slice();
+    for (let k = a.length - 1; k > 0; k--) {
+      const j = Math.floor(rnd() * (k + 1));
+      [a[k], a[j]] = [a[j], a[k]];
+    }
+    return a;
+  }
+
+  // ---- アンケート(各ゲームの後) ----------------------------------------
+  // アンケート仕様書(最終版, 2026-10-06)の C。1 ゲームあたり 18 項目、すべて 5 段階。
+  //   C-1 ラポール(CCR 尺度 8 項目版の日本語訳)。順は人ごとにランダム
+  //   C-2 指示の扱いについての体験(独自 7 項目)。順は人ごとにランダム
+  //   C-3 プレイ体験(miniPXI 3 項目)
+  // C-1 と C-2 は別の項目群として、それぞれの教示を先に出す。
+  //   Lin, Chen, Mutlu, Trafton, Sebo (2026) "The Reduced-Length
+  //   Connection-Coordination Rapport (CCR) Scale", ACM THRI 15(3) 57.
   const CCR_CONNECTION = [
     ['conn_1', 'つながりを感じた'],
     ['conn_2', '打ち解けられた'],
@@ -2693,203 +2922,112 @@
     ['coord_3', 'やりとりがスムーズだった'],
     ['coord_4', 'おたがいに気を配っていた'],
   ];
-  const FIVE_LABELS = ['全くそう思わない', 'そう思わない', 'どちらでもない',
-                       'そう思う', '強くそう思う'];
-  // 指示についての項目。この研究の本題(指示にどれだけ従うかで受け取り方が
-  // どう変わるか)を直接きく。既製の尺度ではないので、CCR にならって
-  // すべて肯定文で書く(逆転項目を混ぜない)。
-  //   1 追従  : 指示どおりに動いたか
-  //   2 反応  : 指示に気づいて反応したか
-  //   3 着手  : 指示した作業に早く取りかかったか(skip_budget の効き目)
-  //   4 伝達  : 指示が届いたと感じたか
-  //   5 納得  : 違う動きをしたときも理由があると思えたか
-  //   6 有用  : 指示を出した甲斐があったか
-  // 誰の指示かは設問文(「AIに出した指示について」)で一度だけ示し、
-  // 項目そのものは短くする。
-  const INSTR_ITEMS = [
-    ['instr_1', '指示どおりに動いてくれた'],
-    ['instr_2', '指示にすぐ反応してくれた'],
-    ['instr_3', '指示した作業にすぐ取りかかってくれた'],
-    ['instr_4', '指示が伝わっている気がした'],
-    ['instr_5', '指示と違う動きにも、理由がありそうだった'],
-    ['instr_6', '指示を出した甲斐があった'],
+  // C-2。画面では「エージェント X は、」を前に付ける。
+  const OWN_ITEMS = [
+    ['own_respect', '私の指示を大切に扱ってくれた'],
+    ['own_intent', '私が何をしたいのかを分かっていた'],
+    ['own_complement', '私が言わなくても必要な作業をしてくれた'],
+    ['own_initiative', '私が任せたい部分と指示したい部分に合わせて動いた'],
+    ['own_judgment', '私が納得できる判断で動いた'],
+    ['own_predict', '私が予想したとおりに動いた'],
+    ['own_postponed', '私の指示を後回しにした'],
   ];
-  // 自分の指示への自信は、ここでは聞かない。指示を選ぶのと同時に答えて
-  // もらう(showInstruct)。ゲームのあとだと AI の動きを見たあとの自信になる。
-  // 確認の質問。指示は「今すぐ作って」の意味で出してもらう前提なので、
-  // 「いずれ作ってほしい料理」のつもりで選んだ回を見分けられるようにする。
-  // 二択・必須。値は now / later。
-  const INTENT_ITEM = ['instr_intent', '指示した料理は、どちらのつもりで選びましたか'];
-  const INTENT_CHOICES = [
-    ['now', '今すぐ作ってほしい料理'],
-    ['later', 'いずれ作ってほしい料理'],
-  ];
-  // ゲームプレイそのものについて(楽しさ・思いどおり・上手さ)。5段階・必須。
   const PLAY_ITEMS = [
-    ['play_fun', 'ゲームプレイは楽しかった'],
-    ['play_control', '自分の思うようにプレイできた'],
-    ['play_skill', 'うまくプレイできた'],
+    ['play_fun', 'このゲームを楽しくプレイできた'],
+    ['play_free', 'このゲームを自分なりのやり方で自由にプレイできた'],
+    ['play_skill', 'このゲームをうまくプレイできた'],
   ];
-  // 自由記述。尺度では拾えない気づきを残すための欄で、回答は任意。
-  // 見出しだけにして、説明は置かない(長い文が3つ並ぶと読む気が失せる)。
-  const FREE_ITEMS = [
-    ['free_good', 'うまく噛み合ったところ'],
-    ['free_bad', '気になったところ'],
-    ['free_instruction', '指示に対するAIの動き'],
-  ];
+  let surveyAnswers = {};
+
+  function surveySteps(exp, summary) {
+    const agent = exp.agent || 'AI';
+    const pid = exp.participant_id || participantId || '';
+    const ccr = seededShuffle([...CCR_CONNECTION, ...CCR_COORDINATION], `ccr:${pid}`);
+    const own = seededShuffle(OWN_ITEMS, `own:${pid}`);
+    const steps = [];
+    steps.push({ kind: 'info', html:
+      '<div class="big">ゲーム終了</div>' + (summary || '') +
+      `<div class="sub">${esc(agent)}とのゲームについて、質問に答えてください` +
+      `<br>(${exp.session} / ${exp.sessions_total})</div>` });
+    const c1 = `今のゲームでの${agent}とのやりとりについて、次のことがどの程度当てはまるかを答えてください`;
+    steps.push({ kind: 'info', html: `<div class="q-text">${esc(c1)}</div>` });
+    ccr.forEach(([name, text]) => steps.push(
+      { kind: 'five', name, text, ctx: `${agent}とのやりとりについて` }));
+    const c2 = `今のゲームでの${agent}の振る舞いについて、次のことがどの程度当てはまるかを答えてください`;
+    steps.push({ kind: 'info', html: `<div class="q-text">${esc(c2)}</div>` });
+    own.forEach(([name, text]) => steps.push(
+      { kind: 'five', name, text: `${agent} は、${text}`, ctx: `${agent}の振る舞いについて` }));
+    const c3 = '今のゲームについて、次のことがどの程度当てはまるかを答えてください';
+    steps.push({ kind: 'info', html: `<div class="q-text">${esc(c3)}</div>` });
+    PLAY_ITEMS.forEach(([name, text]) => steps.push(
+      { kind: 'five', name, text, ctx: '今のゲームについて' }));
+    return { steps, ccrOrder: ccr.map(([n]) => n), ownOrder: own.map(([n]) => n) };
+  }
 
   function showSurvey(exp, result, summary, answers) {
     playing = false;
-    // 1〜5 の項目を並べる。番号は通しで振る(参加者から見て数えやすい)。
-    let fiveNo = 0;
-    // 言葉は両端だけに付ける。5つ全部に付けると、狭い画面では
-    // 「全くそう思わ / ない」のように折り返して、かえって読みにくい。
-    const fiveQs = (items) => items.map(([name, text]) => {
-      fiveNo += 1;
-      const opts = FIVE_LABELS.map((lab, k) =>
-        `<label><input type="radio" name="${name}" value="${k + 1}">` +
-        `<span>${k + 1}</span></label>`).join('');
-      return `<div class="q" id="q-${name}"><div class="text">${fiveNo}. ${esc(text)}</div>` +
-             `<div class="scale num">${opts}</div>` +
-             `<div class="anchors"><span>${esc(FIVE_LABELS[0])}</span>` +
-             `<span>${esc(FIVE_LABELS[FIVE_LABELS.length - 1])}</span></div></div>`;
-    }).join('');
-    const rapportQs = fiveQs(CCR_CONNECTION) + fiveQs(CCR_COORDINATION);
-    fiveNo = 0;
-    const instrQs = fiveQs(INSTR_ITEMS);
-    fiveNo = 0;
-    const selfQs =
-      `<div class="q" id="q-${INTENT_ITEM[0]}">` +
-      `<div class="text">1. ${esc(INTENT_ITEM[1])}</div>` +
-      '<div class="scale choice">' + INTENT_CHOICES.map(([val, lab]) =>
-        `<label><input type="radio" name="${INTENT_ITEM[0]}" value="${val}">` +
-        `<span>${esc(lab)}</span></label>`).join('') + '</div></div>';
-    fiveNo = 0;
-    const playQs = fiveQs(PLAY_ITEMS);
-
-    const freeQs = FREE_ITEMS.map(([name, text]) =>
-      `<div class="q"><div class="text">${esc(text)}</div>` +
-      `<textarea id="${name}" rows="2" placeholder="任意"></textarea></div>`
-    ).join('');
-
+    surveyAnswers = Object.assign({}, answers || {});
+    const { steps, ccrOrder, ownOrder } = surveySteps(exp, summary);
     el.overlay.classList.add('form');
     el.overlay.classList.add('solid');
     document.body.classList.add('survey');
-    showOverlay(
-      '<div class="survey">' +
-      '<div class="big">ゲーム終了</div>' + summary +
-      (exp.agent
-        ? `<div class="sub">${esc(exp.agent)} との` +
-          ((exp.games_per_block || 1) > 1 ? ` ${exp.games_per_block} 回のゲーム` : 'ゲーム') +
-          `についてお答えください<br>(${exp.session} / ${exp.sessions_total})</div>`
-        : `<div class="sub">セッション ${exp.session} / ${exp.sessions_total}</div>`) +
-      // 操作チェック(指示にどう応じたと感じたか)を最初に聞く。ほかの評価
-      // (やりとりの印象など)に答えたあとだと、その答えに引きずられる。
-      `<h3>${esc(exp.agent || 'AI')}に出した指示について</h3>` + instrQs +
-      `<h3>${esc(exp.agent || 'AI')}とのやりとりは、どうでしたか</h3>` + rapportQs +
-      '<h3>あなた自身の指示について</h3>' + selfQs +
-      '<h3>ゲームプレイについて</h3>' + playQs +
-      '<h3>気づいたこと(任意)</h3>' + freeQs +
-      '<div class="err" id="sv-err"></div>' +
-      '<div class="go"><button class="primary" id="sv-send">送信する</button></div>' +
-      '</div>');
-
-    // 前に書きかけていた分を戻す。
-    if (answers) {
-      for (const name of Object.keys(answers)) {
-        const v = answers[name];
-        if (v === '' || v === null || v === undefined) continue;
-        const radio = el.overlayText.querySelector(
-          `input[name="${name}"][value="${v}"]`);
-        if (radio) { radio.checked = true; continue; }
-        const box = document.getElementById(name);
-        if (box && box.tagName === 'TEXTAREA') box.value = v;
-      }
-    }
-    // 出した時点と、触るたびに残す。送れたら消す。
+    // 出した時点と、答えるたびに残す。送れたら消す。
     saveSurveyDraft(exp, result, summary);
-    const form = el.overlayText.querySelector('.survey');
-    if (form) {
-      const keep = () => saveSurveyDraft(exp, result, summary);
-      form.addEventListener('change', keep);
-      form.addEventListener('input', keep);
-    }
+    runQuestions({
+      steps, answers: surveyAnswers,
+      onChange: () => saveSurveyDraft(exp, result, summary),
+      onFinish: (ans, fail) => {
+        const body = {
+          participant_id: exp.participant_id, session: exp.session,
+          pattern: exp.pattern || (lastSelection && lastSelection.pattern) || null,
+          map: exp.map, skip_budget: exp.skip_budget, case: exp.case,
+          group: exp.group || (lastSelection && lastSelection.group) || '',
+          agent: exp.agent || '', block: exp.block || null,
+          game_in_block: exp.game_in_block || null,
+          served: result.served, failed: result.failed,
+          makespan_s: result.makespan_s,
+          order_ccr: ccrOrder, order_own: ownOrder,
+        };
+        for (const [name] of [...CCR_CONNECTION, ...CCR_COORDINATION, ...OWN_ITEMS, ...PLAY_ITEMS]) {
+          body[name] = ans[name];
+        }
+        fetch('/api/survey', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                               body: JSON.stringify(body) })
+          .then(r => r.json())
+          .then((r) => {
+            if (!r.ok) throw new Error(r.error || '保存できませんでした');
+            clearSurveyDraft();
+            el.overlay.classList.remove('form');
+            const last = exp.session >= exp.sessions_total;
+            // 盤面と操作ボタンを戻す(次の回はこの上で遊ぶ)
+            document.body.classList.remove('survey');
+            el.overlay.classList.remove('solid');
+            if (last) { showFinish(); return; }
+            // 続きは自動で始める。ボタンを押させると、押し忘れたまま
+            // 待ちが続いてしまう。
+            showOverlay('<div class="consent"><div class="big">ありがとうございました</div>' +
+              (exp.agent
+                ? `<div class="sub">次は${esc('エージェント ' + String.fromCharCode(65 + (exp.block || 1)))} とのゲームです。</div>`
+                : `<div class="sub">次はゲーム ${exp.session + 1} / ${exp.sessions_total} です。</div>`) +
+              '<div class="sub">まもなく始まります</div></div>');
+            try { sessionStorage.setItem(AUTOSTART_STORE, '1'); } catch (e2) {}
+            setTimeout(() => location.reload(), 2600);
+          })
+          .catch((e) => fail(String(e.message || e)));
+      },
+    });
+  }
 
-    document.getElementById('sv-send').addEventListener('click', () => {
-      const err = document.getElementById('sv-err');
-      const body = {
-        participant_id: exp.participant_id, session: exp.session,
-        pattern: exp.pattern || (lastSelection && lastSelection.pattern) || null,
-        map: exp.map, skip_budget: exp.skip_budget, case: exp.case,
-        group: exp.group || (lastSelection && lastSelection.group) || '',
-        agent: exp.agent || '', block: exp.block || null,
-        game_in_block: exp.game_in_block || null,
-        served: result.served, failed: result.failed,
-        makespan_s: result.makespan_s,
-      };
-      const missing = [];
-      const read = (name) => {
-        const el2 = el.overlayText.querySelector(`input[name="${name}"]:checked`);
-        document.getElementById(`q-${name}`).classList.toggle('todo', !el2);
-        if (!el2) { missing.push(name); return null; }
-        return Number(el2.value);
-      };
-      for (const [name] of CCR_CONNECTION) body[name] = read(name);
-      for (const [name] of CCR_COORDINATION) body[name] = read(name);
-      for (const [name] of INSTR_ITEMS) body[name] = read(name);
-      {
-        // 二択は数字ではないので、read() を通さずに値をそのまま読む。
-        const name = INTENT_ITEM[0];
-        const picked = el.overlayText.querySelector(`input[name="${name}"]:checked`);
-        document.getElementById(`q-${name}`).classList.toggle('todo', !picked);
-        if (!picked) missing.push(name);
-        body[name] = picked ? picked.value : null;
-      }
-      for (const [name] of PLAY_ITEMS) body[name] = read(name);
-      // 自由記述は任意なので、未回答の確認(missing)には入れない。
-      for (const [name] of FREE_ITEMS) {
-        body[name] = (document.getElementById(name) || {}).value || '';
-      }
-      if (missing.length) {
-        err.textContent = `未回答が ${missing.length} 項目あります(赤い項目)`;
-        document.getElementById(`q-${missing[0]}`).scrollIntoView({ block: 'center' });
-        return;
-      }
-      err.textContent = '送信しています...';
-      const btn = document.getElementById('sv-send');
-      btn.disabled = true;
-      fetch('/api/survey', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                             body: JSON.stringify(body) })
-        .then(r => r.json())
-        .then((r) => {
-          if (!r.ok) throw new Error(r.error || '保存できませんでした');
-          clearSurveyDraft();
-          el.overlay.classList.remove('form');
-          const last = exp.session >= exp.sessions_total;
-          // 盤面と操作ボタンを戻す(次の回はこの上で遊ぶ)
-          document.body.classList.remove('survey');
-          el.overlay.classList.remove('solid');
-          if (last) {
-            // 終了後の説明(デブリーフィング)。何を変えていたのかを明かす。
-            showOverlay(
-              '<div class="consent">' +
-              '<div class="big">ご協力ありがとうございました</div>' +
-              '<div class="c-t">' +
-              DEBRIEF_TEXT.map(esc).join('<br>') +
-              '</div></div>');
-            return;
-          }
-          // 続きは自動で始める。ボタンを押させると、押し忘れたまま
-          // 待ちが続いてしまう。
-          showOverlay('<div class="big">ありがとうございました</div>' +
-            (exp.agent
-              ? `<div class="sub">次は${esc('エージェント ' + String.fromCharCode(65 + (exp.block || 1)))} とのゲームです。`
-              : `<div class="sub">次はセッション ${exp.session + 1} / ${exp.sessions_total} です。`) +
-            '<br>まもなく始まります...</div>');
-          try { sessionStorage.setItem(AUTOSTART_STORE, '1'); } catch (e2) {}
-          setTimeout(() => location.reload(), 1800);
-        })
-        .catch((e) => { err.textContent = String(e.message || e); btn.disabled = false; });
+  // 全部終わったときの画面。条件を変えていたことなどは伝えない(2026-10-07)。
+  function showFinish() {
+    try { sessionStorage.removeItem(HONBAN_STORE); } catch (e) {}
+    revealSteps({
+      head: '<div class="big">ご協力ありがとうございました</div>',
+      items: [
+        '<div class="c-t">これで実験はすべて終わりです。</div>',
+        '<div class="c-t">お疲れさまでした。画面はこのまま閉じてください。</div>',
+      ],
+      final: '',
     });
   }
 
@@ -3143,11 +3281,75 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => t.classList.remove('show'), Math.max(2500, text.length * 90));
   }
+  // 画面を出す。中身は上から少しずつずらして、うっすらと出す(fadeIn)。
+  // 同じ中身を出し直すときは何もしない(出し直すたびに動きが始まって点滅する)。
+  let lastOverlayHtml = null;
   function showOverlay(html) {
+    const shown = el.overlay.classList.contains('show');
+    if (shown && html === lastOverlayHtml) return;
+    lastOverlayHtml = html;
     el.overlayText.innerHTML = html;
+    if (!shown) {
+      // 出し直すと #overlay の動きも最初から
+      el.overlay.classList.remove('show');
+      void el.overlay.offsetWidth;
+    }
     el.overlay.classList.add('show');
+    fadeIn(el.overlayText.firstElementChild);
   }
-  function hideOverlay() { el.overlay.classList.remove('show'); }
+  // 要素の子を、上から順に少しずつずらして出す(2 つ以上を同時に出さない)。
+  function fadeIn(root, step = 0.22, start = 0) {
+    if (!root) return;
+    const kids = root.children && root.children.length ? [...root.children] : [root];
+    kids.forEach((k, i) => {
+      k.classList.remove('anim-in');
+      void k.offsetWidth;
+      k.style.animationDelay = `${(start + Math.min(i, 8) * step).toFixed(2)}s`;
+      k.classList.add('anim-in');
+    });
+  }
+  function hideOverlay() { el.overlay.classList.remove('show'); lastOverlayHtml = null; }
+
+  // 1 回のクリックで情報を 1 つずつ足す画面。
+  //   head : 見出し(最初から出す)
+  //   items: 足していく項目(HTML)。最初の 1 つは見出しと一緒に出す
+  //   final: 全部出し終えたあとに出す操作(ボタン・チェック欄など)
+  //   onReady(root): final を出したあとに呼ぶ(操作の取り付け)
+  //   cls  : 外枠のクラス(consent / stage-pick など)
+  // 前に出した項目は少し薄くし、いま足した項目に目が行くようにする。
+  function revealSteps({ head = '', items = [], final = '', onReady = null,
+                         cls = 'consent', nextLabel = '次へ' }) {
+    showOverlay(`<div class="${cls} reveal">${head}<div class="r-list"></div>` +
+                '<div class="r-next"></div></div>');
+    const root = el.overlayText.firstElementChild;
+    const list = root.querySelector('.r-list');
+    const next = root.querySelector('.r-next');
+    let i = 0;
+    const add = () => {
+      list.querySelectorAll('.r-item').forEach((x) => x.classList.add('old'));
+      const d = document.createElement('div');
+      d.className = 'r-item';
+      d.innerHTML = items[i];
+      list.appendChild(d);
+      fadeIn(d.children.length ? d : d, 0.25, i === 0 ? 0.2 : 0);
+      i += 1;
+      if (i < items.length) {
+        next.innerHTML = `<button type="button" class="primary r-go">${nextLabel}</button>` +
+                         `<div class="r-count">${i} / ${items.length}</div>`;
+        next.querySelector('.r-go').addEventListener('click', add);
+      } else {
+        // 最後の項目を読んでから操作が出るよう、少し遅らせる
+        next.innerHTML = final;
+        fadeIn(next, 0.25, 0.35);
+        if (onReady) onReady(root);
+      }
+      fadeIn(next, 0.2, 0.25);
+      d.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    };
+    if (items.length) add();
+    else { next.innerHTML = final; fadeIn(next); if (onReady) onReady(root); }
+    return root;
+  }
 
   // ゲームが始まるまで(カウントダウン中も)は移動・指示を送らない。
   // 送ると、止まっている間に溜まり、始まった瞬間に勝手に動いてしまう。

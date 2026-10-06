@@ -303,12 +303,20 @@ ROSTER_COLUMNS = [
 ROSTER_FIELDS = [c for c, _ in ROSTER_COLUMNS]
 ROSTER_NOTES = dict(ROSTER_COLUMNS)
 
-# 料理ゲームの経験。操作の習熟度に効くので、共変量として残す。
+# 実験前の質問(アンケート仕様書 最終版 A。AI についての説明を読む前に答える)。
+#   A1 似たゲームの経験(はい/いいえ)。操作の習熟度に効くので共変量として残す
+#   A2 AI の能力の予想(段取り) 1〜5
+#   A3 AI の能力の予想(意図の理解) 1〜5
 GAME_EXPERIENCE_CHOICES = [
-    ('none', 'まったくない'),
-    ('few', '少しある(数回程度)'),
-    ('some', 'ある程度ある(何度も遊んだことがある)'),
-    ('often', 'よくプレイする'),
+    ('yes', 'はい'),
+    ('no', 'いいえ'),
+]
+# 基本情報。性別は答えたくない人のために「回答しない」を置く。
+GENDER_CHOICES = [
+    ('female', '女性'),
+    ('male', '男性'),
+    ('other', 'その他'),
+    ('na', '回答しない'),
 ]
 
 
@@ -355,7 +363,7 @@ SESSION_COLUMNS = [
     ('instruction_nl_tasks', '解釈した作業', '確定した作業の id を | で区切る'),
     ('instruction_nl_log', '解釈の記録', '送った文と結果を順に。文=>結果(理由) を | で区切る'),
     ('instruction_confidence', '指示への自信',
-     '「この指示に自信がある」(1〜5)。指示を選ぶのと同時に、ゲームが始まる前に答える'),
+     'B1 選んだ指示は、3 つの注文を早く終えるのに適していると思う(1〜5)。指示を選んだ直後、ゲームを再開する前に答える'),
     ('instruction_accepted_s', '指示を受けた時刻_秒', 'ゲーム内の秒'),
     ('wait_seconds', '指示までの待ち_秒', '指示を選ぶまでにかかった秒'),
     ('wait_after_instruction_s', '指示後に着手するまで_秒', ''),
@@ -433,12 +441,11 @@ ALL_COLUMNS = [
     # --- アンケート ---
     'つながり1', 'つながり2', 'つながり3', 'つながり4',
     '協調1', '協調2', '協調3', '協調4', 'つながり平均', '協調平均', 'ラポール',
-    '指示1', '指示2', '指示3', '指示4', '指示5', '指示6', '指示平均', '指示への自信',
-    '指示の意図',
-    '楽しかった', '思うようにプレイできた', 'うまくプレイできた',
-    'うまく噛み合ったところ', '気になったところ', '指示に対するAIの動き', 'アンケート記録時刻',
+    'オーダー尊重感', '意図理解感', '補完感', '主導権調整感', '判断納得感', '予測可能感',
+    '後回しにされた感', '指示への自信',
+    '楽しさ', '自律性', '熟達', '項目の順_ラポール', '項目の順_独自', 'アンケート記録時刻',
     # --- 参加者 ---
-    '年齢', 'ゲーム経験',
+    '年齢', '性別', 'ゲーム経験', 'AIの能力の予想_段取り', 'AIの能力の予想_意図の理解',
     # --- 補助 ---
     '開始時刻', '中断したか', 'パターン', 'ゲーム番号', 'ブロック内の回', '指示の質',
     '制約なしの開始_秒', '制約ありの開始_秒', '開始の前倒し_秒', '制約なしの開始順位',
@@ -561,15 +568,36 @@ _COND_COLUMNS = [
     ('注文の組み合わせ番号', ''),
     # 名前は絶対に入れない。名簿(participant_roster.csv)にだけ残す。
     ('年齢', '任意回答。記述統計に使う'),
+    ('性別', 'female / male / other / na=回答しない'),
     ('ゲーム経験',
-     'none=まったくない / few=少しある / some=ある程度ある / often=よくプレイする。'
+     'A1「Overcooked」やそれに似た協力型の料理ゲームを遊んだことがある。yes / no。'
      '操作の習熟度に効くので共変量として使う'),
+    ('AIの能力の予想_段取り',
+     'A2 ゲームの相手をする AI は、作業を効率よく進める段取りを立てられると思う(1〜5)。'
+     'AI についての説明を読む前に答える'),
+    ('AIの能力の予想_意図の理解',
+     'A3 ゲームの相手をする AI は、人が何をしたいのかを理解できると思う(1〜5)。'
+     'AI についての説明を読む前に答える'),
 ]
 _SCORE_COLUMNS = [
     ('提供数', 'その回に出せた品数(ゲーム内スコア)'),
     ('失敗数', 'その回に時間切れになった注文の数'),
     ('プレイ時間_秒', 'その回の長さ'),
 ]
+
+# C-2 指示の扱いについての体験(独自項目 9〜15)。画面では「エージェント X は、」を前に付ける。
+OWN_FIELDS = ['own_respect', 'own_intent', 'own_complement', 'own_initiative',
+              'own_judgment', 'own_predict', 'own_postponed']
+OWN_LABELS = ['オーダー尊重感', '意図理解感', '補完感', '主導権調整感',
+              '判断納得感', '予測可能感', '後回しにされた感']
+OWN_TEXTS = ['私の指示を大切に扱ってくれた', '私が何をしたいのかを分かっていた',
+             '私が言わなくても必要な作業をしてくれた',
+             '私が任せたい部分と指示したい部分に合わせて動いた',
+             '私が納得できる判断で動いた', '私が予想したとおりに動いた',
+             '私の指示を後回しにした']
+# C-3 プレイ体験(miniPXI 3 項目)
+PLAY_FIELDS = ['play_fun', 'play_free', 'play_skill']
+PLAY_LABELS = ['楽しさ', '自律性', '熟達']
 
 QUAL_COLUMNS = (
     _COND_COLUMNS
@@ -582,23 +610,16 @@ QUAL_COLUMNS = (
     + [('つながり平均', 'つながり1〜4の平均'),
        ('協調平均', '協調1〜4の平均'),
        ('ラポール', 'つながり平均と協調平均の平均(CCR 短縮版の出し方)')]
-    + [(f'指示{i}', t) for i, t in enumerate(
-        ['指示どおりに動いてくれた', '指示にすぐ反応してくれた',
-         '指示した作業にすぐ取りかかってくれた', '指示が伝わっている気がした',
-         '指示と違う動きにも、理由がありそうだった', '指示を出した甲斐があった'], 1)]
-    + [('指示平均', '指示1〜6の平均'),
-       ('指示への自信',
-        '「この指示に自信がある」(1〜5)。指示を選ぶのと同時に、ゲームが始まる前に答える'
-        '(ゲーム記録から引く。指示平均には入れない)'),
-       ('指示の意図',
-        '確認の質問。now=今すぐ作ってほしい料理のつもりで選んだ / '
-        'later=いずれ作ってほしい料理のつもりで選んだ'),
-       ('楽しかった', 'ゲームプレイは楽しかった(1〜5)'),
-       ('思うようにプレイできた', '自分の思うようにプレイできた(1〜5)'),
-       ('うまくプレイできた', 'うまくプレイできた(1〜5)'),
-       ('うまく噛み合ったところ', '自由記述(任意)'),
-       ('気になったところ', '自由記述(任意)'),
-       ('指示に対するAIの動き', '自由記述(任意)')]
+    + [(col, f'C-2 {n}. エージェントは、{t}(1〜5)') for n, (col, t) in enumerate(
+        zip(OWN_LABELS, OWN_TEXTS), 9)]
+    + [('指示への自信',
+        'B1 選んだ指示は、3 つの注文を早く終えるのに適していると思う(1〜5)。'
+        '指示を選んだ直後、ゲームを再開する前に答える(ゲーム記録から引く)'),
+       ('楽しさ', 'C-3 16. このゲームを楽しくプレイできた(1〜5)'),
+       ('自律性', 'C-3 17. このゲームを自分なりのやり方で自由にプレイできた(1〜5)'),
+       ('熟達', 'C-3 18. このゲームをうまくプレイできた(1〜5)'),
+       ('項目の順_ラポール', 'C-1 を出した順(人ごとにランダム。conn_/coord_ の番号)'),
+       ('項目の順_独自', 'C-2 を出した順(人ごとにランダム)')]
     + _SCORE_COLUMNS)
 QUAL_FIELDS = [c for c, _ in QUAL_COLUMNS]
 QUAL_NOTES = dict(QUAL_COLUMNS)
@@ -2037,6 +2058,9 @@ class WebGamePlay:
                     # 同意のときに受け取った分。名前は入れない。
                     'age': rec.get('age'),
                     'game_experience': rec.get('game_experience', ''),
+                    'gender': rec.get('gender', ''),
+                    'ai_expect_plan': rec.get('ai_expect_plan', ''),
+                    'ai_expect_intent': rec.get('ai_expect_intent', ''),
                     'pattern': pattern,
                     # 同じ相方と続けて遊ぶ設計のための欄。1条件1ゲームの
                     # パターンでは block=session、回=1、毎回アンケート。
@@ -2276,7 +2300,10 @@ class WebGamePlay:
             '地図': sel.get('map'), '割り込み許容数': sel.get('skip_budget'),
             '注文の組み合わせ番号': sel.get('case'),
             '年齢': sel.get('age'),
+            '性別': sel.get('gender', ''),
             'ゲーム経験': sel.get('game_experience', ''),
+            'AIの能力の予想_段取り': sel.get('ai_expect_plan', ''),
+            'AIの能力の予想_意図の理解': sel.get('ai_expect_intent', ''),
         }
         score = {
             '提供数': res.get('served'), '失敗数': res.get('failed'),
@@ -3869,52 +3896,31 @@ async def slot():
     })
 
 
-# 自由記述。改行やカンマが入っても CSV が崩れないよう csv モジュールに任せる。
-FREE_TEXT_FIELDS = ['free_good', 'free_bad', 'free_instruction']
 # ラポールは CCR 短縮版(8項目)。Connection 4項目 + Coordination 4項目。
 #   Lin, Chen, Mutlu, Trafton, Sebo (2026)
 #   "The Reduced-Length Connection-Coordination Rapport (CCR) Scale"
 #   ACM Trans. Hum.-Robot Interact. 15(3), Article 57.
-# 得点の出し方も論文どおり:
-#   (1) Connection の4項目の平均、(2) Coordination の4項目の平均、
-#   (3) その2つの平均を rapport とする。因子ごとの平均を先に取るので、
-#       8項目をまとめて平均するのとは値が変わる(項目数が同じなので
-#       今回は一致するが、手順は論文に合わせておく)。
+# 得点の出し方も論文どおり: つながり因子 = 1〜4 の平均、協調因子 = 5〜8 の平均、
+# ラポール = 両因子の平均。
+# 項目はアンケート仕様書(最終版, 2026-10-06)の C。1 ゲームあたり 18 項目。
+#   C-1 ラポール 8 / C-2 指示の扱いについての体験 7(独自) / C-3 プレイ体験 3(miniPXI)
+# C-1 と C-2 の順は人ごとにランダム(画面側で決めて、出した順を送ってくる)。
 CCR_CONNECTION_FIELDS = [f'conn_{i}' for i in range(1, 5)]
 CCR_COORDINATION_FIELDS = [f'coord_{i}' for i in range(1, 5)]
-# 指示についての項目。この研究の本題(指示にどれだけ従うかで受け取り方が
-# どう変わるか)を直接きくもので、既製の尺度ではない。
-INSTR_FIELDS = [f'instr_{i}' for i in range(1, 7)]
-# 自分の指示への自信は、アンケートではなく指示を選ぶときに取る(ゲームの
-# あとに聞くと、AI の動きを見たあとの自信になってしまう)。値はゲームの
-# 記録(指示への自信)にあり、アンケートの行へはそこから引く。
-# 確認の質問(二択)。指示は「今すぐ作って」の意味で出してもらう前提なので、
-# 「いずれ作ってほしい料理」のつもりで選んだ回を見分けるために残す。
-INTENT_FIELD = 'instr_intent'
-INTENT_CHOICES = ('now', 'later')
-# ゲームプレイそのものについて(楽しさ・思いどおり・上手さ)
-PLAY_FIELDS = ['play_fun', 'play_control', 'play_skill']
 SURVEY_FIELDS = (['participant_id', 'session', 'pattern', 'timestamp']
                  + CCR_CONNECTION_FIELDS + CCR_COORDINATION_FIELDS
                  + ['connection_mean', 'coordination_mean', 'rapport']
-                 + INSTR_FIELDS + ['instr_mean'] + [INTENT_FIELD]
-                 + PLAY_FIELDS
-                 + FREE_TEXT_FIELDS
+                 + OWN_FIELDS + PLAY_FIELDS
                  + ['map', 'skip_budget', 'case', 'served', 'makespan_s',
                     'agent', 'block'])
 
 
 @app.post('/api/survey')
 async def survey(req: Request):
-    """セッション直後のアンケートを1行ずつ results/survey.csv に足す。
+    """各ゲームの後のアンケート(C の 18 項目)を受け取って記録する。
 
-    ラポール(1〜5の8項目)は CCR 短縮版。因子ごとに平均してから、その2つを
-    平均して rapport とする(論文どおりの出し方)。
-    指示についての項目(1〜5の6項目)は単純平均。
-    自由記述(3欄)は任意で、書かなければ空のまま残す。
-
-    信頼感の8項目は外した。1回あたりの項目数を抑えるため(8セッション
-    続けてもらうので、答える負担がそのまま回答の質に効く)。
+    すべて 1〜5 の必須項目。ラポールは因子ごとに平均してから、その2つを
+    平均する(CCR 短縮版の出し方)。独自項目とプレイ体験は値をそのまま使う。
     """
     body = await req.json()
     pid = str(body.get('participant_id') or '').strip()
@@ -3931,69 +3937,41 @@ async def survey(req: Request):
             out.append(int(v))
         return out, None
 
-    conn, err = read_five(CCR_CONNECTION_FIELDS, 'つながり')
+    conn, err = read_five(CCR_CONNECTION_FIELDS, 'やりとり')
     if err:
         return JSONResponse({'ok': False, 'error': err}, status_code=400)
-    coord, err = read_five(CCR_COORDINATION_FIELDS, '連携')
+    coord, err = read_five(CCR_COORDINATION_FIELDS, 'やりとり')
     if err:
         return JSONResponse({'ok': False, 'error': err}, status_code=400)
-    instr, err = read_five(INSTR_FIELDS, '指示について')
+    own, err = read_five(OWN_FIELDS, 'エージェントの振る舞い')
     if err:
         return JSONResponse({'ok': False, 'error': err}, status_code=400)
-    intent = str(body.get(INTENT_FIELD) or '').strip()
-    if intent not in INTENT_CHOICES:
-        return JSONResponse({'ok': False, 'error': '指示した料理をどちらのつもりで選んだかが未回答です'},
-                            status_code=400)
-    playv, err = read_five(PLAY_FIELDS, 'ゲームプレイについて')
+    playv, err = read_five(PLAY_FIELDS, 'ゲームについて')
     if err:
         return JSONResponse({'ok': False, 'error': err}, status_code=400)
 
-    # 自由記述は任意。長すぎる貼り付けだけ切って、あとはそのまま残す。
-    free = {}
-    for name in FREE_TEXT_FIELDS:
-        free[name] = str(body.get(name) or '').strip()[:2000]
+    def order_text(key, allowed):
+        v = body.get(key)
+        if not isinstance(v, list):
+            return ''
+        return ','.join(str(x) for x in v if str(x) in allowed)
 
     connection_mean = round(sum(conn) / len(conn), 2)
     coordination_mean = round(sum(coord) / len(coord), 2)
     _rec_prof = assignment_for(pid, pattern_of(body.get('pattern') or EXPERIMENT_PATTERN))
-    # 指示への自信は、指示を選んだときにゲームの記録へ入れてある。
+    # 指示への自信(B1)は、指示を選んだときにゲームの記録へ入れてある。
     confidence = ''
     for _g in _read_sessions():
         if _g.get('participant_id') == pid and str(_g.get('session')) == str(body.get('session')):
             confidence = _g.get('instruction_confidence', '')   # 同じ回が複数あれば最後
-    row = {
-        'participant_id': pid, 'session': body.get('session'),
-        'pattern': body.get('pattern'),
-        'timestamp': datetime.now().isoformat(timespec='seconds'),
-        'connection_mean': connection_mean,
-        'coordination_mean': coordination_mean,
-        # 論文どおり、因子ごとの平均を出してからその2つを平均する。
-        'rapport': round((connection_mean + coordination_mean) / 2, 2),
-        **free,
-        'instr_mean': round(sum(instr) / len(instr), 2),
-        INTENT_FIELD: intent,
-        'play_fun': playv[0], 'play_control': playv[1], 'play_skill': playv[2],
-        'map': body.get('map'), 'skip_budget': body.get('skip_budget'),
-        'case': body.get('case'), 'served': body.get('served'),
-        'makespan_s': body.get('makespan_s'),
-        'agent': body.get('agent') or '', 'block': body.get('block'),
-    }
-    for name, v in zip(CCR_CONNECTION_FIELDS, conn):
-        row[name] = v
-    for name, v in zip(CCR_COORDINATION_FIELDS, coord):
-        row[name] = v
-    for name, v in zip(INSTR_FIELDS, instr):
-        row[name] = v
-    # 以前はここで survey.csv にも書いていたが、定性ファイル
-    # (exp_qualitative.csv)に同じ内容が日本語の見出しで入るので、やめた。
+    timestamp = datetime.now().isoformat(timespec='seconds')
+    rapport = round((connection_mean + coordination_mean) / 2, 2)
     # 書いてから消す。先に消すと、書けなかったときに出し直せなくなる。
     clear_survey_owed(pid, body.get('session'))
 
     # 実験用の定性ファイル。見出しは日本語、説明の行つき。
-    # 条件の欄は定量ファイルと同じ並びにしてあるので、参加者IDと
-    # セッション番号で突き合わせられる。
     qual = {
-        '記録時刻': row['timestamp'],
+        '記録時刻': timestamp,
         '参加者ID': pid,
         'パターン': body.get('pattern'),
         'グループ': body.get('group', ''),
@@ -4003,20 +3981,19 @@ async def survey(req: Request):
         '地図': body.get('map'),
         '割り込み許容数': body.get('skip_budget'),
         '注文の組み合わせ番号': body.get('case'),
-        # 年齢とゲーム経験は同意のときに割り当ての記録へ入れてある。
-        # 画面は送ってこないので、ここで引く(以前は空のままだった)。
+        # 参加者の情報は同意のときに割り当ての記録へ入れてある。
         '年齢': _rec_prof.get('age'),
+        '性別': _rec_prof.get('gender') or '',
         'ゲーム経験': _rec_prof.get('game_experience') or '',
+        'AIの能力の予想_段取り': _rec_prof.get('ai_expect_plan', ''),
+        'AIの能力の予想_意図の理解': _rec_prof.get('ai_expect_intent', ''),
         'つながり平均': connection_mean,
         '協調平均': coordination_mean,
-        'ラポール': row['rapport'],
-        '指示平均': row['instr_mean'],
+        'ラポール': rapport,
         '指示への自信': confidence,
-        '指示の意図': intent,
-        '楽しかった': playv[0], '思うようにプレイできた': playv[1], 'うまくプレイできた': playv[2],
-        'うまく噛み合ったところ': free.get('free_good', ''),
-        '気になったところ': free.get('free_bad', ''),
-        '指示に対するAIの動き': free.get('free_instruction', ''),
+        '楽しさ': playv[0], '自律性': playv[1], '熟達': playv[2],
+        '項目の順_ラポール': order_text('order_ccr', set(CCR_CONNECTION_FIELDS + CCR_COORDINATION_FIELDS)),
+        '項目の順_独自': order_text('order_own', set(OWN_FIELDS)),
         '提供数': body.get('served'),
         '失敗数': body.get('failed'),
         'プレイ時間_秒': body.get('makespan_s'),
@@ -4025,17 +4002,16 @@ async def survey(req: Request):
         qual[f'つながり{i}'] = v
     for i, v in enumerate(coord, 1):
         qual[f'協調{i}'] = v
-    for i, v in enumerate(instr, 1):
-        qual[f'指示{i}'] = v
+    for label, v in zip(OWN_LABELS, own):
+        qual[label] = v
     append_csv(QUAL_PATH, QUAL_FIELDS, qual, notes=QUAL_NOTES)
     # 1ゲーム1行の統合ファイル(ゲーム記録 + 指示 + アンケート)
     try:
         write_all_in_one(pid, body.get('session'), qual)
     except Exception as e:
         print(f'[server] 統合ファイルに書けませんでした: {type(e).__name__} {e}', flush=True)
-    print(f"[server] アンケートを保存しました: {pid} session={row['session']} "
-          f"ラポール {row['rapport']} (つながり {connection_mean} / "
-          f"連携 {coordination_mean}) 指示 {row['instr_mean']}")
+    print(f"[server] アンケートを保存しました: {pid} session={body.get('session')} "
+          f"ラポール {rapport} (つながり {connection_mean} / 協調 {coordination_mean})")
     return JSONResponse({'ok': True})
 
 
@@ -4049,6 +4025,7 @@ async def consent_text():
     return JSONResponse({
         'contact': contact_info(),
         'experience': [{'id': i, 'label': t} for i, t in GAME_EXPERIENCE_CHOICES],
+        'gender': [{'id': i, 'label': t} for i, t in GENDER_CHOICES],
     })
 
 
@@ -4073,6 +4050,16 @@ async def consent(req: Request):
     if exp not in {i for i, _ in GAME_EXPERIENCE_CHOICES}:
         return JSONResponse({'ok': False, 'error': 'ゲーム経験を選んでください'},
                             status_code=400)
+    gender = str(body.get('gender') or 'na').strip()
+    if gender not in {i for i, _ in GENDER_CHOICES}:
+        gender = 'na'
+    expect = {}
+    for key, label in (('ai_expect_plan', 'AI の段取り'), ('ai_expect_intent', 'AI の意図の理解')):
+        v = body.get(key)
+        if not isinstance(v, (int, float)) or not (1 <= v <= 5):
+            return JSONResponse({'ok': False, 'error': f'{label}についての質問が未回答です'},
+                                status_code=400)
+        expect[key] = int(v)
     age = body.get('age')
     try:
         age = int(age) if str(age).strip() != '' else None
@@ -4125,6 +4112,8 @@ async def consent(req: Request):
         if key in data:
             data[key]['age'] = age
             data[key]['game_experience'] = exp
+            data[key]['gender'] = gender
+            data[key].update(expect)
             data[key]['test'] = int(is_test)
             _save_assignments(data)
     g = design.group_of(pid)
