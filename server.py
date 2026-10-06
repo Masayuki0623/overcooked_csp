@@ -928,7 +928,9 @@ DEFAULT_PATTERN = 1
 # 順に試す(OpenAI が呼べなければ Gemini)。tools/llm_instruction_bench.py で測って決める。
 NL_MODEL = None
 # 例は入力欄の placeholder に出すので、ここには書かない(重複していた)
-NL_HINT = 'エージェントに今すぐやってほしい作業を、具体的に書いてください。'
+NL_HINT = ('ここで出す指示は、エージェントに今すぐやってほしい作業に限ります。'
+           '料理の途中の工程(煮る・提供など)を頼むと、その前の工程(材料を切るなど)も含めてやります。'
+           '具体的に書いてください。')
 
 
 def instruction_input_of(pattern):

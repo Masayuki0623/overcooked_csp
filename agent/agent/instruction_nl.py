@@ -168,10 +168,17 @@ def system_prompt(menu, orders_ja, ingredients_ja='たまねぎ・トマト・�
   cook 系(煮るところまで)は、「煮て」「鍋に入れて」「煮るところまで」のように、煮る工程で止めると明示されたときだけ。
   同じ料理について serve 系と cook 系の両方を選んではいけない(serve 系に煮る工程は含まれている)。
   「切って」「刻んで」= chop 系。
+- 工程の一部「だけ」を頼む言い方は、その工程の段を選ぶ(前の工程は自動で含まれる。曖昧ではない):
+  「調理の部分だけ」「鍋に入れる作業だけ」「煮るところだけ」= cook 系(切ってから煮るまで)。
+  「混ぜるだけ」= mix 系。「盛り付けだけ」「提供だけ」「出すだけ」= serve 系(切る・煮る・盛るを含めて最後まで)。
+  「〜だけ」は前の工程を外す意味ではない(exclude_steps は空のまま)。
+  exclude_steps に入れるのは、「材料を切らずに」「切るのは私がやる」のように、ある工程をやらないと明示したときだけ。
 - 料理の指定は、言い回しに当てはまる料理をすべて選ぶ(曖昧ではない)。
   例: 「トマトに関するスープ」= トマトを使うスープ全部。「スープ」= スープ全部。「たまねぎのスープ」= たまねぎを使うスープ(1つしか無ければそれ)。
 - 切る個数: 数が書かれていればその数(x1 / x2)。「両方」「全部」= x2。数が無く、その材料がこの回に1つしか要らなければ x1。
   数が無く、2つ要るなら ambiguous。
+- 同じ料理が2つあって id に個数(x1 / x2)が付いているとき: 数が書かれていればその数、数が無ければ全部(x2)。
+  x1 と x2 を両方選んではいけない(料理の個数は曖昧にしない)。
 - 「私は〜をやる」のような自分の分担は無視し、AI への作業だけを選ぶ。「あとは任せる」「残りはお願い」は指定ではないので無視する。
 '''
 
@@ -408,6 +415,9 @@ def normalize(raw, ids, candidates=None):
     """LLM の出力(valid / ambiguous / tasks / exclude_steps / message)を、受理・却下の形にする。"""
     tasks = [t for t in (raw.get('tasks') or []) if t in ids]
     tasks = list(dict.fromkeys(tasks))               # 重複は落とす(順は保つ)
+    # 同じ料理の serve 系と cook 系が両方あれば cook 系は落とす(serve 系に含まれている)
+    serve_suffix = {t.split('_', 1)[1] for t in tasks if t.startswith('serve_')}
+    tasks = [t for t in tasks if not (t.startswith('cook_') and t.split('_', 1)[1] in serve_suffix)]
     exclude = [e for e in (raw.get('exclude_steps') or []) if e in STEP_JA]
     valid = bool(raw.get('valid'))
     ambiguous = bool(raw.get('ambiguous'))
