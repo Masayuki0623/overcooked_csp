@@ -3179,6 +3179,25 @@ class CSPAgent:
                 else:
                     self.carry_task_by_agent = None
 
+        # 覚えている工程の注文が、もう無い(出し終えた)ことがある。その注文の
+        # 置き場は割り当てから消えているので、置き場を合わせ直せず、前の台へ
+        # 置いては取り上げるを繰り返す(実測: 残り 1 品のまま 60 秒止まった)。
+        # 同じ材料を切る工程がいまの計画にあればそれに乗り換え、無ければ忘れる。
+        if carry_task:
+            c_id = carry_task.get('id') or (None, None, None)
+            active = {e.get('uid') for e in (getattr(self, 'active_order_entries', None) or [])}
+            if c_id[2] not in (None, -1) and active and c_id[2] not in active:
+                sched = getattr(self, 'schedule_per_agent', None) or {}
+                pool = list(sched.get(agent_idx) or []) + [
+                    t for a, ts in sched.items() if a != agent_idx for t in (ts or [])]
+                repl = next((t for t in pool
+                             if tuple(t.get('id') or ())[:2] == tuple(c_id[:2])), None)
+                carry_task = deepcopy(repl) if repl is not None else None
+                if self.sc_2agent:
+                    self.carry_task_by_agent[agent_idx] = deepcopy(carry_task)
+                else:
+                    self.carry_task_by_agent = deepcopy(carry_task)
+
         def matches_single_chopped(task):
             if carried_ing is None or not holding_name.startswith('Chopped') or task is None:
                 return False
@@ -3253,7 +3272,11 @@ class CSPAgent:
             # chopped_combo_parts の処理に任せて、注文に対応した cook / serve_salad
             # タスクへ読み替える。
             if verb == 'chop' and not chopped_combo_parts and any(food_name in holding_name for food_name in food_names):
-                return deepcopy(carry_task)
+                # 置き場はいまの割り当てに合わせ直す。注文が出て番号が詰まると、
+                # 覚えた置き場は前の料理の台のまま残る。切った物を取り上げた
+                # 台へそのまま置き直し、また取り上げる、を試合の終わりまで
+                # 繰り返していた(実測: 人の役が 20 秒間トマトを拾い置きした)。
+                return fresh(carry_task)
 
         if chopped_combo_parts:
             assigned_counter = None
