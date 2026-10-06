@@ -3000,6 +3000,11 @@ class WebGamePlay:
         pend = list(getattr(ai, '_pending_instructions', None) or [])
         if not pend:
             return set()
+        # 指示が終わった(done)あとは色を付けない。注文が1つ提供されると残りの
+        # 注文の番号が詰まって id が付け替わり、鎖の id が別の注文の工程を指す
+        # (実測: 提供のあとに別の注文の「切る」が黄色になった)
+        if pend[0].get('status') in ('done', 'canceled', 'vanished', 'human_done'):
+            return set()
         task = pend[0].get('task')
         payload = (task if isinstance(task, dict)
                    else task[1] if isinstance(task, (list, tuple)) and len(task) > 1
