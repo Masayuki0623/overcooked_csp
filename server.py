@@ -74,6 +74,7 @@ from agent.gameplay import (  # noqa: E402
     INSTRUCTION_TIMING_NO_INSTRUCTION,
     INSTRUCTION_TIMING_ONCE_AT_START,
 )
+from agent import instruction_nl  # noqa: E402
 from agent.instruction_panel import (  # noqa: E402
     card_action, card_icon_name, card_label, card_steps, VERB_LAYER, LAYER_NAME)
 from gym_cooking.utils import config as game_config  # noqa: E402
@@ -340,6 +341,13 @@ SESSION_COLUMNS = [
     ('instruction_tasks_ai', '指示の工程数_AI', '指示に含まれる工程のうち AI がやる数(「スープを調理して」なら 切る+煮る 等)'),
     ('instruction_tasks_human', '指示の工程数_人', '指示に含まれる工程のうち、AI にはできず人がやる数(仕切りの向こうで切る等)'),
     ('quality', '指示の質', '自動の分類'),
+    ('instruction_text', '指示の文', '文章で書いた指示(パターン7)。一覧から選んだ回は空'),
+    ('instruction_nl_model', '解釈のモデル', '文章を解釈した LLM'),
+    ('instruction_nl_attempts', '解釈の回数', '文章を送って解釈させた回数(書き直しを含む)'),
+    ('instruction_nl_outcome', '解釈の結末',
+     'confirmed=解釈どおりに確定 / cards=一覧から選んだ / 空=文章入力の回ではない'),
+    ('instruction_nl_tasks', '解釈した作業', '確定した作業の id を | で区切る'),
+    ('instruction_nl_log', '解釈の記録', '送った文と結果を順に。文=>結果(理由) を | で区切る'),
     ('instruction_confidence', '指示への自信',
      '「この指示に自信がある」(1〜5)。指示を選ぶのと同時に、ゲームが始まる前に答える'),
     ('instruction_accepted_s', '指示を受けた時刻_秒', 'ゲーム内の秒'),
@@ -415,6 +423,7 @@ ALL_COLUMNS = [
     '指示後に着手するまで_秒', '着手せず終了', '指示の結末', '人がやったか', '先にやったのは',
     '指示の動作', '指示の対象', '指示の個数', '指示の工程数_AI', '指示の工程数_人',
     '指示を受けた時刻_秒', '指示までの待ち_秒',
+    '指示の文', '解釈の回数', '解釈の結末', '解釈した作業', '解釈の記録', '解釈のモデル',
     # --- アンケート ---
     'つながり1', 'つながり2', 'つながり3', 'つながり4',
     '協調1', '協調2', '協調3', '協調4', 'つながり平均', '協調平均', 'ラポール',
@@ -727,6 +736,7 @@ PATTERN_SKIP_BUDGETS = {
     # パターン5は 0 / 1 / 2 / inf の4水準(順序統制は 4x4 のラテン方格)。
     5: (0, 1, 2, SKIP_BUDGET_INF),
     6: (0, 1, 2, SKIP_BUDGET_INF),
+    7: (0, 1, 2, SKIP_BUDGET_INF),
 }
 
 
@@ -877,8 +887,46 @@ EXPERIMENT_PATTERNS = {
         'games_per_block': 1,
         'named_agents': True,
     },
+    7: {
+        # パターン6と同じ進み方で、指示を文章で書いてもらう版(2026-10-06)。
+        # 書いた文を LLM が候補(動詞・対象・個数)に対応づけ、参加者が確認
+        # してから始める。合っていなければ書き直すか、一覧(カード)から選ぶ。
+        # 候補は全工程(切る・煮る・最後まで作る)で、複数の作業を1つの指示に
+        # まとめられる(上限: 料理1品、切る材料は合計3つ)。
+        'pots': 1,
+        'label': 'パターン7',
+        'desc': 'パターン6と同じ(リング・鍋2つ・4ゲーム)で、指示は文章で書く。'
+                'LLM が解釈し、確認してから開始。合わなければ一覧から選ぶ。',
+        'endless': False,
+        'presets': {'exp_ring_2pot': 'experiment1'},
+        'games': [
+            ['TomatoLettuceSalad', 'OnionLettuceSoup', 'OnionTomatoSoup'],
+            ['OnionTomatoSalad', 'OnionLettuceSoup', 'TomatoLettuceSoup'],
+            ['OnionLettuceSalad', 'OnionTomatoSoup', 'TomatoLettuceSoup'],
+            ['OnionTomatoSalad', 'OnionLettuceSoup', 'OnionTomatoSoup'],
+        ],
+        'shuffle_orders': True,
+        'instruction': INSTRUCTION_TIMING_ONCE_AT_START,
+        'instruction_scope': 'all',
+        'instruction_input': 'text',
+        'instruct_every': None,
+        'seconds': None,
+        'orders_active': None,
+        'games_per_block': 1,
+        'named_agents': True,
+    },
 }
 DEFAULT_PATTERN = 1
+
+# 文章の指示を解釈するモデル。tools/llm_instruction_bench.py で測って決める。
+NL_MODEL = instruction_nl.DEFAULT_MODEL
+NL_HINT = ('AIに今すぐやってほしい作業を、具体的に書いてください。'
+           '例: トマトレタススープを1つと、たまねぎを1つ切って')
+
+
+def instruction_input_of(pattern):
+    """指示の入れ方。'cards'(一覧から選ぶ) / 'text'(文章で書き、LLM が解釈)。"""
+    return EXPERIMENT_PATTERNS.get(pattern_of(pattern), {}).get('instruction_input', 'cards')
 
 
 def shuffled_orders(recipes, participant, session):
@@ -1743,6 +1791,12 @@ class WebGamePlay:
         self.instruction_request = None
         self._instruction_answer = None
         self.instruction_confidence = None   # 指示と一緒に答えた自信(1〜5)
+        # 文章で書いた指示(パターン7)。解釈の結果と、その記録。
+        self.instruction_input = 'cards'
+        self.instruction_interp = None       # 画面へ返す解釈の結果
+        self._interp_n = 0
+        self._instruction_candidates = []
+        self._reset_nl()
         self._instruction_seq = 0
         self._instruction_lock = threading.Lock()
         self._instruction_done = threading.Event()
@@ -2015,7 +2069,9 @@ class WebGamePlay:
         out = {'map': map_name, 'preset': preset, 'case': case,
                'recipes': list(sets[case]), 'picked_by': picked_by,
                'instruction': instruction, 'skip_budget': skip_budget,
-               'instruct_every': instruct_every}
+               'instruct_every': instruct_every,
+               # デバッグで選んだパターン(指示の入れ方を決めるのに使う)
+               'pattern': pattern_of(choice.get('pattern'))}
         # デバッグ画面からの上書き。参加者IDのある回や、チュートリアル・
         # 練習には効かせない(上の分岐で先に返している)。
         debug = sanitize_debug(choice.get('debug'))
@@ -2107,6 +2163,12 @@ class WebGamePlay:
             'misserved': misserved,
             **self.human_mistake_record(),
             'instruction_confidence': getattr(self, 'instruction_confidence', None),
+            'instruction_text': getattr(self, 'nl_text', ''),
+            'instruction_nl_model': getattr(self, 'nl_model', ''),
+            'instruction_nl_attempts': getattr(self, 'nl_attempts', 0) or '',
+            'instruction_nl_outcome': getattr(self, 'nl_outcome', ''),
+            'instruction_nl_tasks': getattr(self, 'nl_tasks', ''),
+            'instruction_nl_log': '|'.join(getattr(self, 'nl_log', []) or []),
             'aborted': int(bool(res.get('aborted'))),
             # 正式な記録として数える回かどうか。バグ報告の出た回と、
             # 途中で抜けた回は外す。やり直した回が正式な1回になる。
@@ -2696,11 +2758,17 @@ class WebGamePlay:
             self._instruction_answer = None
             self._instruction_done.clear()
             self._instruction_seq += 1
+            self._instruction_candidates = list(candidates)
+            self.instruction_interp = None
             self.instruction_request = {
                 'seq': self._instruction_seq,
                 'items': items,
                 'layers': layer_names,
                 'players': (env_summary or {}).get('players', []),
+                # 指示の入れ方。'text' なら文章で書いてもらい、LLM が解釈する。
+                # 一覧(items)は、合わなかったときに選ぶ用に同じく送る。
+                'input': getattr(self, 'instruction_input', 'cards'),
+                'hint': NL_HINT,
                 # 指示と一緒に、その指示への自信(1〜5)も答えてもらうか。
                 # 実験の回と練習だけ。
                 'ask_confidence': bool((self.selection or {}).get('participant')
@@ -2711,9 +2779,11 @@ class WebGamePlay:
                 if self.state not in ('ready', 'running') or getattr(self, '_aborted', False):
                     return None      # 打ち切り(接続が切れた等)
             idx = self._instruction_answer
-            if idx is None or not (0 <= idx < len(candidates)):
+            # 文章の解釈で複数の候補をまとめた指示は、控えの末尾に足してある
+            cands = self._instruction_candidates
+            if idx is None or not (0 <= idx < len(cands)):
                 return None
-            chosen = candidates[idx]
+            chosen = cands[idx]
             payload = chosen[1] if isinstance(chosen, (list, tuple)) and len(chosen) > 1 else {}
             if isinstance(payload, dict) and payload.get('verb'):
                 self.instruction_kinds = self._dish_kinds_of(payload)
@@ -2730,8 +2800,73 @@ class WebGamePlay:
             with self._instruction_lock:
                 self.instruction_request = None
 
-    def answer_instruction(self, seq, index, confidence=None):
-        """ブラウザで選ばれた指示と、その指示への自信(1〜5)を受け取る。"""
+    def _reset_nl(self):
+        self.nl_text = ''
+        self.nl_model = ''
+        self.nl_attempts = 0
+        self.nl_outcome = ''
+        self.nl_tasks = ''
+        self.nl_log = []
+        self.instruction_interp = None
+
+    def _candidate_label(self, idx):
+        """候補を参加者に見せる言い方(「たまねぎを1つ切って」)。"""
+        try:
+            display, p = self._instruction_candidates[idx]
+        except (IndexError, TypeError):
+            return str(idx)
+        if not isinstance(p, dict) or not p.get('verb'):
+            return str(display)
+        chain = (p.get('chains') or [p.get('chain') or []])[0]
+        n = f"{int(p.get('count') or 1)}つ" if int(p.get('total') or 1) > 1 else ''
+        return f"{card_label(p['verb'], p.get('obj', ''))}を{n}{card_action(p['verb'], len(chain) > 1)}"
+
+    def interpret_instruction(self, seq, text):
+        """文章で書かれた指示を LLM に解釈させる(別スレッド)。結果は画面へ送る。"""
+        with self._instruction_lock:
+            req = self.instruction_request
+            if not req or req['seq'] != seq:
+                return False
+            cands = list(self._instruction_candidates)
+            self._interp_n += 1
+            n = self._interp_n
+        text = str(text or '').strip()[:300]
+        self.nl_attempts += 1
+        self.nl_text = text
+        orders_ja = '、'.join(recipe_label(r) for r in ((self.selection or {}).get('recipes') or []))
+
+        def work():
+            r = instruction_nl.interpret(text, cands, orders_ja, model=NL_MODEL)
+            self.nl_model = r.get('model', '')
+            ids = {str(d): i for i, (d, _p) in enumerate(cands)}
+            steps = dict(instruction_nl.expand_steps(cands, r.get('tasks', [])))
+            tasks = [{'index': ids[t], 'id': t, 'label': self._candidate_label(ids[t]),
+                      'steps': steps.get(t, [])}
+                     for t in r.get('tasks', []) if t in ids]
+            ok = r.get('decision') == 'accept' and bool(tasks)
+            self.nl_log.append('%s=>%s(%s)' % (
+                text.replace('|', '/'), 'accept:' + ','.join(t['id'] for t in tasks) if ok else 'reject',
+                r.get('reject_reason') or ''))
+            print(f"[指示の解釈] #{self.game_id} {n}回目 {text!r} -> "
+                  f"{'受理 ' + ','.join(t['id'] for t in tasks) if ok else '却下 ' + str(r.get('reject_reason'))} "
+                  f"({r.get('model')} {r.get('latency_s')}s{' ' + str(r.get('error')) if r.get('error') else ''})",
+                  flush=True)
+            self.instruction_interp = {
+                'seq': seq, 'n': n, 'ok': ok, 'tasks': tasks,
+                'valid': r.get('valid'), 'ambiguous': r.get('ambiguous'),
+                'reason': None if ok else (r.get('reject_reason') or 'error'),
+                'message': r.get('message') or '',
+            }
+
+        threading.Thread(target=work, daemon=True).start()
+        return True
+
+    def answer_instruction(self, seq, index, confidence=None, indices=None, via=None):
+        """ブラウザで選ばれた指示と、その指示への自信(1〜5)を受け取る。
+
+        indices が来たら(文章の解釈を確認した回)、その候補をまとめて1つの
+        指示にする。1つだけならその候補そのまま。
+        """
         with self._instruction_lock:
             req = self.instruction_request
             if not req or req['seq'] != seq:
@@ -2741,6 +2876,28 @@ class WebGamePlay:
                 self.instruction_confidence = c if 1 <= c <= 5 else None
             except (TypeError, ValueError):
                 self.instruction_confidence = None
+            cands = self._instruction_candidates
+            if indices:
+                try:
+                    ids = [str(cands[int(i)][0]) for i in indices]
+                except (IndexError, TypeError, ValueError):
+                    return False
+                composed = instruction_nl.compose(cands, ids)
+                if composed is None:
+                    return False
+                if len(ids) > 1:
+                    cands.append(composed)
+                    index = len(cands) - 1
+                else:
+                    index = int(indices[0])
+                self.nl_tasks = '|'.join(ids)
+            if getattr(self, 'instruction_input', 'cards') == 'text':
+                self.nl_outcome = 'confirmed' if via == 'text' else 'cards'
+                if via != 'text':
+                    try:
+                        self.nl_tasks = str(cands[int(index)][0])
+                    except (IndexError, TypeError, ValueError):
+                        pass
             self._instruction_answer = int(index)
             self._instruction_done.set()
             return True
@@ -2963,6 +3120,14 @@ class WebGamePlay:
                 # デバッグ画面からの切り替え。実験の回では常に切り。
                 if hasattr(ai, 'two_agent_assignment'):
                     ai.two_agent_assignment = bool(getattr(self, '_two_agent', False))
+        # 指示の入れ方(一覧から選ぶ / 文章で書く)。実験の回はそのパターンの、
+        # 練習は本番のパターンの、デバッグは画面で選んだパターンのもの。
+        if sel and sel.get('mode') == 'practice':
+            self.instruction_input = instruction_input_of(EXPERIMENT_PATTERN)
+        elif sel and sel.get('pattern') is not None:
+            self.instruction_input = instruction_input_of(sel.get('pattern'))
+        else:
+            self.instruction_input = 'cards'
         return self.game
 
     def prepare(self):
@@ -2973,6 +3138,7 @@ class WebGamePlay:
         # 出す前に切れた回の記録に、前の回の値が入る(実測: 指示が空なのに
         # 自信だけ 4 と残った)。
         self.instruction_confidence = None
+        self._reset_nl()
         game = self.build()
 
         self._me_range = None
@@ -4140,7 +4306,11 @@ async def ws(sock: WebSocket):
                 pass
         elif kind == 'instruct':
             session.answer_instruction(msg.get('seq'), msg.get('index'),
-                                       msg.get('confidence'))
+                                       msg.get('confidence'), msg.get('indices'),
+                                       msg.get('via'))
+        elif kind == 'instruct_text':
+            # 文章で書いた指示。解釈は別スレッドで、結果は状態と一緒に送る
+            session.interpret_instruction(msg.get('seq'), msg.get('text'))
         elif kind == 'go':
             session.go(token)
         elif kind == 'pause':
@@ -4281,6 +4451,7 @@ async def ws(sock: WebSocket):
             await send_status_and_notices()
 
     sent_instruction_seq = [0]
+    sent_interp_n = [0]
 
     async def send_status_and_notices():
         nonlocal last_state
@@ -4291,6 +4462,10 @@ async def ws(sock: WebSocket):
         elif not req and sent_instruction_seq[0]:
             sent_instruction_seq[0] = 0
             await send_text({'type': 'instruct_close'})
+        it = session.instruction_interp
+        if it and it.get('n') != sent_interp_n[0]:
+            sent_interp_n[0] = it['n']
+            await send_text({'type': 'instruct_interp', **it})
         for text in session.take_notices():
             await send_text({'type': 'notice', 'text': text})
         # デバッグの回だけ、CSP が立てた計画を送る。実験の回では送らない

@@ -186,6 +186,25 @@
   }
   /* 印の class は sel。pick は同意画面の欄の class で、余白が付いてしまう */
   #instruct .cards .counts span.sel { background: #4fd39a; color: #10251b; border-color: #4fd39a; }
+  /* 文章で書く指示(パターン7)。入力 -> 解釈の確認 -> 決定 */
+  #instruct .nl { width: 100%; }
+  #instruct .nl .hint { font-size: 12.5px; color: var(--muted); margin-bottom: 6px; line-height: 1.5; }
+  #instruct .nl textarea {
+    width: 100%; box-sizing: border-box; font: inherit; font-size: 15px; color: var(--text);
+    background: #1b1f25; border: 1px solid var(--btn-line); border-radius: 8px; padding: 8px; resize: none;
+  }
+  #instruct .nl .row2 { display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+  #instruct .nl .row2 button {
+    font: inherit; font-size: 14px; color: var(--text); background: var(--btn-bg);
+    border: 1px solid var(--btn-line); border-radius: 8px; padding: 8px 14px;
+  }
+  #instruct .nl .row2 button.primary { background: #2f6f57; border-color: #4fd39a; font-weight: 600; }
+  #instruct .nl .row2 button:disabled { opacity: .5; }
+  #instruct .nl .interp { margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: #22272e; font-size: 14px; line-height: 1.6; }
+  #instruct .nl .interp.ng { border: 1px solid #a1464f; }
+  #instruct .nl .interp.ok { border: 1px solid #3f8a60; }
+  #instruct .nl .interp ul { margin: 4px 0 0 18px; padding: 0; }
+  #instruct .nl .wait { color: var(--muted); font-size: 13px; margin-top: 6px; }
   /* 指示への自信(1〜5)。指示のカードを選ぶのと同じ場所で答える */
   #instruct .conf { margin-top: 8px; }
   #instruct .conf.hidden { display: none; }
@@ -2387,6 +2406,8 @@
                   '<button onclick="location.reload()">もう一度並ぶ</button>');
     } else if (msg.type === 'instruct') {
       showInstruct(msg);
+    } else if (msg.type === 'instruct_interp') {
+      if (instructInterpHandler) instructInterpHandler(msg);
     } else if (msg.type === 'instruct_close') {
       hideInstruct();
     } else if (msg.type === 'plan') {
@@ -2829,6 +2850,7 @@
   const instructBox = document.getElementById('instruct');
   let instructDone = false;     // この回の指示をもう選んだか
   let instructShown = false;    // いま指示を出しているか
+  let instructInterpHandler = null;   // 文章の解釈の結果を受け取る(パターン7)
   function showInstruct(msg) {
     // 押しっぱなしのキーは、止める前にきちんと離しておく。残したままだと
     // 「離した」の合図が届かず、指示のあと手を出せなくなる。
@@ -2856,6 +2878,144 @@
         : 'AIに今すぐやってほしい作業を指示してください';
     }
     document.getElementById('instruct-who').innerHTML = who;
+    // 指示を選ぶ間は移動・使うボタンを隠す。盤面の位置が動かないよう、
+    // 隠す前にボタンの高さを測って、同じ高さを確保する。
+    const padBox = pad.getBoundingClientRect();
+    if (padBox.height) instructBox.style.minHeight = padBox.height + 'px';
+    pad.classList.add('hidden');
+    const box = document.getElementById('instruct-cards');
+    const ok = document.getElementById('instruct-ok');
+    // 選んだ内容。index はカードで選んだ1つ、indices は文章の解釈を確認した
+    // 1つ以上の候補。label はバーに残す言い方。via は決め方(cards / text)。
+    const S = { index: null, indices: null, label: '', via: 'cards', conf: null };
+    ok.disabled = true;
+    // 指示への自信(1〜5)。実験の回では、指示と一緒に答えてもらう。ゲームの
+    // あとに聞くと、AI の動きを見たあとの自信になってしまう。
+    const askConf = !!msg.ask_confidence;
+    const confBox = document.getElementById('instruct-conf');
+    const confScale = document.getElementById('instruct-conf-scale');
+    confBox.classList.toggle('hidden', !askConf);
+    confScale.innerHTML = askConf
+      ? [1, 2, 3, 4, 5].map((v) => `<button type="button" data-v="${v}">${v}</button>`).join('')
+      : '';
+    // 「決定」は、指示(と自信)を選び終えてから押せる。
+    const refreshOk = () => {
+      ok.disabled = (S.index === null && !S.indices) || (askConf && S.conf === null);
+    };
+    confScale.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
+      S.conf = Number(b.dataset.v);
+      confScale.querySelectorAll('button').forEach((o) => o.classList.toggle('on', o === b));
+      refreshOk();
+    }));
+    ok.onclick = () => {
+      if ((S.index === null && !S.indices) || (askConf && S.conf === null)) return;
+      showCurrentInstruction(S.label);
+      sendNow({ type: 'instruct', seq: msg.seq, index: S.index, indices: S.indices,
+                via: S.via, confidence: S.conf });
+      moveBlockUntil = performance.now() + stepMs;
+      instructInterpHandler = null;
+      hideInstruct();
+      instructDone = true;
+      if (!started) beginCountdown();   // 決めてから 3・2・1
+    };
+    if (msg.input === 'text') {
+      renderInstructText(msg, S, refreshOk);
+    } else {
+      renderInstructCards(msg, S, refreshOk);
+    }
+    instructBox.classList.add('show');
+    document.body.classList.add('instructing');   // スマホでは盤面を小さくする
+  }
+
+  // ---- 文章で書く指示(パターン7) --------------------------------------------
+  // 書いた文をサーバーへ送り、LLM の解釈(候補のどれか)を見せて確認する。
+  // 合っていれば「この内容にする」-> 決定。違えば書き直すか、一覧から選ぶ。
+  function renderInstructText(msg, S, refreshOk, prevText) {
+    const box = document.getElementById('instruct-cards');
+    S.index = null; S.indices = null; S.label = ''; S.via = 'text';
+    refreshOk();
+    box.innerHTML =
+      '<div class="nl">' +
+      `<div class="hint">${esc(msg.hint || 'AIに今すぐやってほしい作業を、具体的に書いてください')}</div>` +
+      `<textarea id="nl-text" rows="2" maxlength="300" placeholder="例: トマトレタススープを1つと、たまねぎを1つ切って">${esc(prevText || '')}</textarea>` +
+      '<div class="row2"><button type="button" class="primary" id="nl-send">送る</button>' +
+      '<button type="button" id="nl-cards">一覧から選ぶ</button></div>' +
+      '<div id="nl-result"></div></div>';
+    const ta = document.getElementById('nl-text');
+    const send = document.getElementById('nl-send');
+    const result = document.getElementById('nl-result');
+    document.getElementById('nl-cards').addEventListener('click', () => {
+      instructInterpHandler = null;
+      renderInstructCards(msg, S, refreshOk);
+    });
+    const submit = () => {
+      const text = (ta.value || '').trim();
+      if (!text) { result.innerHTML = '<div class="wait">作業を書いてください</div>'; return; }
+      send.disabled = true;
+      ta.disabled = true;
+      result.innerHTML = '<div class="wait">解釈しています...</div>';
+      sendNow({ type: 'instruct_text', seq: msg.seq, text });
+      // 返事が来なければ(通信や API の不調)、書き直しか一覧へ
+      const timer = setTimeout(() => {
+        if (instructInterpHandler !== onInterp) return;
+        showResult({ ok: false, message: '返事が来ませんでした。もう一度送るか、一覧から選んでください。' });
+      }, 40000);
+      const onInterp = (r) => { clearTimeout(timer); showResult(r); };
+      instructInterpHandler = onInterp;
+    };
+    const showResult = (r) => {
+      instructInterpHandler = null;
+      send.disabled = false;
+      ta.disabled = false;
+      if (r.ok && (r.tasks || []).length) {
+        S.indices = r.tasks.map((t) => t.index);
+        S.label = r.tasks.map((t) => t.label).join('、');
+        S.via = 'text';
+        // 解釈した作業を、AI がやる工程(切る → 煮る → 提供)まで広げて見せる
+        result.innerHTML =
+          '<div class="interp ok">AIがやること:' +
+          `<ul>${r.tasks.map((t) => `<li>${esc(t.label)}` +
+            ((t.steps || []).length > 1 ? `<br><small>${esc(t.steps.join(' → '))}</small>` : '') +
+            '</li>').join('')}</ul>` +
+          '<div class="row2"><button type="button" class="primary" id="nl-yes">この内容にする</button>' +
+          '<button type="button" id="nl-retry">書き直す</button>' +
+          '<button type="button" id="nl-cards2">一覧から選ぶ</button></div></div>';
+        document.getElementById('nl-yes').addEventListener('click', () => {
+          refreshOk();
+          document.getElementById('nl-yes').textContent = askConf && S.conf === null
+            ? '自信を選んでから「決定」を押してください' : '「決定」を押してください';
+          document.getElementById('instruct-ok').scrollIntoView({ block: 'nearest' });
+        });
+      } else {
+        S.indices = null; S.label = '';
+        refreshOk();
+        const head = r.valid === false ? '有効な指示ではありません: '
+          : r.ambiguous ? '曖昧です: ' : '';
+        result.innerHTML =
+          `<div class="interp ng">${esc(head + (r.message || '解釈できませんでした'))}` +
+          '<div class="row2"><button type="button" class="primary" id="nl-retry">書き直す</button>' +
+          '<button type="button" id="nl-cards2">一覧から選ぶ</button></div></div>';
+      }
+      document.getElementById('nl-retry').addEventListener('click', () => {
+        renderInstructText(msg, S, refreshOk, ta.value);
+      });
+      document.getElementById('nl-cards2').addEventListener('click', () => {
+        instructInterpHandler = null;
+        renderInstructCards(msg, S, refreshOk);
+      });
+    };
+    const askConf = !!msg.ask_confidence;
+    send.addEventListener('click', submit);
+    ta.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); submit(); }
+    });
+    ta.focus();
+  }
+
+  // ---- 一覧(カード)から選ぶ指示 ----------------------------------------------
+  function renderInstructCards(msg, S, refreshOk) {
+    S.index = null; S.indices = null; S.label = ''; S.via = 'cards';
+    refreshOk();
     // 段(切る / 調理する / 提供まで任せる)ごとに行を分ける。
     // 同じ工程が複数あるカードは、選ぶと中に「1つ / 2つ」が出る。
     const items = msg.items || [];
@@ -2882,35 +3042,11 @@
       `<div class="row">` +
       (rows.length > 1 && layerName[String(r.layer)] ? `<div class="row-name">${esc(layerName[String(r.layer)])}</div>` : '') +
       r.html + '</div>').join('');
-    // 指示を選ぶ間は移動・使うボタンを隠す。盤面の位置が動かないよう、
-    // 隠す前にボタンの高さを測って、同じ高さを確保する。
-    const padBox = pad.getBoundingClientRect();
-    if (padBox.height) instructBox.style.minHeight = padBox.height + 'px';
-    pad.classList.add('hidden');
     const box = document.getElementById('instruct-cards');
     box.innerHTML = cards;
     // 押した瞬間には送らない。移動ボタンを操作しているときに指が触れて
     // そのまま送ってしまうため、いったん選ぶだけにして「決定」で送る。
-    const ok = document.getElementById('instruct-ok');
     let chosen = null;
-    ok.disabled = true;
-    // 指示への自信(1〜5)。実験の回では、指示と一緒に答えてもらう。ゲームの
-    // あとに聞くと、AI の動きを見たあとの自信になってしまう。
-    const askConf = !!msg.ask_confidence;
-    let conf = null;
-    const confBox = document.getElementById('instruct-conf');
-    const confScale = document.getElementById('instruct-conf-scale');
-    confBox.classList.toggle('hidden', !askConf);
-    confScale.innerHTML = askConf
-      ? [1, 2, 3, 4, 5].map((v) => `<button type="button" data-v="${v}">${v}</button>`).join('')
-      : '';
-    // 「決定」は、指示(と自信)を選び終えてから押せる。
-    const refreshOk = () => { ok.disabled = chosen === null || (askConf && conf === null); };
-    confScale.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
-      conf = Number(b.dataset.v);
-      confScale.querySelectorAll('button').forEach((o) => o.classList.toggle('on', o === b));
-      refreshOk();
-    }));
     box.querySelectorAll('button').forEach((b) => b.addEventListener('click', (ev) => {
       const it = items[Number(b.dataset.i)] || {};
       const opts = it.options || [];
@@ -2926,26 +3062,13 @@
         chosen = picked && opts.length > 1 ? opts[Number(picked.dataset.k)].index : Number(b.dataset.index);
       }
       box.querySelectorAll('button').forEach((o) => o.classList.toggle('on', o === b));
+      // 何を指示したかをバーに残す(「たまねぎを2つ切って」)
+      const opt = (it.options || []).find((o) => o.index === chosen);
+      const n = opt && (it.options || []).length > 1 ? `${opt.count}つ` : '';
+      S.index = chosen; S.indices = null; S.via = 'cards';
+      S.label = `${it.label}を${n}${it.action || ''}`;
       refreshOk();
     }));
-    ok.onclick = () => {
-      if (chosen === null || (askConf && conf === null)) return;
-      // 何を指示したかをバーに残す(「たまねぎを2つ切って」)
-      const onBtn = box.querySelector('button.on');
-      const onItem = onBtn ? items[Number(onBtn.dataset.i)] : null;
-      if (onItem) {
-        const opt = (onItem.options || []).find((o) => o.index === chosen);
-        const n = opt && (onItem.options || []).length > 1 ? `${opt.count}つ` : '';
-        showCurrentInstruction(`${onItem.label}を${n}${onItem.action || ''}`);
-      }
-      sendNow({ type: 'instruct', seq: msg.seq, index: chosen, confidence: conf });
-      moveBlockUntil = performance.now() + stepMs;
-      hideInstruct();
-      instructDone = true;
-      if (!started) beginCountdown();   // 決めてから 3・2・1
-    };
-    instructBox.classList.add('show');
-    document.body.classList.add('instructing');   // スマホでは盤面を小さくする
   }
   function showCurrentInstruction(text) {
     const box = document.getElementById('cur-instr');
@@ -2956,6 +3079,7 @@
   }
   function hideInstruct() {
     instructShown = false;
+    instructInterpHandler = null;
     instructBox.classList.remove('show');
     document.body.classList.remove('instructing');
     pad.classList.remove('hidden');
