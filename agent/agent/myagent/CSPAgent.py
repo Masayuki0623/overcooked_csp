@@ -4965,6 +4965,58 @@ class CSPAgent:
                     return k, tuple(ag.location)
         return None
 
+    @staticmethod
+    def _chop_rest_steps(env, board_pos):
+        """まな板の上の材料を切り終えるまでに残っている回数(無ければ None)。
+
+        まだ切り始めていない(Fresh)なら全回数、切りかけ(Chopping)なら残り。
+        """
+        obj = env.pos_obj.get(tuple(board_pos)) if hasattr(env, 'pos_obj') else None
+        if obj is None or getattr(obj, 'is_held', False):
+            return None
+        contents = getattr(obj, 'contents', None) or []
+        if len(contents) != 1:
+            return None
+        state = getattr(contents[0], 'state', None)
+        name = type(state).__name__ if state is not None else ''
+        if name == 'Fresh':
+            return int(game_config.chopping_steps())
+        if name == 'Chopping':
+            rest = getattr(state, '_rest_steps', None)
+            if rest is None:
+                return None
+            return max(1, int(rest))
+        if name == 'Chopped':
+            return 0          # 切り終えてまな板に載ったまま(取って運ぶだけ)
+        return None
+
+    @staticmethod
+    def _chopped_on_boards(env, obj):
+        """切り終えたその材料だけが載っているまな板の位置。
+
+        まな板の上の切った物は在庫(consume_chopped)には数えない決まりなので、
+        「切る」工程は残る。その工程の所要は「取って運ぶだけ」で見積もる
+        (2026-10-06。以前は供給口から切り直す満額で見積もり、切り終えてから
+        取るまでの間だけ見込みが 14 フレーム悪化していた)。
+        """
+        out = []
+        try:
+            boards = {tuple(b) for b in env.get_pos_by_obj_gs(gs='Cutboard')}
+        except Exception:
+            return out
+        for pos, item in getattr(env, 'pos_obj', {}).items():
+            if tuple(pos) not in boards or item is None or getattr(item, 'is_held', False):
+                continue
+            contents = getattr(item, 'contents', None) or []
+            if len(contents) != 1:
+                continue
+            c = contents[0]
+            if str(getattr(c, 'name', '')).lower() != str(obj).lower():
+                continue
+            if type(getattr(c, 'state', None)).__name__ == 'Chopped':
+                out.append(tuple(pos))
+        return out
+
     def _chop_walk_frames(self, env, ing_pos, cutboard_pos, target):
         """材料の場所 → まな板 → 置き場 と歩く手数。経路が引けなければ None。"""
         best = None
@@ -5295,6 +5347,7 @@ class CSPAgent:
                     base_name = raw_base_name(world_obj)
                     if base_name is not None and base_name.lower() == obj:
                         raw_candidates.append(pos)
+                raw_candidates += self._chopped_on_boards(env, obj)
                 # 向こう側に置かれた材料を起点にすると経路が引けない。
                 # 担当者の手の届くものだけを見る。
                 raw_candidates = own_side(raw_candidates)
@@ -6052,6 +6105,8 @@ class CSPAgent:
                 base_name = raw_base_name(world_obj)
                 if base_name is not None and base_name.lower() == obj:
                     raw_candidates.append(pos)
+            # 切り終えてまな板に載ったままの物も「その材料の工程の起点」
+            raw_candidates += self._chopped_on_boards(env, obj)
 
             if raw_candidates:
                 ing_pos = get_nearest(resources['cutboards'][0] if resources['cutboards'] else None, raw_candidates)
@@ -6102,6 +6157,17 @@ class CSPAgent:
             
             if min_total is None:
                 return None
+            # 材料がもうまな板に載っている(置いたまま / 切りかけ)なら、
+            # 「取る + 置く」は済んでいて、刻むのは残りの回数だけ(2026-10-06)。
+            # 以前は満額で見積もっていたため、切っている間だけ所要が
+            # 4〜8 フレーム多く見え、見込みの所要が一時的に悪化して同点の
+            # 並び・担当が入れ替わっていた(実測: 見込み 29.8 -> 31.4 -> 29.8 秒)。
+            if tuple(ing_pos) in {tuple(c) for c in cutboard_pos_list}:
+                rest = self._chop_rest_steps(env, ing_pos)
+                if rest is not None:
+                    # 残りを刻む + 刻んだ物を取る + 置き場に置く(min_total は
+                    # まな板→置き場の分だけ。材料→まな板は 0)
+                    return int(min_total + INTERACT_FRAMES * 2 + rest)
             # 材料を取る + まな板に置く + 刻む + 刻んだ物を取る + 置き場に置く。
             # 刻んでいる間と、刻んだ物を取るときは、まな板を向いたままなので
             # 向き直す手は要らない。
@@ -9094,6 +9160,11 @@ class CSPAgent:
                 sum(solver.Value(v) for v in in_time_vars)
                 if in_time_vars else None)
             self._last_solve_metrics['objective'] = solver.ObjectiveValue()
+            # 目的関数の内訳(観測用)。計画が変わった理由を追うのに使う
+            self._last_solve_metrics['end_sum_frames'] = int(sum(solver.Value(e) for e in task_ends)) if task_ends else 0
+            self._last_solve_metrics['switch_penalty'] = (
+                int(sum(solver.Value(x) if not isinstance(x, int) else x for x in switch_penalty_terms))
+                if switch_penalty_terms else 0)
             self._emit_counter_debug(f"[CSPAgent] 最適Makespan(移動込み): {actual_makespan} (評価値: {solver.ObjectiveValue()})")
             
             if not self.sc_2agent:
