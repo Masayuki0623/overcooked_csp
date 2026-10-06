@@ -1676,12 +1676,40 @@ class CSPAgent:
             'Putout_Fire',
         )
 
+        # 計画どおりに動く側(AI 自身。2人とも計画どおりなら両方)の出来事は
+        # 計画の想定内なので、それで再計算はしない(2026-10-06)。
+        # 実測: 2人とも計画どおりでも 30 秒の試合で 35〜40 回再計算し、その
+        # 半分で担当や並びが入れ替わっていた。再計算は、計画どおりでない側
+        # (人)の出来事と、工程の増減・停滞のときだけ。
+        planned = set()
+        try:
+            agents = list(getattr(env, 'agents', []) or [])
+            if getattr(self, 'replan_on_own_events', False):
+                agents = []
+            if self.sc_2agent and getattr(self, 'human_counterpart_mode', False):
+                own = 1 if getattr(self, 'own_agent_idx', 0) == 1 else 0
+                if own < len(agents):
+                    planned.add(getattr(agents[own], 'name', None))
+            elif self.sc_2agent and not getattr(self, 'partner_is_external', True):
+                planned.update(getattr(a, 'name', None) for a in agents[:2])
+            elif self.sc_2agent:
+                own = 1 if getattr(self, 'own_agent_idx', 0) == 1 else 0
+                if own < len(agents):
+                    planned.add(getattr(agents[own], 'name', None))
+            else:
+                if agents:
+                    planned.add(getattr(agents[0], 'name', None))
+        except Exception:
+            planned = set()
+
         for event in new_events:
             event_name = getattr(event, 'event', None)
             player_name = getattr(event, 'playerA', None)
             if not event_name or not player_name:
                 continue
             if event_name == 'No-op':
+                continue
+            if player_name in planned:
                 continue
             if event_name.startswith(relevant_prefixes):
                 return f"event:{player_name}:{event_name}"
