@@ -319,7 +319,11 @@ class CSPAgent:
         self._claim_priority = None      # 確保する順に並べた注文 uid
         self._stock_contest = {}         # 食材 -> {'claimed': [uid], 'chopped': [uid]}
         self._claim_winner = {}          # 取り合いが決着した食材 -> 取る注文 uid
-        self.MAX_CLAIM_CANDIDATES = 3
+        # 取り合いの裁き方(確保順)の案の上限。3 だと、関わる注文が 3 つのとき
+        # 「切った注文が自分の在庫を取る」案が評価されないことがあった
+        # (実測 2026-10-06: スープが切って置いたレタスを、常にサラダが取って
+        #  スープは切り直し。見込みの所要が 29.4 -> 32.0 秒に悪化)。
+        self.MAX_CLAIM_CANDIDATES = 8
 
         # print("[CSPAgent] 初期化完了")
 
@@ -1684,7 +1688,10 @@ class CSPAgent:
         planned = set()
         try:
             agents = list(getattr(env, 'agents', []) or [])
-            if getattr(self, 'replan_on_own_events', False):
+            # 既定では元どおり、どちらの出来事でも再計算する(2026-10-06 の方針:
+            # 再計算を明示的に抑えるのではなく、計画どおりなのに計画が変わる
+            # 原因(モデルの誤り)を直す)。False にすると自分の出来事では再計算しない
+            if getattr(self, 'replan_on_own_events', True):
                 agents = []
             if self.sc_2agent and getattr(self, 'human_counterpart_mode', False):
                 own = 1 if getattr(self, 'own_agent_idx', 0) == 1 else 0
@@ -7048,12 +7055,23 @@ class CSPAgent:
             return []
 
         candidates = [list(base)]
+
+        def add(cand):
+            if cand not in candidates and len(candidates) < self.MAX_CLAIM_CANDIDATES:
+                candidates.append(cand)
+
+        # 切って置いた注文が自分の在庫をそのまま使う案は必ず入れる(上限で
+        # 切られて評価されないと、別の注文が横取りする案しか残らない)
+        owners = [uid for info in contest.values() for uid in list(info['chopped']) if uid is not None]
+        for owner in owners:
+            if owner in base:
+                rest = [u for u in base if u != owner]
+                add([owner] + rest)
         for perm in itertools.permutations([base[i] for i in positions]):
             cand = list(base)
             for pos, uid in zip(positions, perm):
                 cand[pos] = uid
-            if cand not in candidates:
-                candidates.append(cand)
+            add(cand)
             if len(candidates) >= self.MAX_CLAIM_CANDIDATES:
                 break
         return candidates
