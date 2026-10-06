@@ -1505,6 +1505,46 @@ class CSPAgent:
                   f'action={action} 時刻={pending["canceled_env_time"]}秒',
                   flush=True)
 
+    def finalize_instruction_status(self, deliveries, ai_name=None, env_pending=None):
+        """試合の終わりに、指示の料理が出たかを提供の記録から確かめ直す。
+
+        指示の料理が最後の 1 品だと、出た瞬間に試合が終わり、その提供を
+        _track_instruction_progress が見ないまま記録が締められる(結末が started
+        のまま残っていた)。deliveries は環境の提供の記録
+        ([{'dish', 'time', 'ok', 'by'}])。env_pending があれば同じ id の分も直す。
+        """
+        for pending in list(getattr(self, '_pending_instructions', []) or []):
+            if pending.get('status') in ('done', 'canceled', 'vanished', 'human_done'):
+                continue
+            chain_tids = self._pending_chain_tids(pending) or set()
+            dish = next((str(t[1]) for t in chain_tids
+                         if str(t[0]) in ('serve', 'serve_salad', 'serve_juice')), None)
+            if not dish:
+                continue
+            pref = {KIND_SOUP: 'Cooked', KIND_SALAD: 'Chopped',
+                    KIND_JUICE: 'Mixed'}.get(dish_kind_of(dish))
+            want = sorted(p.lower() for p in dish_ingredients(dish))
+            since = float(pending.get('accepted_env_time') or 0.0)
+            for d in deliveries or []:
+                if not d.get('ok', True) or float(d.get('time') or 0.0) < since:
+                    continue
+                parts = [x for x in str(d.get('dish') or '').split('-') if x not in ('Plate', 'Cup')]
+                got = sorted(x[len(pref):].lower() for x in parts if pref and x.startswith(pref))
+                if not parts or len(got) != len(parts) or got != want:
+                    continue
+                by_ai = ai_name is not None and d.get('by') == ai_name
+                pending['status'] = 'done'
+                pending['delivered_env_time'] = float(d.get('time') or 0.0)
+                pending['delivered_by'] = 'AI' if by_ai else '人'
+                if not by_ai and pending.get('human_done_env_time') is None:
+                    pending['human_done_env_time'] = pending['delivered_env_time']
+                for ep in (env_pending or []):
+                    if ep is not pending and ep.get('id') == pending.get('id'):
+                        for k in ('status', 'delivered_env_time', 'delivered_by', 'human_done_env_time'):
+                            if k in pending:
+                                ep[k] = pending[k]
+                break
+
     def _note_instruction_started(self, env, agent_idx, tid):
         """指示された作業に実際に取りかかった時刻を残す(測定用)。
 
@@ -1515,6 +1555,12 @@ class CSPAgent:
             return
         for pending in list(getattr(self, '_pending_instructions', []) or []):
             if pending.get('started_env_time') is not None:
+                continue
+            # 終わった指示には触らない。相手が指示の料理を丸ごと出した回は
+            # 着手の時刻が無いまま終わる。そのあと、注文番号が詰め直されて
+            # 同じ id になった別の注文の工程に取りかかると、「着手した」に
+            # 戻っていた(実測 2026-10-07: 3 品とも出たのに started のまま)。
+            if pending.get('status') in ('done', 'canceled', 'vanished', 'human_done'):
                 continue
             if pending.get('target_idx', 0) not in (agent_idx, None):
                 continue
@@ -8240,6 +8286,16 @@ class CSPAgent:
         carried_budget = {}
         current_orders = env.order.current_orders if hasattr(env, 'order') and hasattr(env.order, 'current_orders') else []
         order_uids = self._refresh_active_order_uids(current_orders)
+        # 手に持っている刻んだ材料の持ち主の注文は、持っている人の作業の注文番号
+        # から推している。その注文がもう無い(出し終えて番号が詰め直された)なら
+        # 持ち主不明として扱い、残っている注文が使えるようにする。以前は無い注文の
+        # 分として抱えたままにし、残った注文はその材料を当てにできず、相手が
+        # 置く・拾うたびに「取りに行く」と「切り直す」を往復して止まった
+        # (実測 2026-10-07: 最後のサラダが出せずに 120 秒)。
+        for _u in list(held_chopped_by_order):
+            if _u not in order_uids:
+                for _n, _c in held_chopped_by_order.pop(_u).items():
+                    held_chopped_unassigned[_n] = held_chopped_unassigned.get(_n, 0) + _c
 
         # 他の注文の置き場に置かれた材料を、その注文がまだ使うかどうか。
         # 置き場の予約は AI の中だけの取り決めで、人は知らずにどこにでも

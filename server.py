@@ -2182,6 +2182,10 @@ class WebGamePlay:
         is_debug = not sel.get('participant') and bool(sel.get('custom'))
         if not sel.get('participant') and not is_debug:
             return
+        # 指示の料理が最後の 1 品だと、出た瞬間に試合が終わり、AI はその提供を
+        # 見ないまま記録を締めることになる(指示の結末が started のまま残った)。
+        # 提供の記録から確かめ直してから書く。
+        self._safe('指示の結末の確認', self._finalize_instruction_status)
         pid = sel.get('participant') or 'debug'
         res = self.result or {}
         env = self.env
@@ -2271,6 +2275,19 @@ class WebGamePlay:
                                    'makespan_s': round(float(
                                        getattr(env, 'current_time', 0.0) or 0.0), 1)},
                         'ts': datetime.now().isoformat(timespec='seconds')})
+
+    def _finalize_instruction_status(self):
+        """試合の終わりに、指示の料理が出たかを提供の記録から確かめ直す。"""
+        game = self.game
+        env = self.env
+        ai = getattr(game, 'ai', None) if game is not None else None
+        if ai is None or env is None or not hasattr(ai, 'finalize_instruction_status'):
+            return
+        agents = list(getattr(env, 'sim_agents', []) or [])
+        own = int(getattr(ai, 'own_agent_idx', 0) or 0)
+        ai_name = agents[own].name if own < len(agents) else None
+        ai.finalize_instruction_status(list(getattr(env, 'delivery_log', []) or []), ai_name,
+                                       getattr(env, '_pending_instructions', None))
 
     def _log_instructions(self, reason):
         """この回に出した指示を、1回1行で残す。
