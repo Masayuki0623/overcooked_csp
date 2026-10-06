@@ -1421,11 +1421,14 @@
   // ---- ステージ選択 ----------------------------------------------------
   // 地図・レシピ・注文の組み合わせを選んでからスタートする。前回選んだ
   // ものはこの端末に覚えておく(次に開いたとき同じ選択から始められる)。
-  const SKIP_BUDGETS = [0, 1, 2];
+  const SKIP_BUDGETS = [0, 1, 2, 3, 4, 'inf'];
   const SKIP_BUDGET_DESC = {
     '0': '0 = 指示したことにすぐ取りかかる',
     '1': '1 = 他の作業を1つまで先にやってから取りかかる',
     '2': '2 = 他の作業を2つまで先にやってから取りかかる',
+    '3': '3 = 他の作業を3つまで先にやってから取りかかる',
+    '4': '4 = 他の作業を4つまで先にやってから取りかかる',
+    'inf': 'inf = 指示を縛りにしない(いつ取りかかってもよい)',
   };
   const INSTRUCTION_CHOICES = [
     { id: 'once_at_start', label: '指示あり(最初に1回)',
@@ -1593,7 +1596,7 @@
           '<div class="opts">' +
           SKIP_BUDGETS.map((b) =>
             `<button type="button" data-key="skip_budget" data-val="${b}" ` +
-            `class="${Number(pick.skip_budget) === b ? 'on' : ''}">${b}</button>`).join('') +
+            `class="${String(pick.skip_budget) === String(b) ? 'on' : ''}">${b}</button>`).join('') +
           `</div><div class="hint">${esc(SKIP_BUDGET_DESC[String(pick.skip_budget)] || '')}` +
           '</div></div>' : '')) +
       // デバッグ設定(煮込み時間・切る回数・エンドレスなど)は、実験
@@ -1632,9 +1635,8 @@
     }
 
     el.overlayText.querySelectorAll('.opts button').forEach((b) => b.addEventListener('click', () => {
-      pick[b.dataset.key] = (b.dataset.key === 'skip_budget'
-                             || b.dataset.key === 'pattern'
-                             || b.dataset.key === 'two_agent')
+      pick[b.dataset.key] = (b.dataset.key === 'pattern' || b.dataset.key === 'two_agent'
+                             || (b.dataset.key === 'skip_budget' && b.dataset.val !== 'inf'))
         ? Number(b.dataset.val) : b.dataset.val;
       if (b.dataset.key === 'pattern') { assignment = null; loadAssignment(); }
       if (b.dataset.key === 'preset') pick.case = '';
@@ -1669,7 +1671,7 @@
              instruction_input: custom ? (pick.instruction_input || 'cards') : undefined,
              case: pick.case === '' ? null : Number(pick.case),
              instruction: pick.instruction,
-             skip_budget: Number(pick.skip_budget) || 0,
+             skip_budget: pick.skip_budget === 'inf' ? 'inf' : (Number(pick.skip_budget) || 0),
              instruct_every: Number(pick.instruct_every) || 3,
              pattern: Number(pick.pattern) || 1,
              debug: d.on ? {

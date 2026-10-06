@@ -133,6 +133,8 @@ def system_prompt(menu, orders_ja, ingredients_ja='たまねぎ・トマト・�
 
 この回の注文: {orders_ja}
 材料は {ingredients_ja} だけです。
+材料の言い換えは同じ材料として扱う: たまねぎ = 玉ねぎ = オニオン = onion、トマト = tomato、
+レタス = lettuce。料理の言い方もゆるく受ける(「オニオンレタススープ」「たまねぎとレタスのスープ」など)。
 
 できる作業の一覧(id: 内容):
 {lines}

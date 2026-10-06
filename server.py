@@ -2073,9 +2073,16 @@ class WebGamePlay:
             instruct_every = max(1, min(20, int(choice.get('instruct_every') or 3)))
         except (TypeError, ValueError):
             instruct_every = 3
+        # デバッグで選べる割り込み許容数は 0〜4 と inf(2026-10-06)。
+        # 以前は SKIP_BUDGETS(0, 1)しか受けず、2 を選んでも黙って 0 になっていた
         skip_budget = choice.get('skip_budget')
-        if skip_budget not in SKIP_BUDGETS:
-            skip_budget = SKIP_BUDGETS[0]
+        if skip_budget == SKIP_BUDGET_INF or skip_budget is None:
+            skip_budget = SKIP_BUDGET_INF if skip_budget == SKIP_BUDGET_INF else SKIP_BUDGETS[0]
+        else:
+            try:
+                skip_budget = max(0, min(4, int(skip_budget)))
+            except (TypeError, ValueError):
+                skip_budget = SKIP_BUDGETS[0]
         out = {'map': map_name, 'preset': preset, 'case': case,
                'recipes': list(sets[case]), 'picked_by': picked_by,
                'instruction': instruction, 'skip_budget': skip_budget,
