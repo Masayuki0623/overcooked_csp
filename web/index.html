@@ -525,9 +525,10 @@
   }
   #overlay.show { animation: ovFade .35s ease both; }
   @keyframes ovFade { from { opacity: 0; } to { opacity: 1; } }
-  #overlay-text .anim-in { animation: ovIn .55s ease both; }
+  #instruct.show { animation: ovFade .45s ease both; }
+  #overlay-text .anim-in, #instruct .anim-in { animation: ovIn .55s ease both; }
   @media (prefers-reduced-motion: reduce) {
-    #overlay.show, #overlay-text .anim-in { animation: none; }
+    #overlay.show, #overlay-text .anim-in, #instruct .anim-in { animation: none; }
   }
   /* ---- 画面の見た目(主張しすぎない程度に) ----
      説明・アンケート・チュートリアルの枠は、薄い光の入った面に載せる。 */
@@ -3080,13 +3081,22 @@
     const askConf = !!msg.ask_confidence;
     const confBox = document.getElementById('instruct-conf');
     const confScale = document.getElementById('instruct-conf-scale');
-    confBox.classList.toggle('hidden', !askConf);
+    // 質問(B1)は、指示を選んだあとに出す。カードと同時に出すと、
+    // 読むものが 2 か所に同時に現れる(2026-10-07)。
+    confBox.classList.add('hidden');
     confScale.innerHTML = askConf
       ? [1, 2, 3, 4, 5].map((v) => `<button type="button" data-v="${v}">${v}</button>`).join('')
       : '';
     // 「決定」は、指示(と自信)を選び終えてから押せる。
     const refreshOk = () => {
-      ok.disabled = (S.index === null && !S.indices) || (askConf && S.conf === null);
+      const chosen = !(S.index === null && !S.indices);
+      if (askConf && chosen && confBox.classList.contains('hidden')) {
+        confBox.classList.remove('hidden');
+        confBox.classList.remove('anim-in');
+        void confBox.offsetWidth;
+        confBox.classList.add('anim-in');
+      }
+      ok.disabled = !chosen || (askConf && S.conf === null);
     };
     confScale.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
       S.conf = Number(b.dataset.v);
