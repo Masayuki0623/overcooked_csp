@@ -75,11 +75,22 @@ def main():
                       'tasks': ['chop_onion_x1', 'chop_onion_x2']}, list(by_id))
     check('曖昧として却下', r['decision'] == 'reject' and r['reject_reason'] == 'ambiguous', r['message'])
 
-    print('[2] compose: 「トマトレタススープを作って。材料は切らないで」')
+    print('[2] 「材料は切らないで」(下の工程を人に残す)は無効。除けるのは提供だけ')
     sid = 'serve_lettuce_tomatosoup'
     check('候補にある', sid in by_id)
     if sid not in by_id:
         return 1
+    r = NL.normalize({'valid': True, 'ambiguous': False, 'message': '', 'tasks': [sid],
+                      'exclude_steps': ['chop']}, list(by_id), cands)
+    check('切るを除くと無効', r['decision'] == 'reject' and r['reject_reason'] == 'invalid', r['message'])
+    r = NL.normalize({'valid': True, 'ambiguous': False, 'message': '', 'tasks': [sid],
+                      'exclude_steps': ['cook']}, list(by_id), cands)
+    check('煮るを除くと無効', r['decision'] == 'reject' and r['reject_reason'] == 'invalid')
+    r = NL.normalize({'valid': True, 'ambiguous': False, 'message': '', 'tasks': [sid],
+                      'exclude_steps': ['serve']}, list(by_id), cands)
+    check('提供を除くのは受ける', r['decision'] == 'accept' and r['exclude'] == ['serve'], str(r))
+
+    print('[2b] compose(計画側の仕組み): 除いた工程は人の分になる')
     label, p = NL.compose(cands, [sid], ['chop'])
     chain = [tuple(c) for c in p['chains'][0]]
     human = {tuple(c) for c in p.get('human_ids') or []}
@@ -128,7 +139,7 @@ def main():
           str(size([sid, 'chop_onion_x1'])))
     two = [sid, 'serve_lettuce_onionsoup']
     check('スープ2品(8工程)は多すぎ', size(two)[1] == 'too_many', str(size(two)))
-    check('スープ、切るのは人(2工程)は受ける', size([sid], ['chop'])[0] == 'accept', str(size([sid], ['chop'])))
+    check('スープ、提供は人(3工程)は受ける', size([sid], ['serve'])[0] == 'accept', str(size([sid], ['serve'])))
     check('サラダ、提供は人(2工程)は受ける', size(['serve_salad_onion_tomatosalad'], ['serve'])[0] == 'accept',
           str(size(['serve_salad_onion_tomatosalad'], ['serve'])))
 

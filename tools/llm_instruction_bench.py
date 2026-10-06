@@ -107,9 +107,9 @@ CASES = [
     ('サラダを作って、レタスも1つ切っておいて', A, [['serve_salad_onion_tomatosalad', 'chop_lettuce_x1']]),
     ('私はサラダをやるので、たまねぎレタスのスープをお願い', A, [['serve_lettuce_onionsoup']]),
     ('たまねぎを1つ切ったあと、トマトレタススープを煮て', A, [['chop_onion_x1', 'cook_lettuce_tomatosoup']]),
-    # 工程の一部を除く(AI にやらせない工程)
-    ('トマトレタスのスープを作って。材料は切らないで', A, [['serve_lettuce_tomatosoup']], ['chop']),
-    ('たまねぎレタスのスープをお願い。切るのは私がやる', A, [['serve_lettuce_onionsoup']], ['chop']),
+    # 工程の一部を除く。除けるのは一番上(提供)だけ。下の工程(切る)を人に残す指示は無効
+    ('トマトレタスのスープを作って。材料は切らないで', INV, None),
+    ('たまねぎレタスのスープをお願い。切るのは私がやる', INV, None),
     ('サラダを作って。盛り付けと提供は私がやる', A, [['serve_salad_onion_tomatosalad']], ['serve']),
     # 曖昧: 作業が特定できない
     ('右で作業して', AMB, None),

@@ -94,9 +94,9 @@ def system_prompt(menu, orders_ja, ingredients_ja='たまねぎ・トマト・�
              料理の種類だけの指定(「スープを作って」「スープを煮て」)は曖昧ではない(その種類の料理をすべて選ぶ)。
 - tasks    : valid かつ ambiguous でないとき、当てはまる id をすべて。それ以外は空。
              同じ作業の個数違い(x1 と x2)を両方選んではいけない。個数が決まらなければ ambiguous。
-- exclude_steps: 「材料は切らないで」「切るのは私がやる」「煮るのは任せる」のように、料理の工程のうち AI に
+- exclude_steps: 「材料は切らないで」「切るのは私がやる」「提供は私がやる」のように、料理の工程のうち AI に
              やらせないと言われた工程を入れる(chop=切る, cook=煮る, serve=提供)。何も言われなければ空の配列。
-             除く工程があっても、料理の指定(serve 系 / cook 系)はそのまま選ぶ。
+             除く工程があっても、料理の指定(serve 系 / cook 系)はそのまま選ぶ(受けるかどうかは後で決める)。
 - message  : 参加者に見せる短い日本語。受理なら解釈した内容を1文で、曖昧・無効なら理由と書き直しの助言を1文で。
 
 規則:
@@ -371,6 +371,13 @@ def normalize(raw, ids, candidates=None):
     if cap:
         return dict(base, decision='reject', tasks=[], reject_reason=cap,
                     message=REJECT_JA[cap] + '。頼む量を減らしてください。')
+    # 指示は「AI に今すぐやってほしい作業」なので、鎖の下の工程(切る・煮る)を人に
+    # 残して上の工程だけ頼むことはできない(上を頼んだら下も AI がやる)。
+    # 除けるのは一番上(提供)だけ(2026-10-06)
+    if any(e != 'serve' for e in exclude):
+        return dict(base, decision='reject', tasks=[], reject_reason='invalid',
+                    message='AI に今すぐやってほしい作業の指示なので、料理を頼むときは材料を切るところから'
+                            '任せてください(煮るところまでで止めるなら「煮て」と書いてください)。')
     # 除く工程が、選んだ作業の全部(切るだけの指示で「切らないで」)なら、やることが無い。
     # 料理の指示は鎖(切る → 煮る → 提供)なので、提供を除いても切る・煮るが残る
     if exclude:
