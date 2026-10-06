@@ -1177,8 +1177,9 @@
     const note = document.getElementById('dl-note');
     if (note) {
       const size = formatBytes(spriteBytes);
+      // 読み終えたら消す(参加者には要らない情報が画面に残る)
       note.textContent = spritesAllLoaded
-        ? (size ? `ゲームの画像を読み込みました(${size})` : '')
+        ? ''
         : `ゲームの画像を読み込んでいます${size ? `(全部で約 ${size})` : ''}`;
     }
   }
@@ -1713,10 +1714,12 @@
           '</div><div class="hint">CSP にすると、1 つの CSP が 2 人ぶんの計画を立てて、あなたの席も動かします(見るだけ。指示は AI に出せます)</div></div>'
         : '') +
       '<div class="go"><button class="primary" id="start" disabled>スタート</button> ' +
-      '<button id="pick-back">最初に戻る</button>' +
+      // 本番の流れでは出さない(押すと流れの外へ出てしまう)
+      (inHonban() && experiment ? '' : '<button id="pick-back">最初に戻る</button>') +
       '<div class="sub" id="dl-note" style="margin-top:8px"></div></div>' +
       '</div>');
-    document.getElementById('pick-back').addEventListener('click', () => {
+    const pickBack = document.getElementById('pick-back');
+    if (pickBack) pickBack.addEventListener('click', () => {
       setMode(''); renderModePick();
     });
 
@@ -2330,6 +2333,9 @@
             loadAssignment(!inHonban());
             if (inHonban()) {
               // 本番の流れ: 続けて操作の練習(チュートリアル)へ
+              // 先に練習の状態にしておく。ボタンを押す前に読み込み直されると、
+              // 練習を飛ばして本番の 1 回目から始まってしまっていた。
+              setMode('tutorial'); setStep(0);
               showOverlay('<div class="consent"><div class="big">登録しました</div>' +
                 `<div class="sub">参加者番号 ${esc(r.participant_id)}</div>` +
                 '<div class="sub">続けて、操作の練習をします</div>' +
