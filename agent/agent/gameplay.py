@@ -219,6 +219,7 @@ class GamePlay(Game):
         self._seen_ready_cook_actions = set()
         # once_at_start で、開始直後の1回を出したかどうか。
         self._once_instruction_done = False
+        self._once_instruction_settled = False
         # every_n_tasks 用。AI の担当作業が切り替わった回数で数える。
         # CSPAgent の completed_task_ids は cook しか記録しない(chop と serve は
         # 「置くと決めた瞬間」であって実行確認ではない)ため、そちらは使えない。
@@ -738,7 +739,11 @@ class GamePlay(Game):
         if self._latest_env_state is None:
             return
         self._once_instruction_done = True
-        self._request_instruction(trigger='once_at_start', allow_text_fallback=False)
+        try:
+            self._request_instruction(trigger='once_at_start', allow_text_fallback=False)
+        finally:
+            # 指示が AI に渡り終えた(または出せなかった)。ここから AI が動く。
+            self._once_instruction_settled = True
 
     @staticmethod
     def _is_ai_task_done(event):
@@ -1324,6 +1329,17 @@ class GamePlay(Game):
                 if chat != '':
                     self.ai.high_level_infer(env, chat)
                     chat = ''
+
+                # 開始直後に指示を受ける回は、指示が決まるまで AI は動かない。
+                # 指示の画面が開く前の数フレームで AI が別の料理に手をつけると、
+                # その作業は計画では「もう始めた分」として許容数の外、数える側
+                # では「挟んだ作業」になり、d を超えて記録される(実測: d=2 で
+                # 挟んだ数 3。指示の前にトマトレタスのスープを切り始めていた)。
+                if (env_update
+                        and self.instruction_request_timing == INSTRUCTION_TIMING_ONCE_AT_START
+                        and not getattr(self, '_once_instruction_settled', False)):
+                    env_update = False
+                    continue
 
                 if env_update:
                     self._refresh_instruction_states(env)
