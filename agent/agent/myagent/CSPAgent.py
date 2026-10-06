@@ -4287,6 +4287,15 @@ class CSPAgent:
                         and self._pot_still_cooking(env, obj)
                         and (not me_hold or 'Plate' in me_hold)):
                     alt = self._find_startable_other_task(env, agent_idx, tid, sc)
+                    # 計画どおりの「出す」なら乗り換えない。計画は「煮上がるまで
+                    # 出せない」を知っていて(下の pot_ready)、それでも出すのを
+                    # 先にしているのは、鍋を早く空けて次のスープを煮るため。
+                    # 乗り換えると鍋が空くのが遅れ、次を煮るのが後ろにずれていた
+                    # (実測: 皿を持ったままサラダを盛りに行き、見込みが
+                    #  40.4 -> 46.4 秒)。この乗り換えは、計画が煮上がりを
+                    # 知らなかった頃の対策(鍋の前で 15 秒待っていた)。
+                    if tid == scheduled_tid:
+                        alt = None
                     if alt is not None:
                         task = alt
                         tid = task['id']
@@ -5077,6 +5086,72 @@ class CSPAgent:
                 out.append(tuple(pos))
         return out
 
+    def _raw_item_positions(self, env, obj):
+        """盤面にある、その材料の「切る」の起点になる物の位置。
+
+        台やまな板に置かれた生の物・切りかけ。手に持っている物は含めない
+        (_held_raw_ingredient で扱う)。切り終えてまな板に載ったままの物も
+        含めない。それは在庫(_build_order_tasks の register_chopped_item ->
+        carry_from)として数えられており、ここでも数えると同じ 1 個を 2 つの
+        注文が使う計画になる(実測: スープ用に切った玉ねぎを、サラダ用は
+        在庫として、スープ用は起点として、両方が当てにしていた)。
+        """
+        out = []
+        for pos, item in getattr(env, 'pos_obj', {}).items():
+            if item is None or getattr(item, 'is_held', False):
+                continue
+            for prefix in ('Fresh', 'Chopping'):
+                name = str(getattr(item, 'name', '') or '')
+                full = str(getattr(item, 'full_name', '') or '')
+                if ((name.startswith(prefix) and name[len(prefix):].lower() == obj)
+                        or (full.startswith(prefix) and full[len(prefix):].lower() == obj)):
+                    out.append(tuple(pos))
+                    break
+        return out
+
+    def _raw_source_allocator(self, env):
+        """盤面の材料を、同じ材料の「切る」工程に 1 個ずつ充てる関数を返す。
+
+        以前は同じ材料の「切る」工程のすべてが、盤面の同じ 1 個(まな板の
+        切りかけ等)を起点に見積もっていた。1 人が切り始めた瞬間に、別の
+        注文の「切る」まで残りの回数だけで済む扱いになり(実測: 21 -> 9
+        フレーム)、担当が大きく入れ替わっていた。
+        いまその材料を切っている人の工程には、その人に一番近い物を先に充てる。
+        戻り値の関数は (材料, 注文 uid) -> 位置(無ければ None = 供給口から)。
+        """
+        pool = {}
+        reserved = {}
+        boards = self._get_resources(env).get('cutboards') or []
+        anchor = tuple(boards[0]) if boards else None
+        agents = list(getattr(env, 'agents', None) or [])
+
+        def items(ing):
+            if ing not in pool:
+                pool[ing] = list(self._raw_item_positions(env, ing))
+                for k, ag in enumerate(agents[:2]):
+                    tid = self._agent_exec_tid(k)
+                    if not tid or len(tid) < 3 or tid[0] != 'chop' or tid[1] != ing:
+                        continue
+                    if not pool[ing] or (ing, tid[2]) in reserved:
+                        continue
+                    loc = tuple(getattr(ag, 'location', None) or (0, 0))
+                    pos = min(pool[ing], key=lambda p: abs(p[0] - loc[0]) + abs(p[1] - loc[1]))
+                    pool[ing].remove(pos)
+                    reserved[(ing, tid[2])] = pos
+            return pool[ing]
+
+        def take(ing, uid):
+            avail = items(ing)
+            if (ing, uid) in reserved:
+                return reserved.pop((ing, uid))
+            if not avail:
+                return None
+            pos = (min(avail, key=lambda p: abs(p[0] - anchor[0]) + abs(p[1] - anchor[1]))
+                   if anchor else avail[0])
+            avail.remove(pos)
+            return pos
+        return take
+
     def _chop_walk_frames(self, env, ing_pos, cutboard_pos, target):
         """材料の場所 → まな板 → 置き場 と歩く手数。経路が引けなければ None。"""
         best = None
@@ -5188,6 +5263,28 @@ class CSPAgent:
                 return None
             return self.astar_distance(env, tuple(a), tuple(b))
 
+        def res_of(verb, foods):
+            """使う器具。手持ちから見積もっても、通常の見積もり
+            (_annotate_task_geometry)と同じ器具を付ける。付けないと鍋・
+            ミキサーの重複禁止から外れ、同じ鍋で 2 つのスープを同時に煮る
+            計画が出ていた(実測: 刻んだ玉ねぎを持って鍋へ向かう間だけ、
+            見込みが 41.8 -> 29.8 秒に縮み、担当が大きく入れ替わった)。
+            foods: 手に持っている料理の中身(皿だけなら空)。"""
+            if verb == 'cook':
+                return ('pot', pot) if pot is not None else None
+            if verb == 'mix':
+                return ('blender', blender) if blender is not None else None
+            if verb == 'serve':
+                # 皿だけ持っているなら鍋から取る。盛ったスープなら鍋は使わない
+                if not foods and pot is not None:
+                    return ('pot', pot)
+                return ('delivery', delivery) if delivery is not None else None
+            if verb == 'serve_juice':
+                if not foods and blender is not None:
+                    return ('blender', blender)
+                return ('delivery', delivery) if delivery is not None else None
+            return ('delivery', delivery) if delivery is not None else None
+
         for k, ag in enumerate(agents):
             if k in held_used:
                 continue
@@ -5256,6 +5353,7 @@ class CSPAgent:
                     if d0 is not None:
                         t['start_pos'] = hpos
                         t['end_pos'] = tuple(end)
+                        t['fixed_res'] = res_of(verb, None)
                         t['held_by'] = k
                         t['dur'] = int(base + d0 + INTERACT_FRAMES)
                         held_used.add(k)
@@ -5265,6 +5363,7 @@ class CSPAgent:
             end_pos, d, extra = plan
             t['start_pos'] = hpos
             t['end_pos'] = tuple(end_pos)
+            t['fixed_res'] = res_of(verb, foods)
             t['held_by'] = k
             t['dur'] = int(d + extra)
             held_used.add(k)
@@ -5436,6 +5535,10 @@ class CSPAgent:
                     if base_name is not None and base_name.lower() == obj:
                         raw_candidates.append(pos)
                 raw_candidates += self._chopped_on_boards(env, obj)
+                # 工程を作るときに盤面の物を 1 個ずつ充ててある(raw_source)。
+                # None なら充てる物が無い = 供給口から。
+                if 'raw_source' in t:
+                    raw_candidates = [tuple(t['raw_source'])] if t['raw_source'] else []
                 # 向こう側に置かれた材料を起点にすると経路が引けない。
                 # 担当者の手の届くものだけを見る。
                 raw_candidates = own_side(raw_candidates)
@@ -6081,7 +6184,7 @@ class CSPAgent:
                                                source=source)
         memo = self.__dict__.setdefault('_duration_memo', {})
         key = (verb, obj, order_idx, tuple(assigned_counter) if assigned_counter else None,
-               tuple(source) if source else None)
+               (source if isinstance(source, str) else tuple(source)) if source else None)
         if value is not None:
             memo[key] = value
             return value
@@ -6195,6 +6298,12 @@ class CSPAgent:
                     raw_candidates.append(pos)
             # 切り終えてまな板に載ったままの物も「その材料の工程の起点」
             raw_candidates += self._chopped_on_boards(env, obj)
+            # 工程を作る側(_build_order_tasks)が、盤面の物を 1 個ずつ充てて
+            # 渡してくる。'dispenser' は「充てる物が無い = 供給口から」。
+            if source == 'dispenser':
+                raw_candidates = []
+            elif source is not None:
+                raw_candidates = [tuple(source)]
 
             if raw_candidates:
                 ing_pos = get_nearest(resources['cutboards'][0] if resources['cutboards'] else None, raw_candidates)
@@ -7720,6 +7829,8 @@ class CSPAgent:
                 plate_states.append({'names': names, 'obj': held, 'used': False})
 
         resources = self._get_resources(env)
+        # 盤面の生の材料・切りかけを「切る」工程に 1 個ずつ充てる
+        take_raw_source = self._raw_source_allocator(env)
         # 既に刻む側へ届いている材料の在庫。注文ごとに1つずつ引いていく。
         carried_budget = {}
         current_orders = env.order.current_orders if hasattr(env, 'order') and hasattr(env.order, 'current_orders') else []
@@ -8025,11 +8136,15 @@ class CSPAgent:
                         carried_budget[ing_key] -= 1
                         got_unit = True
                 carry_needed = via_counter and not got_unit and carry_from is None
+                raw_source = None
                 if via_counter:
                     dur = self._chop_duration_from(env, assigned_counter)
                 else:
+                    if carry_from is None:
+                        raw_source = take_raw_source(ing_key, order_uid)
                     dur = self._task_duration_frames(
-                        env, 'chop', ing.lower(), order_idx, assigned_counter)
+                        env, 'chop', ing.lower(), order_idx, assigned_counter,
+                        source=raw_source or 'dispenser')
                 if carry_from is not None:
                     # 切り直さず「取りに行って運ぶだけ」で済む分は、そのぶん短い。
                     dur_fetch = self._task_duration_frames(
@@ -8044,6 +8159,7 @@ class CSPAgent:
                     stock_chops.setdefault(ing.lower(), []).append(order_uid)
                 chop_task = {
                     'carry_from': carry_from,
+                    'raw_source': raw_source,
                     'id': ('chop', ing.lower(), order_uid),
                     'verb': 'chop', 'obj': ing.lower(), 'order': order_uid,
                     'slot_idx': order_idx,
@@ -8719,6 +8835,9 @@ class CSPAgent:
                     if prev_agent is None:
                         continue
                     switch_penalty_terms.append(is_a1[i] if prev_agent == 0 else (1 - is_a1[i]))
+                    if getattr(self, 'force_previous_assignment', False):
+                        # 診断用: 前回の担当のまま解いたときの目的関数を比べる
+                        model.Add(is_a1[i] == (1 if prev_agent == 1 else 0))
         else:
             # 1エージェント: 従来の circuit 方式
             arcs = []
