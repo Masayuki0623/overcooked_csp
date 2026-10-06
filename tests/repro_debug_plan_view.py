@@ -91,7 +91,7 @@ check('計画が無ければ None', make(NoPlan()).plan_snapshot() is None)
 # 6
 SRC = inspect.getsource(srv)
 check('デバッグの回だけ送る',
-      "if session.show_plan and session.state == 'running':" in SRC,
+      "if session.show_plan and session.state in ('running', 'finished'):" in SRC,
       '実験の回でも送ってしまう')
 check('開始時に印を立てている',
       "self.show_plan = bool((choice or {}).get('show_plan'))" in SRC)
