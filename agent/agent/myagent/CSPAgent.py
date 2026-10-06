@@ -4965,6 +4965,30 @@ class CSPAgent:
                     return k, tuple(ag.location)
         return None
 
+    def _agent_exec_tid(self, k):
+        """エージェント k の実行側がいま手がけている工程の id(無ければ None)。"""
+        tas = getattr(self, 'task_agents', None)
+        ta = tas.get(k) if isinstance(tas, dict) else (getattr(self, 'task_agent', None) if k == 0 else None)
+        tid = getattr(ta, 'assigned_task_id', None) if ta is not None else None
+        return tuple(tid) if tid else None
+
+    def _holder_prefers_other(self, env, tasks, t, holder):
+        """持っている材料を、この工程 t ではなく同じ材料の別の工程(実行側が
+        いま手がけている id)に充てるべきか。
+
+        同じ材料の「切る」が 2 つあるとき、手持ちは一覧で先に出てきた方に
+        付いていた。実行側が手がけているのが後の方だと、先の方が持ち主の
+        先頭に固定され、計画が組み替わる(実測: 見込み 28.4 -> 32.4 秒)。
+        """
+        cur = self._agent_exec_tid(holder)
+        if not cur or len(cur) < 3 or cur[0] != 'chop':
+            return False
+        if tuple(t['id']) == cur:
+            return False
+        if str(cur[1]) != str(t['id'][1]):
+            return False
+        return any(tuple(x.get('id') or ()) == cur for x in tasks)
+
     @staticmethod
     def _chop_rest_steps(env, board_pos):
         """まな板の上の材料を切り終えるまでに残っている回数(無ければ None)。
@@ -5173,6 +5197,33 @@ class CSPAgent:
                     d1, d2 = dist(hpos, blender), dist(blender, delivery)
                     plan = (delivery, None if d1 is None or d2 is None else d1 + d2,
                             INTERACT_FRAMES * 2)
+            # 材料の一部だけを持っている(切ったたまねぎを持っていて、サラダには
+            # トマトも要る)。その人の工程に固定し、所要は「置き場へ運んで置く +
+            # 普通の所要」で見積もる(2026-10-06)。以前は固定されず、再計算で
+            # 別の人の担当になると、持っている物が「不要」になって置き直し、
+            # その材料の「切る」が計画に復活していた(実測: 見込み 32.0 -> 37.2 秒)。
+            if (plan is None and verb in ('cook', 'serve_salad', 'mix')
+                    and not has_plate and not has_cup and chopped and not cooked and not mixed
+                    and set(chopped) < set(parts)
+                    and self._agent_exec_tid(k) == tuple(t['id'])):
+                # (実行側がその工程を手がけているときだけ。切った直後に持っている
+                #  だけなら、それは「切る」の最後の置く動作で、この工程ではない)
+                counter = t.get('assigned_counter')
+                base = None
+                try:
+                    base = self._task_duration_frames(env, verb, obj, order_idx, counter)
+                except Exception:
+                    base = None
+                end = (delivery if verb == 'serve_salad' else pot if verb == 'cook' else blender)
+                if counter is not None and base is not None and end is not None:
+                    d0 = dist(hpos, counter)
+                    if d0 is not None:
+                        t['start_pos'] = hpos
+                        t['end_pos'] = tuple(end)
+                        t['held_by'] = k
+                        t['dur'] = int(base + d0 + INTERACT_FRAMES)
+                        held_used.add(k)
+                        return True
             if plan is None or plan[1] is None:
                 continue
             end_pos, d, extra = plan
@@ -5308,7 +5359,8 @@ class CSPAgent:
                 t['end_pos'] = tuple(t['assigned_counter'])
                 t['fixed_res'] = ('cutboard', board)
 
-            elif verb == 'chop' and (self._held_raw_ingredient(env, obj) or (None,))[0] not in (None, *held_used):
+            elif (verb == 'chop' and (self._held_raw_ingredient(env, obj) or (None,))[0] not in (None, *held_used)
+                  and not self._holder_prefers_other(env, tasks, t, self._held_raw_ingredient(env, obj)[0])):
                 # 誰かがその材料を手に持っている。取りに行く必要は無いので、
                 # 持っている人の位置から「まな板へ行く → 刻む → 置く」で
                 # 見積もり、その人に固定する(held_by。割り当てで読む)。
@@ -8934,6 +8986,33 @@ class CSPAgent:
                 else:
                     model.Add(starts[j] >= ends[_prog])
             self._emit_counter_debug(f"[CSPAgent] 手をつけた工程を先頭に固定: {tasks[_prog]['id']}")
+
+        # 手に物を持っている人の、その物を使う工程(held_by)は、その人の先頭に
+        # 固定する(2026-10-06)。間に別の工程を入れると、持っている物を一度
+        # 置いて取りに戻る費用がかかるが、モデルにはその費用が無い。
+        # 実測: 皿を持って煮上がりを待っている AI に「たまねぎを切る」が先に
+        # 割り当てられ、皿を戻す場所を探して 4 秒うろうろした。
+        for _i in range(num_tasks):
+            _hb = tasks[_i].get('held_by')
+            if _hb is None or _i not in starts or _i == _prog:
+                continue
+            _holder = 1 if int(_hb) == 1 else 0
+            # 同じ人に「手をつけた切る」を先頭に固定済みなら、こちらは固定しない
+            # (先頭が 2 つになって解が無くなる)
+            if _prog is not None and _holder == (1 if getattr(self, 'own_agent_idx', 0) == 1 else 0):
+                continue
+            # 持っている人に割り当てる(人と遊ぶ回は上の分岐でも固定している。
+            # 2人とも CSP の回はここでしか固定されない)
+            if is_a1 is not None and is_a1[_i] is not None:
+                model.Add(is_a1[_i] == _holder)
+            for j in range(num_tasks):
+                if j == _i or j not in starts or tasks[j].get('verb') == 'carry':
+                    continue
+                if is_a1 is not None and is_a1[j] is not None:
+                    _his = is_a1[j] if _holder == 1 else is_a1[j].Not()
+                    model.Add(starts[j] >= ends[_i]).OnlyEnforceIf(_his)
+                elif is_a1 is None and _holder == 0:
+                    model.Add(starts[j] >= ends[_i])
 
         # 動的制約 (Dynamic Constraints)
         if hasattr(self, 'active_constraints') and self.active_constraints:
