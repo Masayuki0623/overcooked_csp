@@ -107,6 +107,10 @@ CASES = [
     ('サラダを作って、レタスも1つ切っておいて', A, [['serve_salad_onion_tomatosalad', 'chop_lettuce_x1']]),
     ('私はサラダをやるので、たまねぎレタスのスープをお願い', A, [['serve_lettuce_onionsoup']]),
     ('たまねぎを1つ切ったあと、トマトレタススープを煮て', A, [['chop_onion_x1', 'cook_lettuce_tomatosoup']]),
+    # 工程の一部を除く(AI にやらせない工程)
+    ('トマトレタスのスープを作って。材料は切らないで', A, [['serve_lettuce_tomatosoup']], ['chop']),
+    ('たまねぎレタスのスープをお願い。切るのは私がやる', A, [['serve_lettuce_onionsoup']], ['chop']),
+    ('サラダを作って。盛り付けと提供は私がやる', A, [['serve_salad_onion_tomatosalad']], ['serve']),
     # 曖昧: 作業が特定できない
     ('右で作業して', AMB, None),
     ('急いで', AMB, None),
@@ -228,7 +232,7 @@ def list_models():
 
 
 # ---- 採点 --------------------------------------------------------------------
-def judge(expect_kind, expect, got):
+def judge(expect_kind, expect, got, expect_exclude=None):
     """(受理/曖昧/無効の区分が合っているか, 中身まで合っているか, 短い説明)"""
     if not isinstance(got, dict):
         return False, False, '形式が違う'
@@ -242,6 +246,8 @@ def judge(expect_kind, expect, got):
                 kind, got.get('valid'), got.get('ambiguous'), got.get('tasks'))
         tasks = set(n['tasks'])
         ok = any(tasks == set(alt) for alt in expect)
+        if ok and set(n.get('exclude') or []) != set(expect_exclude or []):
+            return True, False, '除く工程が違う: %s(期待 %s)' % (n.get('exclude'), expect_exclude)
         return True, ok, '' if ok else '選んだ: %s' % sorted(tasks)
     if kind == 'accept':
         return False, False, '受理された: %s' % sorted(n['tasks'])
@@ -249,12 +255,14 @@ def judge(expect_kind, expect, got):
     return ok, ok, '' if ok else '%sと判定' % kind
 
 
-def run_model(model, workers=4, repeat=1):
+def run_model(model, workers=4, repeat=1, only=''):
     caller = CALLERS[provider_of(model)]
     rows = []
 
     def one(idx_case):
-        idx, (text, kind, expect) = idx_case
+        idx, case = idx_case
+        text, kind, expect = case[0], case[1], case[2]
+        expect_exclude = case[3] if len(case) > 3 else None
         # 混雑(503)や割り当て超過(429。無料枠は1分あたりの回数が小さい)は、
         # 言われた秒数だけ待ってやり直す。応答時間には待ちを含めない。
         got, usage, err, dt = None, {}, None, 0.0
@@ -274,12 +282,12 @@ def run_model(model, workers=4, repeat=1):
                     time.sleep(min(wait, 70.0))
                     continue
                 break
-        d_ok, full_ok, why = judge(kind, expect, got) if got is not None else (False, False, err)
+        d_ok, full_ok, why = judge(kind, expect, got, expect_exclude) if got is not None else (False, False, err)
         return {'i': idx, 'text': text, 'kind': kind, 'expect': expect, 'got': got,
                 'decision_ok': d_ok, 'ok': full_ok, 'why': why, 'latency_s': round(dt, 2), 'usage': usage,
                 'error': err}
 
-    jobs = [(i, c) for _ in range(repeat) for i, c in enumerate(CASES)]
+    jobs = [(i, c) for _ in range(repeat) for i, c in enumerate(CASES) if not only or only in c[0]]
     with ThreadPoolExecutor(max_workers=workers) as ex:
         for r in ex.map(one, jobs):
             rows.append(r)
@@ -314,6 +322,7 @@ def main():
     ap.add_argument('--out', default='')
     ap.add_argument('--workers', type=int, default=1)
     ap.add_argument('--repeat', type=int, default=1)
+    ap.add_argument('--only', default='', help='文にこの語を含む件だけ測る')
     args = ap.parse_args()
     if args.list:
         for prov, ms in list_models().items():
@@ -335,7 +344,7 @@ def main():
             print(f'[{m}] 鍵が無いので飛ばします')
             continue
         print(f'[{m}] {len(CASES)} 件 x {args.repeat} を測ります...', flush=True)
-        rows = run_model(m, args.workers, args.repeat)
+        rows = run_model(m, args.workers, args.repeat, args.only)
         s = summarize(m, rows)
         results[m] = {'summary': s, 'rows': rows}
         print('  正答 %d/%d (受理/却下の判断 %d, 受理の中身 %d/%d, 却下 %d/%d うち理由も一致 %d) '

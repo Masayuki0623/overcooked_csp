@@ -31,11 +31,17 @@ DEFAULT_MODEL = DEFAULT_MODELS[0]
 # 作業はすべて返す。「全部やって」は全部)。数を入れると、超えたら reject。
 MAX_DISHES = None       # serve / cook 系(料理まるごと)
 MAX_CHOP_UNITS = None   # 切る材料の合計
-REJECT_REASONS = ['invalid', 'ambiguous', 'too_many', 'error']
+# 1回の指示で AI がやる工程の数の下限と、全体に占める割合の上限(2026-10-06)。
+# 「たまねぎを1つ切って」(工程1つ)は AI の分担が少なすぎるので受けない。
+# 候補(鎖)が分かるときだけ数える(候補が無い bench では数えない)。
+MIN_AI_STEPS = 2
+MAX_AI_SHARE = 0.5
+REJECT_REASONS = ['invalid', 'ambiguous', 'too_few', 'too_many', 'error']
 REJECT_JA = {
     'invalid': 'この回の注文にない作業か、AI への作業の指定がありません',
     'ambiguous': '作業か個数が決められません',
-    'too_many': '一度に頼める量を超えています',
+    'too_few': 'AI の分担が少なすぎます',
+    'too_many': '一度に頼める量を超えています(全体の半分まで)',
     'error': '解釈できませんでした',
 }
 
@@ -50,10 +56,13 @@ SCHEMA_BASE = {
         'valid': {'type': 'boolean'},
         'ambiguous': {'type': 'boolean'},
         'tasks': {'type': 'array', 'items': {'type': 'string'}},
+        # AI にやらせない工程(「切るのは私がやる」)。ふつうは空
+        'exclude_steps': {'type': 'array', 'items': {'type': 'string', 'enum': ['chop', 'cook', 'serve']}},
         'message': {'type': 'string'},
     },
-    'required': ['valid', 'ambiguous', 'tasks', 'message'],
+    'required': ['valid', 'ambiguous', 'tasks', 'exclude_steps', 'message'],
 }
+STEP_JA = {'chop': '切る', 'cook': '煮る', 'serve': '提供する'}
 
 
 def schema_for(menu_ids):
@@ -84,6 +93,10 @@ def system_prompt(menu, orders_ja, ingredients_ja='たまねぎ・トマト・�
              (2) 切る個数が決まらない(その材料がこの回に2つ要るのに、数が書かれていない。例: 「たまねぎを切って」で、たまねぎが2つ要るとき。「野菜を切って」も同じ)
              料理の種類だけの指定(「スープを作って」「スープを煮て」)は曖昧ではない(その種類の料理をすべて選ぶ)。
 - tasks    : valid かつ ambiguous でないとき、当てはまる id をすべて。それ以外は空。
+             同じ作業の個数違い(x1 と x2)を両方選んではいけない。個数が決まらなければ ambiguous。
+- exclude_steps: 「材料は切らないで」「切るのは私がやる」「煮るのは任せる」のように、料理の工程のうち AI に
+             やらせないと言われた工程を入れる(chop=切る, cook=煮る, serve=提供)。何も言われなければ空の配列。
+             除く工程があっても、料理の指定(serve 系 / cook 系)はそのまま選ぶ。
 - message  : 参加者に見せる短い日本語。受理なら解釈した内容を1文で、曖昧・無効なら理由と書き直しの助言を1文で。
 
 規則:
@@ -151,6 +164,52 @@ def cap_check(task_ids, candidates=None):
             dishes += 1
     if (MAX_DISHES is not None and dishes > MAX_DISHES) or \
             (MAX_CHOP_UNITS is not None and chops > MAX_CHOP_UNITS):
+        return 'too_many'
+    return None
+
+
+def total_steps(candidates):
+    """この回の工程の総数(候補の鎖に出てくる工程の集合の大きさ)。"""
+    seen = set()
+    for _d, p in (candidates or []):
+        if not isinstance(p, dict):
+            continue
+        for g in (p.get('chains') or [p.get('chain') or []]):
+            for c in g:
+                seen.add(tuple(c))
+    return len(seen)
+
+
+def ai_steps(candidates, task_ids, exclude=()):
+    """選んだ作業のうち、AI がやる工程の数(人の分と、除く工程は数えない)。"""
+    by_id = {str(d): p for d, p in (candidates or [])}
+    n = 0
+    for tid in task_ids:
+        p = by_id.get(tid)
+        if not isinstance(p, dict):
+            continue
+        count = int(p.get('count') or 1)
+        groups = list(p.get('chains') or [p.get('chain') or []])[:count]
+        human = {tuple(c) for c in (p.get('human_ids') or [])}
+        for g in groups:
+            for c in g:
+                if tuple(c) in human:
+                    continue
+                if len(c) > 2 and _step_kind(c[1]) in exclude:
+                    continue
+                n += 1
+    return n
+
+
+def size_check(task_ids, candidates=None, exclude=()):
+    """AI の分担が 下限(MIN_AI_STEPS)〜上限(全体 x MAX_AI_SHARE)に収まるか。外れていれば理由。"""
+    if not candidates:
+        return None
+    n = ai_steps(candidates, task_ids, exclude)
+    total = total_steps(candidates)
+    if n < MIN_AI_STEPS:
+        return 'too_few'
+    if total and n > total * MAX_AI_SHARE:
         return 'too_many'
     return None
 
@@ -283,30 +342,62 @@ def interpret(text, candidates, orders_ja, model=None, timeout_s=25.0):
 
 
 def normalize(raw, ids, candidates=None):
-    """LLM の出力(valid / ambiguous / tasks / message)を、受理・却下の形にする。"""
+    """LLM の出力(valid / ambiguous / tasks / exclude_steps / message)を、受理・却下の形にする。"""
     tasks = [t for t in (raw.get('tasks') or []) if t in ids]
     tasks = list(dict.fromkeys(tasks))               # 重複は落とす(順は保つ)
+    exclude = [e for e in (raw.get('exclude_steps') or []) if e in STEP_JA]
     valid = bool(raw.get('valid'))
     ambiguous = bool(raw.get('ambiguous'))
     message = str(raw.get('message') or '').strip()
-    base = {'valid': valid, 'ambiguous': ambiguous}
+    base = {'valid': valid, 'ambiguous': ambiguous, 'exclude': exclude}
+    # 同じ作業の個数違い(x1 と x2)が両方選ばれていたら、個数が決まっていない
+    # (実測: 「レタスサラダを作って」で、1つと2つの両方が選ばれた)
+    stems = [re.sub(r'_x\d+$', '', t) for t in tasks]
+    if len(set(stems)) < len(stems):
+        ambiguous = True
+        base['ambiguous'] = True
+        message = '個数を書いてください(1つ / 2つ)。'
     if not valid:
         return dict(base, decision='reject', tasks=[], reject_reason='invalid',
                     message=message or REJECT_JA['invalid'] + '。この回の注文にある作業を書いてください。')
     if ambiguous or not tasks:
         return dict(base, decision='reject', tasks=[], reject_reason='ambiguous',
                     message=message or REJECT_JA['ambiguous'] + '。料理や材料と個数を書いてください。')
-    cap = cap_check(tasks, candidates)
+    cap = size_check(tasks, candidates, exclude) or cap_check(tasks, candidates)
+    if cap == 'too_few':
+        return dict(base, decision='reject', tasks=[], reject_reason=cap,
+                    message=REJECT_JA[cap] + '。切る作業を複数まとめて頼むか、'
+                    '料理を煮る・提供するところまで頼んでください。')
     if cap:
         return dict(base, decision='reject', tasks=[], reject_reason=cap,
-                    message=message or REJECT_JA[cap] + '。頼む量を減らしてください。')
+                    message=REJECT_JA[cap] + '。頼む量を減らしてください。')
+    # 除く工程が、選んだ作業の全部(切るだけの指示で「切らないで」)なら、やることが無い。
+    # 料理の指示は鎖(切る → 煮る → 提供)なので、提供を除いても切る・煮るが残る
+    if exclude:
+        by_id = {str(d): p for d, p in (candidates or [])}
+        kinds = set()
+        for t in tasks:
+            p = by_id.get(t)
+            chain = (p or {}).get('chain') or []
+            if chain:
+                kinds |= {_step_kind(c[1]) for c in chain if len(c) > 2}
+            elif t.startswith('chop_'):
+                kinds.add('chop')
+            elif t.startswith('cook_'):
+                kinds |= {'chop', 'cook'}
+            else:
+                kinds |= {'chop', 'cook', 'serve'}
+        if all(k in exclude for k in kinds):
+            return dict(base, decision='reject', tasks=[], reject_reason='ambiguous',
+                        message='AI がやる工程が残りません。何をやってほしいかを書いてください。')
     return dict(base, decision='accept', tasks=tasks, reject_reason=None, message=message)
 
 
-def expand_steps(candidates, task_ids):
+def expand_steps(candidates, task_ids, exclude=()):
     """選んだ候補を、AI がやる一連の作業(切る → 煮る → 提供)に広げて、日本語で返す。
 
     戻り値: [(候補の id, [工程の文, ...]), ...]。個数つきの候補は個数ぶん。
+    exclude の工程(AI にやらせない)には「(あなた)」を添える。
     """
     from agent.instruction_panel import INGREDIENT_JP, card_label
     by_id = {str(d): p for d, p in candidates}
@@ -323,34 +414,48 @@ def expand_steps(candidates, task_ids):
                 if len(fid) < 3:
                     continue
                 verb, obj = str(fid[1]), str(fid[2])
+                tag = '(あなた)' if _step_kind(verb) in exclude else ''
                 if verb == 'chop':
-                    steps.append(f'{INGREDIENT_JP.get(obj, obj)}を切る')
+                    steps.append(f'{INGREDIENT_JP.get(obj, obj)}を切る{tag}')
                 elif verb in ('cook', 'mix'):
-                    steps.append(f'{card_label(verb, obj)}を煮る' if verb == 'cook' else f'{card_label(verb, obj)}を混ぜる')
+                    steps.append((f'{card_label(verb, obj)}を煮る' if verb == 'cook' else f'{card_label(verb, obj)}を混ぜる') + tag)
                 elif verb == 'serve_salad':
-                    steps.append(f'{card_label(verb, obj)}を盛って提供する')
+                    steps.append(f'{card_label(verb, obj)}を盛って提供する{tag}')
                 elif verb in ('serve', 'serve_juice', 'serve_from_counter'):
-                    steps.append(f'{card_label(verb, obj)}を提供する')
+                    steps.append(f'{card_label(verb, obj)}を提供する{tag}')
                 elif verb == 'handover':
-                    steps.append(f'{card_label(verb, obj)}を渡す')
+                    steps.append(f'{card_label(verb, obj)}を渡す{tag}')
                 else:
                     steps.append(f'{verb} {obj}')
         out.append((tid, steps))
     return out
 
 
-def compose(candidates, task_ids):
-    """複数の候補を、1つの指示(鎖の指示)にまとめる。1つだけなら、その候補をそのまま返す。
+def _step_kind(verb):
+    """工程の種類(chop / cook / serve)。exclude_steps と突き合わせる。"""
+    v = str(verb)
+    if v == 'chop':
+        return 'chop'
+    if v in ('cook', 'mix'):
+        return 'cook'
+    return 'serve'
+
+
+def compose(candidates, task_ids, exclude=()):
+    """複数の候補を、1つの指示(鎖の指示)にまとめる。1つだけで除く工程も無ければ、その候補のまま。
 
     個数つきの候補(たまねぎを1つ: かたまり2つのうち1つ)は、先頭から個数ぶんの
     かたまりに固定する。まとめた指示では「どのかたまりを AI がやるか」を
     ソルバーに選ばせない(選ばせると、別の作業のかたまりを選んでしまう)。
+    exclude の工程(「切るのは私がやる」)は、鎖に残したまま人がやる工程にする
+    (exclude_verbs。計画側はその工程を相手に割り当て、AI はそれを待つ)。
     """
     by_id = {str(d): (d, p) for d, p in candidates}
     picked = [by_id[t] for t in task_ids if t in by_id]
+    exclude = [e for e in (exclude or []) if e in STEP_JA]
     if not picked:
         return None
-    if len(picked) == 1:
+    if len(picked) == 1 and not exclude:
         return picked[0]
     groups, fixed, humans, labels = [], [], [], []
     for display, p in picked:
@@ -361,10 +466,15 @@ def compose(candidates, task_ids):
         humans += [c for c in (p.get('human_ids') or []) if any(tuple(c) == tuple(x) for ch in chains for x in ch)]
         labels.append(str(display))
     first = dict(picked[0][1])
+    excl_verbs = sorted({str(c[1]) for g in groups for c in g if len(c) > 2 and _step_kind(c[1]) in exclude})
+    if excl_verbs:
+        humans = list(humans) + [c for g in groups for c in g if len(c) > 2 and str(c[1]) in excl_verbs]
     first.update({
         'chains': groups, 'count': len(groups), 'chain': [c for g in groups for c in g],
         'fixed_task_ids': [f for f in fixed if f], 'fixed_task_id': (fixed or [None])[0],
         'human_ids': humans, 'startable': all(p.get('startable', True) for _d, p in picked),
-        'composite': [str(d) for d, _p in picked],
+        'composite': [str(d) for d, _p in picked] if len(picked) > 1 else None,
+        'exclude_verbs': excl_verbs,
     })
-    return ('+'.join(labels), first)
+    label = '+'.join(labels) + ('(除く: ' + '/'.join(STEP_JA[e] for e in exclude) + ')' if exclude else '')
+    return (label, first)

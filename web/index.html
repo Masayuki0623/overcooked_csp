@@ -2893,7 +2893,7 @@
     const ok = document.getElementById('instruct-ok');
     // 選んだ内容。index はカードで選んだ1つ、indices は文章の解釈を確認した
     // 1つ以上の候補。label はバーに残す言い方。via は決め方(cards / text)。
-    const S = { index: null, indices: null, label: '', via: 'cards', conf: null };
+    const S = { index: null, indices: null, exclude: null, label: '', via: 'cards', conf: null };
     ok.disabled = true;
     // 指示への自信(1〜5)。実験の回では、指示と一緒に答えてもらう。ゲームの
     // あとに聞くと、AI の動きを見たあとの自信になってしまう。
@@ -2917,7 +2917,7 @@
       if ((S.index === null && !S.indices) || (askConf && S.conf === null)) return;
       showCurrentInstruction(S.label);
       sendNow({ type: 'instruct', seq: msg.seq, index: S.index, indices: S.indices,
-                via: S.via, confidence: S.conf });
+                exclude: S.exclude, via: S.via, confidence: S.conf });
       moveBlockUntil = performance.now() + stepMs;
       instructInterpHandler = null;
       hideInstruct();
@@ -2938,7 +2938,7 @@
   // 合っていれば「この内容にする」-> 決定。違えば書き直すか、一覧から選ぶ。
   function renderInstructText(msg, S, refreshOk, prevText) {
     const box = document.getElementById('instruct-cards');
-    S.index = null; S.indices = null; S.label = ''; S.via = 'text';
+    S.index = null; S.indices = null; S.exclude = null; S.label = ''; S.via = 'text';
     refreshOk();
     box.innerHTML =
       '<div class="nl">' +
@@ -2975,7 +2975,10 @@
       ta.disabled = false;
       if (r.ok && (r.tasks || []).length) {
         S.indices = r.tasks.map((t) => t.index);
-        S.label = r.tasks.map((t) => t.label).join('、');
+        S.exclude = (r.exclude || []).length ? r.exclude : null;
+        const exclJa = { chop: '切る', cook: '煮る', serve: '提供' };
+        S.label = r.tasks.map((t) => t.label).join('、') +
+          (S.exclude ? `(${S.exclude.map((e) => exclJa[e] || e).join('・')}はあなた)` : '');
         S.via = 'text';
         // 解釈した作業を、AI がやる工程(切る → 煮る → 提供)まで広げて見せる
         result.innerHTML =
@@ -3020,7 +3023,7 @@
 
   // ---- 一覧(カード)から選ぶ指示 ----------------------------------------------
   function renderInstructCards(msg, S, refreshOk) {
-    S.index = null; S.indices = null; S.label = ''; S.via = 'cards';
+    S.index = null; S.indices = null; S.exclude = null; S.label = ''; S.via = 'cards';
     refreshOk();
     // 段(切る / 調理する / 提供まで任せる)ごとに行を分ける。
     // 同じ工程が複数あるカードは、選ぶと中に「1つ / 2つ」が出る。
@@ -3071,7 +3074,7 @@
       // 何を指示したかをバーに残す(「たまねぎを2つ切って」)
       const opt = (it.options || []).find((o) => o.index === chosen);
       const n = opt && (it.options || []).length > 1 ? `${opt.count}つ` : '';
-      S.index = chosen; S.indices = null; S.via = 'cards';
+      S.index = chosen; S.indices = null; S.exclude = null; S.via = 'cards';
       S.label = `${it.label}を${n}${it.action || ''}`;
       refreshOk();
     }));

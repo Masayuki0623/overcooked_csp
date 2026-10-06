@@ -2843,7 +2843,7 @@ class WebGamePlay:
             r = instruction_nl.interpret(text, cands, orders_ja, model=NL_MODEL)
             self.nl_model = r.get('model', '')
             ids = {str(d): i for i, (d, _p) in enumerate(cands)}
-            steps = dict(instruction_nl.expand_steps(cands, r.get('tasks', [])))
+            steps = dict(instruction_nl.expand_steps(cands, r.get('tasks', []), r.get('exclude') or []))
             tasks = [{'index': ids[t], 'id': t, 'label': self._candidate_label(ids[t]),
                       'steps': steps.get(t, [])}
                      for t in r.get('tasks', []) if t in ids]
@@ -2858,6 +2858,7 @@ class WebGamePlay:
             self.instruction_interp = {
                 'seq': seq, 'n': n, 'ok': ok, 'tasks': tasks,
                 'valid': r.get('valid'), 'ambiguous': r.get('ambiguous'),
+                'exclude': r.get('exclude') or [],
                 'reason': None if ok else (r.get('reject_reason') or 'error'),
                 'message': r.get('message') or '',
             }
@@ -2865,7 +2866,7 @@ class WebGamePlay:
         threading.Thread(target=work, daemon=True).start()
         return True
 
-    def answer_instruction(self, seq, index, confidence=None, indices=None, via=None):
+    def answer_instruction(self, seq, index, confidence=None, indices=None, via=None, exclude=None):
         """ブラウザで選ばれた指示と、その指示への自信(1〜5)を受け取る。
 
         indices が来たら(文章の解釈を確認した回)、その候補をまとめて1つの
@@ -2886,15 +2887,16 @@ class WebGamePlay:
                     ids = [str(cands[int(i)][0]) for i in indices]
                 except (IndexError, TypeError, ValueError):
                     return False
-                composed = instruction_nl.compose(cands, ids)
+                exclude = [e for e in (exclude or []) if e in ('chop', 'cook', 'serve')]
+                composed = instruction_nl.compose(cands, ids, exclude)
                 if composed is None:
                     return False
-                if len(ids) > 1:
+                if len(ids) > 1 or exclude:
                     cands.append(composed)
                     index = len(cands) - 1
                 else:
                     index = int(indices[0])
-                self.nl_tasks = '|'.join(ids)
+                self.nl_tasks = '|'.join(ids) + ('|除く:' + ','.join(exclude) if exclude else '')
             if getattr(self, 'instruction_input', 'cards') == 'text':
                 self.nl_outcome = 'confirmed' if via == 'text' else 'cards'
                 if via != 'text':
@@ -4314,7 +4316,7 @@ async def ws(sock: WebSocket):
         elif kind == 'instruct':
             session.answer_instruction(msg.get('seq'), msg.get('index'),
                                        msg.get('confidence'), msg.get('indices'),
-                                       msg.get('via'))
+                                       msg.get('via'), msg.get('exclude'))
         elif kind == 'instruct_text':
             # 文章で書いた指示。解釈は別スレッドで、結果は状態と一緒に送る
             session.interpret_instruction(msg.get('seq'), msg.get('text'))

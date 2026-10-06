@@ -954,6 +954,10 @@ class CSPAgent:
         # 人の分 = AI にはできない工程(仕切りの向こう)か、相手が材料を
         # 持っている工程。人は「AI が必要とする時までに」済ませるものとして
         # 計画に入れる(人の側にも同じ割り込み許容数を課す)。
+        # 「切るのは私がやる」のように、AI にやらせないと言われた工程は人の分
+        # (exclude_verbs。文章の指示でだけ付く)
+        _p = self._pending_payload(pending) or {}
+        excl_verbs = set(_p.get('exclude_verbs') or [])
         alive = []                       # [(ai_idxs, human_idxs)]
         finished = 0
         for grp in chain_groups:
@@ -974,7 +978,8 @@ class CSPAgent:
                     except Exception:
                         pass
                     hb = tasks[i].get('held_by')
-                    if not ai_can or (hb is not None and int(hb) != own):
+                    if (not ai_can or (hb is not None and int(hb) != own)
+                            or str(tasks[i].get('verb')) in excl_verbs):
                         hidxs.append(i)
                         continue
                 idxs.append(i)
