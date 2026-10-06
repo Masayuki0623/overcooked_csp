@@ -120,6 +120,7 @@ MAP_CHOICES = [
     ('exp_ring', 'リング', '真ん中の島のまわりをぐるっと回れる'),
 ]
 RECIPE_CHOICES = [
+    ('experiment3', 'サラダ1 + スープ2', '本番(パターン6・7)と同じ構成。全部入りは無し'),
     ('experiment1', '野菜のみ', 'サラダ2品 + スープ1品'),
     ('experiment2', '野菜 + フルーツ', 'サラダ + スープ + ジュース'),
 ]
@@ -160,6 +161,11 @@ def recipe_label(name):
 
 
 def order_sets_for(preset):
+    if preset == 'experiment3':
+        # 本番(パターン6・7)と同じ: 全部入り(FullSalad / FullSoup)は使わない。
+        # 「サラダ専用の材料がある」縛りも外す(本番の組み合わせはその縛りを満たさない)
+        return [rs for rs in enumerate_order_recipes(preset, require_exclusive_salad_ingredient=False)
+                if not any(r.startswith('Full') for r in rs)]
     return enumerate_order_recipes(preset)
 
 

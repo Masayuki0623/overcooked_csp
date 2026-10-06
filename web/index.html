@@ -1435,7 +1435,9 @@
     { id: 'no_instruction', label: '指示なし',
       desc: 'AIは自分で段取りを決めて動きます' },
   ];
-  const PICK_STORE = 'overcooked-stage-v1';
+  // v2(2026-10-06): 既定を リング / サラダ1+スープ2 / 文章で書く / 鍋2つ にした。
+  // 古い保存(v1)は読まない(既定が効くように)
+  const PICK_STORE = 'overcooked-stage-v2';
   const PID_STORE = 'overcooked-participant';
   // アンケートを出し終えて読み込み直したときだけ立つ目印。実験のセッションを
   // 続けて回すために、ステージ選択を出さずにそのまま次を始める。
@@ -1486,9 +1488,10 @@
   // チュートリアルには効かない(サーバー側で先に分岐している)。
   const DEBUG_DEFAULT = { on: false, endless: false, seconds: 60,
                           orders_active: 3, cook_seconds: 15, chop_steps: 8,
-                          pots: 1, swap_agents: false };
-  let pick = { map: null, preset: null, case: '', instruction: 'once_at_start',
-               skip_budget: 0, instruct_every: 3, pattern: 1,
+                          pots: 2, swap_agents: false };
+  // 既定は本番(パターン6・7)に近い形: リング / サラダ1+スープ2 / 文章で書く
+  let pick = { map: 'exp_ring', preset: 'experiment3', case: '', instruction: 'once_at_start',
+               skip_budget: 0, instruct_every: 3, pattern: 1, instruction_input: 'text',
                // 既定は本番と同じ「2人で分担」。デバッグで見比べるときだけ
                // 切り替える。ここが 0 だと、デバッグの計画表がいつも
                // AI 単独になり、本番と違うものを見ることになる。
