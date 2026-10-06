@@ -1659,11 +1659,34 @@ class CSPAgent:
     def _collect_event_replan_reason(self, env):
         """直近のイベント履歴から、再スケジュールを要する人間/世界状態変更だけを拾う。"""
         event_history = list(getattr(env, 'event_history', []) or [])
-        last_len = getattr(self, '_last_event_history_len', 0)
-        if last_len > len(event_history):
-            last_len = 0
-
-        new_events = event_history[last_len:]
+        # 新しい出来事は時刻で見分ける。履歴は直近 200 件しか残らない
+        # (overcooked_environment._EVENT_HISTORY_MAX_LEN)ので、件数の差で
+        # 見分けると、200 件に達した後は差がずっと 0 になり、出来事による
+        # 再計算が以後まったく起きなかった(実測: 28 秒以降、切って置くを
+        # 繰り返したまま止まった)。同じ時刻の出来事は中身で重複を除く。
+        last_t = getattr(self, '_last_event_time', None)
+        seen = getattr(self, '_last_event_keys', set())
+        times = [getattr(ev, 'time', None) for ev in event_history]
+        newest_t = max((t for t in times if t is not None), default=None)
+        if last_t is not None and newest_t is not None and newest_t < last_t:
+            last_t, seen = None, set()      # 試合をやり直した
+        new_events = []
+        for ev, t_ev in zip(event_history, times):
+            if t_ev is None:
+                continue
+            key = (getattr(ev, 'event', None), getattr(ev, 'playerA', None),
+                   str(getattr(ev, 'location', None)))
+            if last_t is not None and (t_ev < last_t or (t_ev == last_t and key in seen)):
+                continue
+            new_events.append(ev)
+        if newest_t is not None:
+            if newest_t != last_t:
+                seen = set()
+            seen = seen | {(getattr(ev, 'event', None), getattr(ev, 'playerA', None),
+                            str(getattr(ev, 'location', None)))
+                           for ev, t_ev in zip(event_history, times) if t_ev == newest_t}
+            self._last_event_time = newest_t
+            self._last_event_keys = seen
         self._last_event_history_len = len(event_history)
 
         if not new_events:
