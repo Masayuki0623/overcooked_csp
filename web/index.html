@@ -2947,16 +2947,16 @@
     const steps = [];
     steps.push({ kind: 'info', html:
       '<div class="big">ゲーム終了</div>' + (summary || '') +
-      `<div class="sub">${esc(agent)}とのゲームについて、質問に答えてください` +
+      `<div class="sub">${esc(agent)} とのゲームについて、質問に答えてください` +
       `<br>(${exp.session} / ${exp.sessions_total})</div>` });
-    const c1 = `今のゲームでの${agent}とのやりとりについて、次のことがどの程度当てはまるかを答えてください`;
+    const c1 = `今のゲームでの${agent} とのやりとりについて、次のことがどの程度当てはまるかを答えてください`;
     steps.push({ kind: 'info', html: `<div class="q-text">${esc(c1)}</div>` });
     ccr.forEach(([name, text]) => steps.push(
-      { kind: 'five', name, text, ctx: `${agent}とのやりとりについて` }));
-    const c2 = `今のゲームでの${agent}の振る舞いについて、次のことがどの程度当てはまるかを答えてください`;
+      { kind: 'five', name, text, ctx: `${agent} とのやりとりについて` }));
+    const c2 = `今のゲームでの${agent} の振る舞いについて、次のことがどの程度当てはまるかを答えてください`;
     steps.push({ kind: 'info', html: `<div class="q-text">${esc(c2)}</div>` });
     own.forEach(([name, text]) => steps.push(
-      { kind: 'five', name, text: `${agent} は、${text}`, ctx: `${agent}の振る舞いについて` }));
+      { kind: 'five', name, text: `${agent} は、${text}`, ctx: `${agent} の振る舞いについて` }));
     const c3 = '今のゲームについて、次のことがどの程度当てはまるかを答えてください';
     steps.push({ kind: 'info', html: `<div class="q-text">${esc(c3)}</div>` });
     PLAY_ITEMS.forEach(([name, text]) => steps.push(
