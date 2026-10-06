@@ -585,6 +585,31 @@ class CSPAgent:
         ids = self._pending_chain_fixed_ids(pending) or []
         return {(str(c[1]), str(c[2]), c[3]) for c in ids if len(c) >= 4}
 
+    def _note_exec_tid(self, env, tid):
+        """実行側が「いま手がけている工程」の id を時刻つきで覚える。
+
+        切る出来事(まな板から切った物を取った)がどの工程の分かは、その時刻に
+        手がけていた工程で決める(_track_instruction_progress)。計画の進行位置
+        (current_task_idx)は切る順と一致しないことがある。
+        """
+        log = self.__dict__.setdefault('_exec_tid_log', [])
+        t = float(getattr(env, 'time', 0.0) or 0.0)
+        if log and log[-1][1] == tid:
+            return
+        log.append((t, tuple(tid) if tid else None))
+        if len(log) > 600:
+            del log[:100]
+
+    def _exec_tid_at(self, t):
+        """時刻 t に手がけていた工程の id(無ければ None)。"""
+        out = None
+        for t0, tid in self.__dict__.get('_exec_tid_log', []):
+            if t0 <= t + 1e-6:
+                out = tid
+            else:
+                break
+        return out
+
     def _pending_chain_names(self, pending):
         """鎖の工程の名前(動詞, 材料)の集合。
 
@@ -818,6 +843,8 @@ class CSPAgent:
                 # 材料はどの注文にも使えるので、計画から消えた id では誰が何個
                 # 切ったか分からない(相手が切った分を AI の分に数えていた)
                 ai_chops = Counter()
+                ai_cooks = 0          # AI が鍋(ミキサー)に入れた回数
+                ai_delivers = 0       # AI が提供した回数
                 has_events = hasattr(env, 'event_history') and hasattr(env, 'agents')
                 pending.setdefault('_consumed_tasks', 0)
                 pending.setdefault('inserted_in_wait', 0)
@@ -831,19 +858,30 @@ class CSPAgent:
                             continue
                         newest = t_ev if newest is None else max(newest, t_ev)
                         name_ev = str(getattr(ev, 'event', '') or '')
-                        if (getattr(ev, 'playerA', None) == my_name
-                                and name_ev.startswith('Pickup_Chopped') and name_ev.endswith('_from_Cutboard')):
+                        if getattr(ev, 'playerA', None) != my_name:
+                            continue
+                        if name_ev.startswith('Pickup_Chopped') and name_ev.endswith('_from_Cutboard'):
                             ing = name_ev[len('Pickup_Chopped'):-len('_from_Cutboard')]
                             if '-' not in ing:
+                                # そのとき手がけていた工程が鎖の id なら鎖の分(数えない)
+                                exec_tid = self._exec_tid_at(float(t_ev))
+                                if exec_tid is not None and tuple(exec_tid) in chain_tids:
+                                    continue
                                 ai_chops[('chop', ing.lower())] += 1
+                        elif name_ev.startswith(('Cook_', 'Mix_')):
+                            ai_cooks += 1
+                        elif name_ev.startswith('Deliver_'):
+                            ai_delivers += 1
                     if pending.get('_events_last_time') is None:
                         # 最初の呼び出しでは、それまでの出来事は数えない
                         ai_chops = Counter()
+                        ai_cooks = ai_delivers = 0
                     pending['_events_last_time'] = newest if newest is not None else float(getattr(env, 'time', 0.0) or 0.0)
                 except Exception:
                     ai_chops = Counter()
                 total_now = Counter(name_of(tid) for tid in current_ids if name_of(tid))
                 total_prev = pending.get('_watched_total_names')
+                prev_ids = pending.get('_watched_all_ids') or set()
                 ai_prev = pending.get('_watched_ai_names') or Counter()
                 free_prev = pending.get('_free_ai_names') or Counter()
                 human_prev = pending.get('_watched_human_names') or Counter()
@@ -854,11 +892,15 @@ class CSPAgent:
                     for name in names_all:
                         n_prev = ai_prev.get(name, 0)
                         if name[0] == 'chop' and has_events:
+                            # 鎖の id で切った分は上で除いてある
                             done_by_ai = ai_chops.get(name, 0)
-                            # 手がけていた工程が鎖の id なら鎖の分(数えない)
-                            if (cur_tid_prev and tuple(cur_tid_prev) in chain_tids
-                                    and name_of(cur_tid_prev) == name):
-                                continue
+                        elif has_events and name[0] in ('cook', 'mix'):
+                            # 煮る(混ぜる)は、AI が鍋に入れた出来事があるときだけ AI の分
+                            gone = max(0, total_prev.get(name, 0) - total_now.get(name, 0))
+                            done_by_ai = min(gone, n_prev) if ai_cooks > 0 else 0
+                        elif has_events and name[0] in ('serve', 'serve_salad', 'serve_juice'):
+                            gone = max(0, total_prev.get(name, 0) - total_now.get(name, 0))
+                            done_by_ai = min(gone, n_prev) if ai_delivers > 0 else 0
                         else:
                             gone = max(0, total_prev.get(name, 0) - total_now.get(name, 0))
                             # 相手の計画にも同じ名前があり、AI がそれを手がけていた
@@ -872,12 +914,17 @@ class CSPAgent:
                         in_wait = min(done_by_ai, free_prev.get(name, 0))
                         pending['inserted_in_wait'] = pending.get('inserted_in_wait', 0) + in_wait
                         pending['_consumed_tasks'] = pending.get('_consumed_tasks', 0) + (done_by_ai - in_wait)
+                        if getattr(self, 'debug_count_trace', False):
+                            print(f"[挟んだ] t={float(getattr(env, 'time', 0.0) or 0.0):.1f} {name} +{done_by_ai}"
+                                  f"(待ち中 {in_wait}) 出来事={dict(ai_chops)} 手がけ={self.__dict__.get('_exec_tid_log', [])[-3:]}",
+                                  flush=True)
                 ai_now = [t.get('id') for t in (getattr(self, 'schedule_per_agent', None) or {}).get(own, [])]
                 pending['_watched_ai_names'] = Counter(
                     name_of(tid) for tid in ai_now
                     if tid in current_ids and name_of(tid) and name_of(tid) not in skip_names
                     and tid not in targets and tid not in deps)
                 pending['_watched_total_names'] = total_now
+                pending['_watched_all_ids'] = set(current_ids)
                 sched_all = getattr(self, 'schedule_per_agent', None) or {}
                 pending['_watched_human_names'] = Counter(
                     name_of(t.get('id')) for t in sched_all.get(1 - own, []) if name_of(t.get('id')))
@@ -3892,6 +3939,7 @@ class CSPAgent:
             if task_name:
                 self.task_agent.task_name = task_name
                 self.task_agent.assigned_task_id = tid
+                self._note_exec_tid(env, tid)
                 self.task_agent.order_ingredients = self._order_ingredients_of(task)
                 # 「切らずに運ぶだけ」の指定(既に切られた物が別テーブルにある場合)
                 self.task_agent.carry_from = task.get('carry_from') if verb == 'chop' else None
@@ -4265,6 +4313,8 @@ class CSPAgent:
                 if getattr(ta, 'assigned_task_id', None) != tid or getattr(ta, 'assigned_counter', None) is None:
                     ta.assigned_counter = task.get('assigned_counter')
                 ta.assigned_task_id = tid
+                if agent_idx == (1 if getattr(self, 'own_agent_idx', 0) == 1 else 0):
+                    self._note_exec_tid(env, tid)
                 ta.order_ingredients = self._order_ingredients_of(task)
                 # 「切らずに運ぶだけ」の指定(既に切られた物が別テーブルにある場合)
                 ta.carry_from = task.get('carry_from') if verb == 'chop' else None
