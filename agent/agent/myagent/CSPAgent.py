@@ -910,6 +910,11 @@ class CSPAgent:
                     lost = Counter(pending.get('_chain_chops_redone') or {})
                     for ing, n_done in done_chain.items():
                         need = sum(sorted((pg.get(ing, 0) for pg in per_group), reverse=True)[:max(1, cnt)])
+                        if need <= 0:
+                            # 鎖に使わない材料。鎖の工程の途中でまな板から取った
+                            # (まな板を空けた等)だけで、鎖のために切ったのではない
+                            # (実測: OL スープの指示でトマトを取ったのを 1 と数えた)
+                            continue
                         extra = max(0, n_done - need) - lost.get(ing, 0)
                         if extra > 0:
                             lost[ing] += extra
