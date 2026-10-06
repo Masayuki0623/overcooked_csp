@@ -2853,7 +2853,8 @@ class WebGamePlay:
                      for t in r.get('tasks', []) if t in ids]
             ok = r.get('decision') == 'accept' and bool(tasks)
             self.nl_log.append('%s=>%s(%s)' % (
-                text.replace('|', '/'), 'accept:' + ','.join(t['id'] for t in tasks) if ok else 'reject',
+                text.replace('|', '/'),
+                'accept:' + ','.join(t['id'] for t in tasks) if ok else 'reject:' + str(r.get('pattern') or ''),
                 r.get('reject_reason') or ''))
             print(f"[指示の解釈] #{self.game_id} {n}回目 {text!r} -> "
                   f"{'受理 ' + ','.join(t['id'] for t in tasks) if ok else '却下 ' + str(r.get('reject_reason'))} "
@@ -2864,6 +2865,7 @@ class WebGamePlay:
                 'valid': r.get('valid'), 'ambiguous': r.get('ambiguous'),
                 'exclude': r.get('exclude') or [],
                 'reason': None if ok else (r.get('reject_reason') or 'error'),
+                'pattern': None if ok else (r.get('pattern') or 'other'),
                 'message': r.get('message') or '',
             }
 

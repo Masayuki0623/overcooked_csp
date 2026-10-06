@@ -37,26 +37,62 @@ MAX_CHOP_UNITS = None   # 切る材料の合計
 MIN_AI_STEPS = 2
 MAX_AI_SHARE = 0.5
 REJECT_REASONS = ['invalid', 'ambiguous', 'too_few', 'too_many', 'error']
-# 参加者に見せる却下の文。やわらかく、何をどう書き直せばよいかを伝える
-# (「曖昧です」「無効です」は使わない。2026-10-06)
-REJECT_JA = {
-    'invalid': 'この回の注文にある作業で、AI にやってほしいことを書き直してください。',
-    'ambiguous': 'どの作業か、いくつかが決めきれませんでした。料理や材料と個数を入れて、書き直してください。',
-    'too_few': 'もう少し多くの作業を頼んでください。切る作業を2つ以上にするか、'
-               '料理を煮る・提供するところまで任せる形で書き直してください。',
-    'too_many': '一度に頼めるのは全体の半分までです。頼む量を減らして、書き直してください。',
-    'error': 'うまく読み取れませんでした。もう一度送ってください。',
+# 却下の文は、場合分けごとに事前に決めた定型文(2026-10-06)。
+# 「システムが入力を確かめている」という立場で書き、AI(相方)が断ったように
+# 見える言い方はしない。LLM が書いた文を使うのは、場合分けの外(other)だけ。
+#
+# LLM が返す理由の種類(reason):
+#   not_in_orders   : この回の注文に無い料理・材料を指している
+#   not_instruction : AI への作業の指示ではない(挨拶・質問・自分の分担の宣言)
+#   no_task         : どの料理・材料の作業かが読み取れない(場所・速さ・態度だけ)
+#   count_missing   : 切る個数が決まらない
+#   count_over      : 要る数より多い個数
+#   other           : 上のどれでもない(このときだけ LLM の message を使う)
+# こちらで決める種類:
+#   both_counts, too_few, too_many, exclude_lower, no_ai_steps, error
+REASON_CODES = ['none', 'not_in_orders', 'not_instruction', 'no_task', 'count_missing', 'count_over', 'other']
+PATTERN_JA = {
+    'not_in_orders': 'この回の注文に無い料理や材料が含まれています。画面の下に出ている注文の中から、'
+                     'AI にやってほしい作業を書いてください。',
+    'not_instruction': 'AI への作業の指示として読み取れませんでした。「〜を作って」「〜を切って」のように、'
+                       'やってほしい作業を書いてください。',
+    'no_task': 'どの料理・材料の作業かが読み取れませんでした。料理か材料の名前を入れて書いてください。',
+    'count_missing': '切る個数が読み取れませんでした。1つか 2つかを入れて書いてください。',
+    'count_over': 'この回に必要な数より多い個数が指定されています。必要な数の範囲で書いてください。',
+    'both_counts': '切る個数が 1つと 2つの両方に読めました。どちらかを入れて書いてください。',
+    'too_few': '指示の量が少なすぎます。切る作業を 2つ以上頼むか、料理を煮る・提供するところまで任せる形で'
+               '書いてください。',
+    'too_many': '一度に頼める量は全体の半分までです。頼む量を減らして書いてください。',
+    'exclude_lower': '料理を頼むときは、材料を切るところから任せる形で書いてください'
+                     '(煮るところまでで止めたいときは「煮て」と書けます)。',
+    'no_ai_steps': 'AI がやる作業が残りません。AI にやってほしい作業を書いてください。',
+    'error': '解釈の処理がうまくいきませんでした。もう一度送ってください。',
 }
-# LLM が書いた文にこの語があれば、こちらの文に差し替える
-HARSH_WORDS = ('曖昧', '無効', '有効では', '不明確', '不適切')
+# 古い呼び方との互換(reject_reason -> 定型文)
+REJECT_JA = {
+    'invalid': PATTERN_JA['not_in_orders'],
+    'ambiguous': PATTERN_JA['no_task'],
+    'too_few': PATTERN_JA['too_few'],
+    'too_many': PATTERN_JA['too_many'],
+    'error': PATTERN_JA['error'],
+}
+# LLM が書いた文にこの語があれば使わない(定型文に落とす)
+HARSH_WORDS = ('曖昧', '無効', '有効では', '不明確', '不適切', '拒否', 'できません')
+
+
+def pattern_message(code, llm_message='', fallback='no_task'):
+    """場合分けの種類 code に対応する定型文。other のときだけ LLM の文(きつい語があれば定型文)。"""
+    if code in PATTERN_JA:
+        return PATTERN_JA[code]
+    m = (llm_message or '').strip()
+    if not m or any(w in m for w in HARSH_WORDS):
+        return PATTERN_JA[fallback]
+    return m if m.endswith('。') else m + '。'
 
 
 def soft_message(llm_message, reason):
-    """LLM の助言が使えればそれ(書き直しの促しを添える)、きつい言い方ならこちらの文。"""
-    m = (llm_message or '').strip()
-    if not m or any(w in m for w in HARSH_WORDS):
-        return REJECT_JA[reason]
-    return m if m.endswith('。') else m + '。'
+    """互換用。reason(invalid / ambiguous)の定型文。"""
+    return REJECT_JA.get(reason, PATTERN_JA['no_task'])
 
 # LLM の出力の形。
 #   valid     : 有効な指示か(この回の注文にある作業を、AI に指定しているか)
@@ -71,9 +107,12 @@ SCHEMA_BASE = {
         'tasks': {'type': 'array', 'items': {'type': 'string'}},
         # AI にやらせない工程(「切るのは私がやる」)。ふつうは空
         'exclude_steps': {'type': 'array', 'items': {'type': 'string', 'enum': ['chop', 'cook', 'serve']}},
+        # 却下の理由の種類(受理なら none)。定型文を選ぶのに使う
+        'reason': {'type': 'string', 'enum': ['none', 'not_in_orders', 'not_instruction', 'no_task',
+                                              'count_missing', 'count_over', 'other']},
         'message': {'type': 'string'},
     },
-    'required': ['valid', 'ambiguous', 'tasks', 'exclude_steps', 'message'],
+    'required': ['valid', 'ambiguous', 'tasks', 'exclude_steps', 'reason', 'message'],
 }
 STEP_JA = {'chop': '切る', 'cook': '煮る', 'serve': '提供する'}
 
@@ -110,6 +149,10 @@ def system_prompt(menu, orders_ja, ingredients_ja='たまねぎ・トマト・�
 - exclude_steps: 「材料は切らないで」「切るのは私がやる」「提供は私がやる」のように、料理の工程のうち AI に
              やらせないと言われた工程を入れる(chop=切る, cook=煮る, serve=提供)。何も言われなければ空の配列。
              除く工程があっても、料理の指定(serve 系 / cook 系)はそのまま選ぶ(受けるかどうかは後で決める)。
+- reason   : 受理なら none。却下なら理由の種類を1つ:
+             not_in_orders(この回の注文に無い料理・材料を指している) / not_instruction(作業の指示ではない:
+             挨拶・質問・感想・自分の分担の宣言だけ) / no_task(どの料理・材料かが読み取れない) /
+             count_missing(切る個数が決まらない) / count_over(要る数より多い個数) / other(どれでもない)。
 - message  : 参加者に見せる短い日本語。受理なら解釈した内容を1文で、曖昧・無効なら「何を足して書き直せばよいか」を
              やわらかく1文で(「曖昧です」「無効です」「不明確」のような言い方はしない。例: 「たまねぎは2つ要るので、
              切る個数を入れて書き直してください」)。
@@ -337,7 +380,7 @@ def interpret(text, candidates, orders_ja, model=None, timeout_s=25.0):
     system = system_prompt(menu, orders_ja)
     t0 = time.perf_counter()
     fail = {'decision': 'reject', 'valid': None, 'ambiguous': None, 'tasks': [], 'reject_reason': 'error',
-            'message': REJECT_JA['error'],
+            'message': PATTERN_JA['error'], 'pattern': 'error',
             'raw': None, 'model': models[0]}
     errors = []
     raw = None
@@ -364,6 +407,9 @@ def normalize(raw, ids, candidates=None):
     valid = bool(raw.get('valid'))
     ambiguous = bool(raw.get('ambiguous'))
     message = str(raw.get('message') or '').strip()
+    code = str(raw.get('reason') or '').strip()
+    if code not in REASON_CODES:
+        code = 'other'
     base = {'valid': valid, 'ambiguous': ambiguous, 'exclude': exclude}
     # 同じ作業の個数違い(x1 と x2)が両方選ばれていたら、個数が決まっていない
     # (実測: 「レタスサラダを作って」で、1つと2つの両方が選ばれた)
@@ -371,23 +417,27 @@ def normalize(raw, ids, candidates=None):
     if len(set(stems)) < len(stems):
         ambiguous = True
         base['ambiguous'] = True
-        message = '個数(1つ / 2つ)を入れて、書き直してください。'
+        code = 'both_counts'
     if not valid:
-        return dict(base, decision='reject', tasks=[], reject_reason='invalid',
-                    message=soft_message(message, 'invalid'))
+        if code in ('none', 'other'):
+            code = 'other' if message else 'not_in_orders'
+        return dict(base, decision='reject', tasks=[], reject_reason='invalid', pattern=code,
+                    message=pattern_message(code, message, 'not_in_orders'))
     if ambiguous or not tasks:
-        return dict(base, decision='reject', tasks=[], reject_reason='ambiguous',
-                    message=soft_message(message, 'ambiguous'))
+        if code in ('none', 'other'):
+            code = 'other' if message else 'no_task'
+        return dict(base, decision='reject', tasks=[], reject_reason='ambiguous', pattern=code,
+                    message=pattern_message(code, message, 'no_task'))
     cap = size_check(tasks, candidates, exclude) or cap_check(tasks, candidates)
     if cap:
-        return dict(base, decision='reject', tasks=[], reject_reason=cap, message=REJECT_JA[cap])
+        return dict(base, decision='reject', tasks=[], reject_reason=cap, pattern=cap,
+                    message=PATTERN_JA[cap])
     # 指示は「AI に今すぐやってほしい作業」なので、鎖の下の工程(切る・煮る)を人に
     # 残して上の工程だけ頼むことはできない(上を頼んだら下も AI がやる)。
     # 除けるのは一番上(提供)だけ(2026-10-06)
     if any(e != 'serve' for e in exclude):
-        return dict(base, decision='reject', tasks=[], reject_reason='invalid',
-                    message='料理を頼むときは、材料を切るところから任せる形で書き直してください'
-                            '(煮るところまでで止めたいときは「煮て」と書けます)。')
+        return dict(base, decision='reject', tasks=[], reject_reason='invalid', pattern='exclude_lower',
+                    message=PATTERN_JA['exclude_lower'])
     # 除く工程が、選んだ作業の全部(切るだけの指示で「切らないで」)なら、やることが無い。
     # 料理の指示は鎖(切る → 煮る → 提供)なので、提供を除いても切る・煮るが残る
     if exclude:
@@ -406,7 +456,7 @@ def normalize(raw, ids, candidates=None):
                 kinds |= {'chop', 'cook', 'serve'}
         if all(k in exclude for k in kinds):
             return dict(base, decision='reject', tasks=[], reject_reason='ambiguous',
-                        message='AI がやる作業が残りませんでした。AI にやってほしい作業を書き直してください。')
+                        pattern='no_ai_steps', message=PATTERN_JA['no_ai_steps'])
     return dict(base, decision='accept', tasks=tasks, reject_reason=None, message=message)
 
 
