@@ -107,6 +107,9 @@ CASES = [
     ('サラダを作って、レタスも1つ切っておいて', A, [['serve_salad_onion_tomatosalad', 'chop_lettuce_x1']]),
     ('私はサラダをやるので、たまねぎレタスのスープをお願い', A, [['serve_lettuce_onionsoup']]),
     ('たまねぎを1つ切ったあと、トマトレタススープを煮て', A, [['chop_onion_x1', 'cook_lettuce_tomatosoup']]),
+    # 料理名の材料は読み替えない
+    ('レタス玉ねぎスープの調理だけして', A, [['cook_lettuce_onionsoup']]),
+    ('たまねぎトマトスープを作って', INV, None),
     # 工程の一部「だけ」= その段(前の工程を含む)
     ('スープの調理の部分だけをやって', A, [['cook_lettuce_onionsoup', 'cook_lettuce_tomatosoup']]),
     ('スープ料理を作るときの鍋に入れる作業だけをやって', A, [['cook_lettuce_onionsoup', 'cook_lettuce_tomatosoup']]),

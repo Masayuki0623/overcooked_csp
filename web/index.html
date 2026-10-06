@@ -3024,6 +3024,8 @@
           '<div class="interp ok"><h4>指示の解釈</h4>' +
           r.tasks.map((t) => `<div class="reading">${esc(t.label)}</div>`).join('') +
           '<h4>エージェントがやる作業の流れ</h4>' + r.tasks.map(flow).join('') +
+          '<div class="sysnote">※ 解釈は自動で行っています。自分の指示と合っているか(料理・材料・個数)を確かめ、' +
+          '違っていれば「書き直す」で書き直してください。</div>' +
           '<div class="row2"><button type="button" class="primary" id="nl-yes">この内容にする</button>' +
           '<button type="button" id="nl-retry">書き直す</button></div></div>';
         document.getElementById('nl-yes').addEventListener('click', () => {
