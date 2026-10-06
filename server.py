@@ -2966,23 +2966,8 @@ class WebGamePlay:
             here = cur.get(idx, 0) if isinstance(cur, dict) else 0
             # 指示の工程(chain)、その最後より前に入っている指示の外の工程
             # (inserted = 挟んだ工程)、それ以外(other)で色を分ける
-            # 鎖の「切る」は同じ材料ならどの注文の id でもよい(必要数まで)。
-            # 計画の並びで先に出てくる同名の「切る」を鎖の分とみなして色を付ける
-            from collections import Counter
-            need = Counter((str(c[0]), str(c[1])) for c in chain_ids if str(c[0]) == 'chop')
-            used = Counter()
-            chain_rows = set()
-            for k, t in enumerate(lst):
-                tid = tuple(t.get('id') or ())
-                if len(tid) < 2:
-                    continue
-                name = (str(tid[0]), str(tid[1]))
-                if name in need:
-                    if used[name] < need[name]:
-                        used[name] += 1
-                        chain_rows.add(k)
-                elif tid in chain_ids:
-                    chain_rows.add(k)
+            # 鎖の工程は id で見る(同名でも別の注文のものは別の工程)
+            chain_rows = {k for k, t in enumerate(lst) if tuple(t.get('id') or ()) in chain_ids}
             last_chain = max(chain_rows, default=-1)
             for k, t in enumerate(lst):
                 tid = t.get('id') or ('', '', '')

@@ -796,28 +796,20 @@ class CSPAgent:
                 # 「消えた」は全体(2人ぶん)の個数が減ったときだけ。AI の前の計画に
                 # あった名前の分を AI がやったとみなす。
                 from collections import Counter
-                # 鎖の「切る」は同じ材料ならどの注文の id でも鎖の分(必要数まで。
-                # 切った材料はどの注文にも使える)。必要数を超えた同名の「切る」は
-                # 割り込みとして数える(quota。2026-10-06)。切る以外の鎖の工程
-                # (煮る・盛る)は名前が一意なので数えない
+                # 同名の工程(別の注文の「レタスを切る」)は別の工程として扱う(2026-10-06:
+                # 同じ物として扱うと、鎖の分を別の注文の id でやって在庫がその注文に
+                # 回る弊害があった)。鎖の工程(id)はどれも数えず、それ以外は数える。
+                # 「切る」は出来事で数え、そのとき AI が手がけていた工程の id で
+                # 鎖の分かどうかを決める(切る以外は名前が一意なので名前で数える)
                 skip_names = set()
-                quota = pending.get('_same_name_quota')
                 if chain_tids:
-                    groups, cnt = self._pending_chain_groups(pending)
-                    quota_init = Counter()
-                    for g in (groups or [])[:cnt]:
-                        for c in g:
-                            if len(c) >= 3 and str(c[1]) == 'chop':
-                                quota_init[(str(c[1]), str(c[2]))] += 1
-                            elif len(c) >= 3:
-                                skip_names.add((str(c[1]), str(c[2])))
-                    if quota is None:
-                        quota = quota_init
+                    for tid in chain_tids:
+                        if str(tid[0]) != 'chop':
+                            skip_names.add((str(tid[0]), str(tid[1])))
                 else:
                     for tid in targets | deps:
                         if tid and len(tid) >= 2:
                             skip_names.add((str(tid[0]), str(tid[1])))
-                quota = Counter(quota or {})
 
                 def name_of(tid):
                     return (str(tid[0]), str(tid[1])) if tid and len(tid) >= 2 else None
@@ -856,12 +848,17 @@ class CSPAgent:
                 free_prev = pending.get('_free_ai_names') or Counter()
                 human_prev = pending.get('_watched_human_names') or Counter()
                 cur_prev = pending.get('_watched_ai_current_name')
+                cur_tid_prev = pending.get('_watched_ai_current_tid')
                 if total_prev is not None:
                     names_all = set(ai_prev) | set(ai_chops)
                     for name in names_all:
                         n_prev = ai_prev.get(name, 0)
                         if name[0] == 'chop' and has_events:
                             done_by_ai = ai_chops.get(name, 0)
+                            # 手がけていた工程が鎖の id なら鎖の分(数えない)
+                            if (cur_tid_prev and tuple(cur_tid_prev) in chain_tids
+                                    and name_of(cur_tid_prev) == name):
+                                continue
                         else:
                             gone = max(0, total_prev.get(name, 0) - total_now.get(name, 0))
                             # 相手の計画にも同じ名前があり、AI がそれを手がけていた
@@ -872,20 +869,14 @@ class CSPAgent:
                             continue
                         if name in skip_names:
                             continue
-                        # 鎖の分(同名の必要数)に先に充てる
-                        chain_part = min(done_by_ai, quota.get(name, 0))
-                        if chain_part:
-                            quota[name] -= chain_part
-                            done_by_ai -= chain_part
                         in_wait = min(done_by_ai, free_prev.get(name, 0))
                         pending['inserted_in_wait'] = pending.get('inserted_in_wait', 0) + in_wait
                         pending['_consumed_tasks'] = pending.get('_consumed_tasks', 0) + (done_by_ai - in_wait)
-                pending['_same_name_quota'] = quota
                 ai_now = [t.get('id') for t in (getattr(self, 'schedule_per_agent', None) or {}).get(own, [])]
                 pending['_watched_ai_names'] = Counter(
                     name_of(tid) for tid in ai_now
                     if tid in current_ids and name_of(tid) and name_of(tid) not in skip_names
-                    and (chain_tids or (tid not in targets and tid not in deps)))
+                    and tid not in targets and tid not in deps)
                 pending['_watched_total_names'] = total_now
                 sched_all = getattr(self, 'schedule_per_agent', None) or {}
                 pending['_watched_human_names'] = Counter(
@@ -895,6 +886,8 @@ class CSPAgent:
                 own_sched = sched_all.get(own, []) or []
                 pending['_watched_ai_current_name'] = (
                     name_of(own_sched[cur_idx].get('id')) if 0 <= cur_idx < len(own_sched) else None)
+                pending['_watched_ai_current_tid'] = (
+                    tuple(own_sched[cur_idx].get('id')) if 0 <= cur_idx < len(own_sched) else None)
                 free_ids = self._chain_free_task_ids(pending) if chain_tids else set()
                 pending['_free_ai_names'] = Counter(name_of(tid) for tid in free_ids if name_of(tid))
                 # 古い形(id の集合)も残す(他の場所が参照している)
@@ -1158,19 +1151,12 @@ class CSPAgent:
                             or str(tasks[i].get('verb')) in excl_verbs):
                         hidxs.append(i)
                         continue
-                # 「切る」は、同じ材料ならどの注文の id が付いた工程でも鎖の分に
-                # できる(切った材料はどの注文にも使える。2026-10-06)。どれを鎖の分に
-                # するかはソルバーが選ぶ。選ばれなかった同名の工程は、鎖の外の工程
-                # として普通に数える(必要数を超えた同名の作業は割り込み)。
-                if str(tasks[i].get('verb')) == 'chop':
-                    alts = [j for j in range(len(tasks))
-                            if starts.get(j) is not None and str(tasks[j].get('verb')) == 'chop'
-                            and str((tasks[j].get('id') or ('', ''))[1]) == str(tasks[i]['id'][1])
-                            and tasks[j].get('id') not in self.completed_task_ids
-                            and tasks[j].get('held_by') in (None, own)]
-                    if len(alts) > 1 and i in alts:
-                        idxs.append(tuple(alts))
-                        continue
+                # 鎖の「切る」は自分の注文の id の工程に固定する。別の注文の id を
+                # 鎖の分に選ばせると、AI はその id で切り、切った物は在庫の割り当てで
+                # その注文(スープ)に回ってしまう(実測 2026-10-06: サラダの指示で
+                # スープの id のレタス・トマトを切り、スープを先に煮て提供した)。
+                # 同名の工程の扱いは数え方(_track_instruction_progress: 必要数までは
+                # 鎖の分、超えた分は割り込み)で持つ。
                 idxs.append(i)
             if idxs or hidxs:
                 alive.append((idxs, hidxs))
@@ -1205,32 +1191,14 @@ class CSPAgent:
         any_human = False
         waits = []                        # (w0, w1, group_lit)
         in_group = {}                     # task idx -> group lit(None=無条件)
-        picks_of = {}                     # task idx -> [同名の工程として選ばれた印, ...]
         for g, (idxs, hidxs) in enumerate(alive):
             lit = sel[g]
             enf = [lit] if lit is not None else []
-            fixed_idxs = []
             for i in idxs:
-                if isinstance(i, tuple):
-                    # 同名の候補から1つを鎖の分として選ぶ
-                    pk = [model.NewBoolVar(f'chain_pick_{g}_{j}') for j in i]
-                    if lit is None:
-                        model.AddExactlyOne(pk)
-                    else:
-                        model.Add(sum(pk) == 1).OnlyEnforceIf(lit)
-                        model.Add(sum(pk) == 0).OnlyEnforceIf(lit.Not())
-                    for j, b in zip(i, pk):
-                        picks_of.setdefault(j, []).append(b)
-                        if is_a1 is not None and is_a1[j] is not None:
-                            model.Add(is_a1[j] == own).OnlyEnforceIf(b)
-                        model.Add(ce >= ends[j]).OnlyEnforceIf(b)
-                    continue
-                fixed_idxs.append(i)
                 in_group[i] = lit
                 if is_a1 is not None and is_a1[i] is not None:
                     model.Add(is_a1[i] == own).OnlyEnforceIf(enf)
                 model.Add(ce >= ends[i]).OnlyEnforceIf(enf)
-            idxs = fixed_idxs
             for i in hidxs:
                 in_group[i] = lit
                 any_human = True
@@ -1250,10 +1218,6 @@ class CSPAgent:
         # --- 鎖の外の工程: 数える/数えない ---
         # 人の側: 鎖の中の人の工程が終わるまでに、人が鎖の外の工程を
         # 挟んでよいのも d 個まで(AI が必要とする時までに済ませる縛り)
-        # 1つの工程が2つの鎖の要素に選ばれることはない
-        for j, pk in picks_of.items():
-            if len(pk) > 1:
-                model.AddAtMostOne(pk)
         # 同名の工程(別の注文の「レタスを切る」)は、鎖の分に選ばれなければ
         # 他の工程と同じに扱う(鎖の前に入れれば割り込みとして数える。2026-10-06:
         # 「必要より多く切るなら、それは割り込みに含めてよい」)
@@ -1282,7 +1246,6 @@ class CSPAgent:
             lits = []                     # どれかが真なら「数えない」
             if j in in_group:
                 lits.append(in_group[j])  # そのかたまりを選んだなら鎖の工程
-            lits += picks_of.get(j, [])   # 同名の工程として鎖の分に選ばれた
             if is_a1 is not None and is_a1[j] is not None:
                 other = model.NewBoolVar(f'chain_other_{j}')
                 model.Add(is_a1[j] != own).OnlyEnforceIf(other)
