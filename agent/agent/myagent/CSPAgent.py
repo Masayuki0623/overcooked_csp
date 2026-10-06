@@ -3316,6 +3316,85 @@ class CSPAgent:
                 ready.add((verb, obj))
         return ready
 
+    def _order_pot(self, env, pots, order_idx):
+        """その注文(並びの番号)のスープを煮る鍋。
+
+        以前は「並びの番号 ÷ 鍋の数の余り」で決め打ちしていた。注文を出すと
+        残りの注文の並びが詰め直されるので、別の注文のスープが入っている鍋を
+        割り当てることがあった。実行側は空いている鍋を使うのに、計画はその鍋が
+        空くのを待つ形になり、見込みが大きく外れた(実測 2026-10-07: もう一方の
+        鍋が空いているのに 15 秒待つ計画。見込み 40 -> 53 秒)。
+        中身を見て決める(_assign_pots)。同じフレームの中では同じ答えを返す。
+        """
+        pots = [tuple(p) for p in (pots or [])]
+        if not pots:
+            return None
+        key = (float(getattr(env, 'time', 0.0) or 0.0), tuple(pots), id(env))
+        cache = self.__dict__.get('_order_pot_cache')
+        if not cache or cache[0] != key:
+            try:
+                assigned = self._assign_pots(env, pots)
+            except Exception:
+                assigned = {}
+            cache = (key, assigned)
+            self._order_pot_cache = cache
+        return cache[1].get(order_idx, pots[order_idx % len(pots)])
+
+    def _assign_pots(self, env, pots):
+        """注文の並びの番号 -> 鍋。
+
+        1. その料理がもう入っている鍋(煮ている・煮えた)
+        2. まだ入っていない注文には、空いている鍋(前に割り当てた鍋が空いていればそれ)
+        割り当てられない注文は呼び出し側が従来どおり決める。
+        皿に盛った後のスープ(手に持っている・台にある)は鍋を使わないので外す。
+        """
+        from collections import Counter
+        orders = list(getattr(getattr(env, 'order', None), 'current_orders', None) or [])
+        content = {}
+        for p in pots:
+            name = str(getattr(env.pos_obj.get(p), 'full_name', '') or '')
+            content[p] = frozenset(self._pot_contents(name)) if name else None
+        plated = Counter()
+        holders = [getattr(a, 'holding', None) for a in (getattr(env, 'agents', None) or [])]
+        for obj in list(env.pos_obj.values()) + holders:
+            name = str(getattr(obj, 'full_name', '') or '')
+            if 'Cooked' in name and 'Plate' in name:
+                plated[frozenset(self._pot_contents(name.replace('-Plate', '').replace('Plate-', '')))] += 1
+        soup_slots = []
+        for idx, ot in enumerate(orders):
+            name = str(getattr(ot[0], 'full_name', '') or '').lower()
+            if goal_dish_kind(name) != KIND_SOUP:
+                continue
+            ings = frozenset(i for i in ALL_INGREDIENTS if i in name)
+            soup_slots.append((idx, ings))
+        # 工程を作るときと同じ順(在庫を確保する順)で、鍋のスープを注文に充てる
+        seq = list(getattr(self, '_build_claim_seq', None) or [])
+        if seq:
+            rank = {idx: k for k, idx in enumerate(seq)}
+            soup_slots.sort(key=lambda s: rank.get(s[0], len(rank) + s[0]))
+        out, used, rest = {}, set(), []
+        for idx, ings in list(soup_slots):
+            if plated.get(ings, 0) > 0:
+                plated[ings] -= 1
+                soup_slots.remove((idx, ings))
+        for idx, ings in soup_slots:
+            p = next((p for p in pots if p not in used and content[p] == ings), None)
+            if p is None:
+                rest.append(idx)
+                continue
+            out[idx] = p
+            used.add(p)
+        prev = self.__dict__.setdefault('_pot_prev', {})
+        for idx in rest:
+            free = [p for p in pots if p not in used and content[p] is None]
+            if not free:
+                continue
+            p = prev.get(idx) if prev.get(idx) in free else free[0]
+            out[idx] = p
+            used.add(p)
+            prev[idx] = p
+        return out
+
     def _pot_still_cooking(self, env, dish_name):
         """その料理が、まだ鍋で煮えている最中か。"""
         want = {p.capitalize() for p in dish_ingredients(dish_name)}
@@ -3765,6 +3844,16 @@ class CSPAgent:
             for t in o['tasks']:
                 current_task_ids.add(t['id'])
         current_task_ids = self._stabilize_task_ids_for_held_progress(env, current_task_ids)
+        # 「煮る」「混ぜる」は、鍋・ミキサーの中身を見て、まだ要るときだけ作られる。
+        # それが一覧に出ているなら済んでいない。完了印が残っていれば外す。
+        # 工程の id は (動詞, 料理, 注文番号) で、注文を出すと残りの注文の番号が
+        # 詰め直される。同じ料理が 2 つあると、前に煮た分の完了印がまだ煮ていない
+        # 分に付き、デバッグ画面で線が引かれ、実行側にも「済んだ」と扱われていた
+        # (実測 2026-10-07: トマトレタスのスープ 2 品。見込み 39.6 秒 -> 実際 55.2 秒)。
+        _stale_done = {t for t in (self.completed_task_ids & current_task_ids)
+                       if t and t[0] in ('cook', 'mix')}
+        if _stale_done:
+            self.completed_task_ids -= _stale_done
         event_reason = self._collect_event_replan_reason(env)
 
         # 指示タイミング固定モード(enable_cook)の監視用。GamePlay が読む。
@@ -4441,6 +4530,12 @@ class CSPAgent:
                 # 計画が選んだまな板。空いていればそこを使う(TaskAgent)。
                 # まな板の上で合流させる 1 つ目の材料は、必ずそのまな板で切る。
                 ta.merge_anchor = bool(task.get('merge_anchor')) and verb == 'chop'
+                # 計画に載っている煮る(混ぜる)は、まだどの鍋にもこの注文の分が
+                # 入っていないということ。同じ料理の別の注文が入れた鍋を見て
+                # 「完了」と判定しない(同じスープ 2 品で、材料を持ったまま完了
+                # 扱いになり、材料を捨てていた。実測 2026-10-07)。持ち物から
+                # 作った臨時の工程(注文番号 -1)は今までどおり。
+                ta.exclude_full_pots = verb in ('cook', 'mix') and order_uid != -1
                 if ta.merge_anchor and (task.get('res') or (None,))[0] == 'cutboard':
                     ta.preferred_cutboard = tuple(task['res'][1])
                 else:
@@ -5438,7 +5533,7 @@ class CSPAgent:
         delivery = resources.get('delivery')
         pots = resources.get('pots') or []
         blenders = resources.get('blenders') or []
-        pot = pots[order_idx % len(pots)] if pots else None
+        pot = self._order_pot(env, pots, order_idx) if pots else None
         blender = blenders[order_idx % len(blenders)] if blenders else None
 
         def dist(a, b):
@@ -5760,7 +5855,7 @@ class CSPAgent:
 
             elif verb == 'cook':
                 pots = resources['pots']
-                pot = pots[order_idx % len(pots)] if pots else default_start_pos
+                pot = self._order_pot(env, pots, order_idx) if pots else default_start_pos
                 needed_ings = dish_ingredients(obj)
                 start_candidates = []
 
@@ -5825,7 +5920,7 @@ class CSPAgent:
 
             elif verb == 'serve':
                 pots = resources['pots']
-                pot = pots[order_idx % len(pots)] if pots else default_start_pos
+                pot = self._order_pot(env, pots, order_idx) if pots else default_start_pos
                 delivery = resources['delivery']
                 plate = self._pick_plate(env, resources, delivery)
 
@@ -5840,7 +5935,7 @@ class CSPAgent:
             elif verb == 'clear_pot':
                 # 皿を取りに行き、鍋から取り出し、空いた台へ置く。
                 pots = resources['pots']
-                pot = pots[order_idx % len(pots)] if pots else default_start_pos
+                pot = self._order_pot(env, pots, order_idx) if pots else default_start_pos
                 plate = self._pick_plate(env, resources, pot) or default_start_pos
                 free = [c for c in self._usable_counters(
                             env, env.get_pos_by_obj_gs(gs='Counter'))
@@ -5866,7 +5961,7 @@ class CSPAgent:
 
             elif verb == 'handover':
                 pots = resources['pots']
-                pot = pots[order_idx % len(pots)] if pots else default_start_pos
+                pot = self._order_pot(env, pots, order_idx) if pots else default_start_pos
                 counter = t.get('assigned_counter') or self._find_shared_counter(env, pot)
                 t['start_pos'] = self._pick_plate(env, resources, pot)
                 t['end_pos'] = counter
@@ -6440,7 +6535,7 @@ class CSPAgent:
             pots = resources['pots']
             if not pots:
                 return None
-            pot_pos = pots[order_idx % len(pots)]
+            pot_pos = self._order_pot(env, pots, order_idx)
             plate_pos = self._pick_plate(env, resources, pot_pos)
             if plate_pos is None:
                 return None
@@ -6584,7 +6679,7 @@ class CSPAgent:
             pot_pos_list = resources['pots']
             if not pot_pos_list: return None
             
-            pot_pos = pot_pos_list[order_idx % len(pot_pos_list)]
+            pot_pos = self._order_pot(env, pot_pos_list, order_idx)
 
             needed_ings = dish_ingredients(obj)
             # 材料は指定テーブルに集めるので、そこが実際の出発点。指定が無い
@@ -6648,7 +6743,7 @@ class CSPAgent:
             plate_pos = self._pick_plate(env, resources, delivery_pos)
 
             if not pot_pos_list: return None
-            pot_pos = pot_pos_list[order_idx % len(pot_pos_list)]
+            pot_pos = self._order_pot(env, pot_pos_list, order_idx)
 
             d1 = self.astar_distance(env, plate_pos, pot_pos)
             d2 = self.astar_distance(env, pot_pos, delivery_pos)
@@ -6702,7 +6797,7 @@ class CSPAgent:
             # 仕切りの向こうへ渡すための工程。皿を取り、鍋から盛り、受け渡し台に置く。
             pot_pos_list = resources['pots']
             if not pot_pos_list: return None
-            pot_pos = pot_pos_list[order_idx % len(pot_pos_list)]
+            pot_pos = self._order_pot(env, pot_pos_list, order_idx)
             plate_pos = self._pick_plate(env, resources, pot_pos)
             counter = assigned_counter or self._find_shared_counter(env, pot_pos)
             if counter is None: return None
@@ -7353,7 +7448,7 @@ class CSPAgent:
 
         # 複数候補があれば、鍋までの距離が最短のものを優先する
         pots = resources.get('pots', [])
-        pot = pots[order_idx % len(pots)] if pots else None
+        pot = self._order_pot(env, pots, order_idx) if pots else None
         if pot is None:
             return candidates[0]
 
@@ -7382,7 +7477,7 @@ class CSPAgent:
         best_cb = get_nearest(ing_pos, cutboards)
 
         pots = resources.get('pots', [])
-        pot = pots[order_idx % len(pots)] if pots else (0, 0)
+        pot = self._order_pot(env, pots, order_idx) if pots else (0, 0)
 
         counters = resources.get('counters', [])
 
@@ -8151,6 +8246,11 @@ class CSPAgent:
         _expiry_on = (_sched is not None
                       and not getattr(_sched, 'disable_order_expiry', True))
 
+        # 鍋の割り当て(_assign_pots)も、この順で「鍋のスープはどの注文の分か」を
+        # 決める(下の pot_states の取り方と同じにする。同じ料理が 2 つあると、
+        # 順が違えば煮ていない方の注文に、スープの入った鍋を割り当ててしまう)
+        self._build_claim_seq = list(self._claim_sequence(order_uids, claim_priority))
+        self._order_pot_cache = None
         for order_idx in self._claim_sequence(order_uids, claim_priority):
             order_tuple = current_orders[order_idx]
             goal = order_tuple[0]

@@ -35,6 +35,9 @@ class TaskAgent:
         # まな板の上で合流させる注文の、1 つ目の材料を切る工程か(CSPAgent が設定)。
         # そうなら計画のまな板(preferred_cutboard)で切って、置いたままにする。
         self.merge_anchor = False
+        # 煮る(混ぜる)で、レシピのそろった鍋を「完了」の根拠にしないか(CSPAgent が設定)。
+        # 計画がその注文の煮るを残している = その鍋のスープは別の注文(同じ料理)の分。
+        self.exclude_full_pots = False
 
         # 経路予約用（Cooperative A*）
         self.planned_path = []
@@ -1357,6 +1360,12 @@ class TaskAgent:
                             remaining.remove(p)
                     if not remaining:
                         # 必要な材料が全て入っている鍋(調理中/調理済み)
+                        # 計画がこの注文の「煮る」をまだ残しているなら、その鍋の
+                        # スープは別の注文(同じ料理)の分。完了とみなさず、使えない
+                        # 鍋として扱う(CSPAgent が exclude_full_pots を立てる)。
+                        if getattr(self, 'exclude_full_pots', False):
+                            blocked_pot_loc = p_loc
+                            continue
                         target_pot_loc = p_loc
                         missing_ings = remaining
                         break
