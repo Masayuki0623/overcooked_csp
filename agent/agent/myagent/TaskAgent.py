@@ -2141,21 +2141,55 @@ class TaskAgent:
                 check_cbs = list(reversed(check_cbs))
 
             pref = getattr(self, 'preferred_cutboard', None)
-            if (pref is not None and tuple(pref) in {tuple(c) for c in check_cbs}
-                    and env.pos_obj[tuple(pref)] is None):
-                # 計画が選んだまな板が空いている。近いほうではなく、そちらを使う
-                # (近いほうは、相手がこれから使う計画になっていることがある)。
-                best_cb = tuple(pref)
-                check_cbs = []
-            for loc in check_cbs:
-                if env.pos_obj[loc] is None:
-                    dist = abs(self_pos[0]-loc[0]) + abs(self_pos[1]-loc[1])
-                    if dist < min_dist:
-                        min_dist = dist
-                        best_cb = loc
-            
-            if best_cb:
-                #print(f"  -> {target_ing_name} をまな板 {best_cb} に置きます")
+            empties = [tuple(loc) for loc in check_cbs if env.pos_obj[loc] is None]
+            # まな板の選び方(2026-10-06):
+            #   1. 前のフレームで選んだまな板がまだ空いていれば、それを使い続ける
+            #      (毎フレーム近い順に選び直すと、島の反対側へ回る途中で近い方が
+            #       入れ替わり、往復して進まなかった。実測: トマトを持って 2.5 秒往復)
+            #   2. 計画が選んだまな板が空いていればそれ
+            #   3. 残りは、実際に歩く手数(相手が立っている升は通れない)が短い順
+            kept = getattr(self, '_chosen_cutboard', None)
+            if getattr(self, '_chosen_cutboard_for', None) != getattr(self, 'assigned_task_id', None):
+                kept = None
+            ordered = []
+            if kept in empties:
+                ordered.append(kept)
+            if pref is not None and tuple(pref) in empties and tuple(pref) not in ordered:
+                ordered.append(tuple(pref))
+            rest = []
+            for loc in empties:
+                if loc in ordered:
+                    continue
+                best_cost = None
+                for dx, dy in ((0, 1), (0, -1), (1, 0), (-1, 0)):
+                    adj = (loc[0] + dx, loc[1] + dy)
+                    if adj == tuple(self_pos):
+                        best_cost = 0
+                        break
+                    try:
+                        _path, cost = self.astar_path_cost(env, self_pos, adj, dynamic_obstacles=dynamic_obstacles)
+                    except Exception:
+                        _path, cost = None, None
+                    if _path and (best_cost is None or cost < best_cost):
+                        best_cost = cost
+                if best_cost is not None:
+                    rest.append((best_cost, loc))
+            rest.sort()
+            ordered += [loc for _c, loc in rest]
+            # 歩いて行けるまな板が無ければ、近い順(経路は相手が退けば通る)
+            ordered += [loc for loc in sorted(empties, key=lambda l: abs(self_pos[0]-l[0]) + abs(self_pos[1]-l[1]))
+                        if loc not in ordered]
+            for loc in ordered:
+                action = self.move_to(env, loc, dynamic_obstacles=dynamic_obstacles)
+                adjacent = abs(self_pos[0]-loc[0]) + abs(self_pos[1]-loc[1]) == 1
+                if adjacent or action != (0, 0):
+                    best_cb = loc
+                    self._chosen_cutboard = loc
+                    self._chosen_cutboard_for = getattr(self, 'assigned_task_id', None)
+                    self._log_chop_debug(env, ing_name, holding_name, assigned_cutboard, assigned_counter, "place_fresh", target=best_cb)
+                    return action, f"{target_ing_name} を置く"
+            if empties:
+                best_cb = ordered[0] if ordered else empties[0]
                 self._log_chop_debug(env, ing_name, holding_name, assigned_cutboard, assigned_counter, "place_fresh", target=best_cb)
                 return self.move_to(env, best_cb, dynamic_obstacles=dynamic_obstacles), f"{target_ing_name} を置く"
             elif same_on_board:
