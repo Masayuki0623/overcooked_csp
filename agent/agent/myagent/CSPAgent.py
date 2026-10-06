@@ -507,6 +507,68 @@ class CSPAgent:
     def _tid_of_fixed(fid):
         return (str(fid[1]), str(fid[2]), fid[3]) if len(fid) >= 4 else None
 
+    def _started_chop_index(self, env, tasks):
+        """AI が手をつけた「切る」工程の添字(無ければ None)。
+
+        手をつけた = その材料を手に持っている(Fresh / Chopping)か、まな板に
+        その材料の切りかけ(Chopping)が載っている。
+        再計画のたびに同じ注文の「切る」同士は同点で並びが入れ替わり、実行側は
+        「その注文で一番手前の工程」しか手をつけないので、切りかけを放置して
+        別の材料を取りに行っていた(実測: 26 試合の 102 回の切り始めのうち 20 回)。
+        見つけた工程は AI の先頭に固定する(solve_csp_scheduling)。
+        指示が効いている間は、鎖の中の工程のときだけ(鎖の外を先頭に固定すると
+        d=0 の縛りと矛盾して解が無くなる)。
+        """
+        own = 1 if getattr(self, 'own_agent_idx', 0) == 1 else 0
+        sc = (getattr(self, 'schedule_per_agent', None) or {}).get(own) or []
+        cur = self.current_task_idx
+        cur = cur.get(own, 0) if isinstance(cur, dict) else int(cur or 0)
+        if not (0 <= cur < len(sc)):
+            return None
+        tid = tuple(sc[cur].get('id') or ())
+        if len(tid) < 3 or tid[0] != 'chop':
+            return None
+        cap = str(tid[1]).capitalize()
+        names = (f'Fresh{cap}', f'Chopping{cap}')
+        try:
+            agent = env.agents[own]
+        except (IndexError, TypeError, AttributeError):
+            return None
+        hn = getattr(getattr(agent, 'holding', None), 'full_name', '') or ''
+        started = any(n in hn for n in names)
+        if not started:
+            try:
+                boards = {tuple(b) for b in env.get_pos_by_obj_gs(gs='Cutboard')}
+            except Exception:
+                boards = set()
+            for pos, obj in getattr(env, 'pos_obj', {}).items():
+                if tuple(pos) in boards and obj is not None and not getattr(obj, 'is_held', False)                         and f'Chopping{cap}' in (getattr(obj, 'full_name', '') or ''):
+                    started = True
+                    break
+        if not started:
+            return None
+        # 指示が効いている間は、鎖の中の工程だけ
+        for pend in list(getattr(self, '_pending_instructions', None) or []):
+            if pend.get('status') not in ('pending', 'started', 'accepted'):
+                continue
+            groups, _n = self._pending_chain_groups(pend)
+            chain_tids = {self._tid_of_fixed(f) for g in (groups or []) for f in g}
+            fixed = self._pending_payload(pend) or {}
+            for f in (fixed.get('fixed_task_ids') or [fixed.get('fixed_task_id')]):
+                if f:
+                    chain_tids.add(self._tid_of_fixed(f))
+            if tid not in chain_tids and not any(c and c[0] == 'chop' and c[1] == tid[1] for c in chain_tids):
+                return None
+        for i, t in enumerate(tasks):
+            if tuple(t.get('id') or ()) == tid:
+                return i
+        # id(注文の番号)が付け替わっていることがあるので、同じ材料の「切る」で代える
+        for i, t in enumerate(tasks):
+            tt = tuple(t.get('id') or ())
+            if len(tt) >= 2 and tt[0] == 'chop' and tt[1] == tid[1]:
+                return i
+        return None
+
     def _chain_group_finished(self, group):
         """そのかたまりの工程が全部済んだか。"""
         tids = [self._tid_of_fixed(f) for f in group]
@@ -8576,6 +8638,24 @@ class CSPAgent:
             prev = self._chop_board_prev.get(tasks[i]['id'])
             keep = next((lit for b, lit, _d in lits if b == prev), lits[0][1])
             switch_penalty_terms.append(1 - keep)
+
+        # 手をつけた「切る」工程は、AI の先頭に固定する(他の AI の工程はその後)。
+        # 同点の並び替えで切りかけを放置しないため(_started_chop_index を参照)。
+        _prog = self._started_chop_index(env, tasks) if getattr(self, 'pin_started_chop', True) else None
+        if _prog is not None and _prog in starts:
+            _own = 1 if getattr(self, 'own_agent_idx', 0) == 1 else 0
+            if is_a1 is not None:
+                model.Add(is_a1[_prog] == _own)
+            for j in range(num_tasks):
+                # 運搬(carry)は「切る」の前提なので対象外(先頭固定と矛盾する)
+                if j == _prog or j not in starts or tasks[j].get('verb') == 'carry':
+                    continue
+                if is_a1 is not None:
+                    _mine = is_a1[j] if _own == 1 else is_a1[j].Not()
+                    model.Add(starts[j] >= ends[_prog]).OnlyEnforceIf(_mine)
+                else:
+                    model.Add(starts[j] >= ends[_prog])
+            self._emit_counter_debug(f"[CSPAgent] 手をつけた工程を先頭に固定: {tasks[_prog]['id']}")
 
         # 動的制約 (Dynamic Constraints)
         if hasattr(self, 'active_constraints') and self.active_constraints:

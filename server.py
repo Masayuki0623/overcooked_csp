@@ -2931,14 +2931,21 @@ class WebGamePlay:
                # 設定なのか結果なのか分からない。
                'two_agent': bool(getattr(ai, 'two_agent_assignment', False)),
                'agents': []}
+        chain_ids = self._instruction_chain_ids(ai)
         for idx in (own, 1 - own):
             rows = []
             lst = sched.get(idx) or []
             here = cur.get(idx, 0) if isinstance(cur, dict) else 0
+            # 指示の工程(chain)、その最後より前に入っている指示の外の工程
+            # (inserted = 挟んだ工程)、それ以外(other)で色を分ける
+            last_chain = max((k for k, t in enumerate(lst)
+                              if tuple(t.get('id') or ()) in chain_ids), default=-1)
             for k, t in enumerate(lst):
                 tid = t.get('id') or ('', '', '')
                 st = t.get('start')
                 en = t.get('end')
+                kind = ('chain' if tuple(tid) in chain_ids
+                        else 'inserted' if k < last_chain else 'other')
                 rows.append({
                     'n': k + 1,
                     'verb': str(tid[0]), 'obj': str(tid[1]),
@@ -2948,6 +2955,7 @@ class WebGamePlay:
                             if st is not None and en is not None else None),
                     'done': tuple(tid) in done,
                     'now': k == here,
+                    'kind': kind,
                 })
             out['agents'].append({
                 'who': 'AI' if idx == own else 'あなた',
@@ -2955,6 +2963,29 @@ class WebGamePlay:
             })
         out['instruction'] = self._instruction_debug(ai)
         return out
+
+    @staticmethod
+    def _instruction_chain_ids(ai):
+        """いまの指示の鎖に入っている工程の id(計画の id と同じ形)。指示が無ければ空。"""
+        pend = list(getattr(ai, '_pending_instructions', None) or [])
+        if not pend:
+            return set()
+        task = pend[0].get('task')
+        payload = (task if isinstance(task, dict)
+                   else task[1] if isinstance(task, (list, tuple)) and len(task) > 1
+                   and isinstance(task[1], dict) else {})
+        groups = payload.get('chains') or ([payload['chain']] if payload.get('chain') else [])
+        ids = set()
+        for g in groups:
+            for c in g:
+                if len(c) >= 4:
+                    ids.add((str(c[1]), str(c[2]), c[3]))
+        # 鎖でない指示(1工程)は、固定した工程だけ
+        if not ids:
+            for c in (payload.get('fixed_task_ids') or [payload.get('fixed_task_id')]):
+                if c and len(c) >= 4:
+                    ids.add((str(c[1]), str(c[2]), c[3]))
+        return ids
 
     @staticmethod
     def _instruction_debug(ai):
