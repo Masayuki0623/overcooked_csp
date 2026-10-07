@@ -1852,6 +1852,10 @@
     updateStartButton();
     document.getElementById('start').addEventListener('click', () => {
       if (!spritesAllLoaded) return;
+      // 前の回の印(始まった・数え始めた)を消す。本番の流れでは練習のあと
+      // 読み込み直さずにここへ来るので、残っていると指示を選んでも数え
+      // 始めず、開始の合図が送られないまま止まっていた。
+      resetForNewGame();
       const pidEl = document.getElementById('pid');
       if (pidEl) saveParticipant(pidEl.value);
       const d = pick.debug || {};

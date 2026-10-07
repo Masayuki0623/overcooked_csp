@@ -570,6 +570,11 @@ def nl_exchange_text(pid, session, game_id=None):
         same = [r for r in rows if str(r.get('ゲーム番号')) == str(game_id)]
         if same:
             rows = same
+    # ゲーム番号はサーバーを起動し直すと 0 から数え直すので、同じ回のやり直しと
+    # 番号が重なることがある。1 回目の送信から始まるまとまりの、最後のものだけ残す。
+    starts = [i for i, r in enumerate(rows) if r.get('種類') == 'send' and str(r.get('何回目')) == '1']
+    if starts:
+        rows = rows[starts[-1]:]
     out = []
     for r in rows:
         text = str(r.get('送った文', '')).replace('|', '/')
@@ -2086,9 +2091,17 @@ class WebGamePlay:
                 tut_map = pattern_maps(EXPERIMENT_PATTERN)[0]
                 preset = (EXPERIMENT_PATTERNS[EXPERIMENT_PATTERN]['presets'].get(tut_map)
                           or EXPERIMENT_MAP_PRESETS.get(tut_map) or 'experiment1')
+                # 注文は本番と同じ構成(サラダ1 + 2材料スープ2)から、同じ料理が
+                # 2品ある組み合わせと、本番の4回の組み合わせを除いてくじ引き。
+                # 以前は「野菜のみ」(サラダ2 + スープ1)から引いていて、同じ
+                # サラダが2品出ることがあった(2026-10-07)。
+                preset = 'experiment3'
                 sets = order_sets_for(preset)
-                cases = experiment_case_indices(preset) or list(range(len(sets)))
-                case = random.choice(cases)
+                games = {tuple(sorted(g)) for g in
+                         (EXPERIMENT_PATTERNS[EXPERIMENT_PATTERN].get('games') or [])}
+                cases = [i for i, st in enumerate(sets)
+                         if len(set(st)) == len(st) and tuple(sorted(st)) not in games]
+                case = random.choice(cases or list(range(len(sets))))
                 out.update({'map': tut_map, 'preset': preset, 'case': case,
                             'recipes': list(sets[case]),
                             'instruction': INSTRUCTION_TIMING_NO_INSTRUCTION,
