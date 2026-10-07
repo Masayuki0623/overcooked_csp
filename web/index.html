@@ -251,6 +251,20 @@
   /* 文章で書く指示(パターン7)。入力 -> 解釈の確認 -> 決定 */
   #instruct .nl { width: 100%; }
   #instruct .nl .hint { font-size: 12.5px; color: var(--muted); margin-bottom: 6px; line-height: 1.5; }
+  /* 文章の指示の説明(作業の札) */
+  #instruct .nl-help { font-size: 12.5px; color: var(--muted); margin-bottom: 8px; line-height: 1.5; text-align: left; }
+  #instruct .nl-units { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-bottom: 6px; }
+  #instruct .nl-lab { margin-right: 2px; }
+  #instruct .nl-chip {
+    display: inline-block; padding: 1px 7px; border-radius: 6px; font-size: 12px; color: var(--text);
+    background: #2a3039; border: 1px solid #3a414c; white-space: nowrap;
+  }
+  #instruct .nl-chip.u { background: #23302a; border-color: #3f6250; color: #cdeedb; }
+  #instruct .nl-ex { margin: 3px 0 5px; }
+  #instruct .nl-q { color: var(--text); }
+  #instruct .nl-eq { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; margin-top: 2px; }
+  #instruct .nl-n { margin-left: 4px; color: #ffd27a; font-weight: 700; }
+  #instruct .nl-note { margin-top: 4px; }
   #instruct .nl textarea {
     width: 100%; box-sizing: border-box; font: inherit; font-size: 15px; color: var(--text);
     background: #1b1f25; border: 1px solid var(--btn-line); border-radius: 8px; padding: 8px; resize: none;
@@ -3469,15 +3483,31 @@
   // ---- 文章で書く指示(パターン7) --------------------------------------------
   // 書いた文をサーバーへ送り、LLM の解釈(候補のどれか)を見せて確認する。
   // 合っていれば「この内容にする」-> 決定。違えば書き直す(一覧から選ぶ逃げ道は無い)。
+  // 文章の指示の説明(2026-10-07 作り直し)。読む量を減らすため、文は短くし、
+  // 「何を頼むと作業がいくつになるか」は作業の札を並べて見せる。総数(11 個など)は
+  // 出さない(数だけ言われても意味が分からない)。
+  const NL_CHIP = (t, cls = '') => `<span class="nl-chip ${cls}">${t}</span>`;
+  const NL_HELP_HTML =
+    '<div class="nl-help">' +
+      '<div class="nl-units"><span class="nl-lab">頼める作業</span>' +
+        NL_CHIP('材料を切る', 'u') + NL_CHIP('スープを煮る', 'u') + NL_CHIP('盛り付けて出す', 'u') + '</div>' +
+      '<div class="nl-ex"><div class="nl-q">「レタス・たまねぎスープを出して」</div>' +
+        '<div class="nl-eq">' + NL_CHIP('レタスを切る') + NL_CHIP('たまねぎを切る') + NL_CHIP('煮る') +
+        NL_CHIP('出す') + '<span class="nl-n">= 4つ</span></div></div>' +
+      '<div class="nl-ex"><div class="nl-q">「トマトを2つ切って」</div>' +
+        '<div class="nl-eq">' + NL_CHIP('トマトを切る') + NL_CHIP('トマトを切る') +
+        '<span class="nl-n">= 2つ</span></div></div>' +
+      '<div class="nl-note">全体の作業量の半分くらいまで頼めます。<br>' +
+        '料理を頼むと、材料を切るところからエージェントがやります。</div>' +
+    '</div>';
+
   function renderInstructText(msg, S, refreshOk, prevText) {
     const box = document.getElementById('instruct-cards');
     S.index = null; S.indices = null; S.exclude = null; S.label = ''; S.via = 'text';
     refreshOk();
     box.innerHTML =
-      '<div class="nl">' +
-      `<div class="hint">${esc(msg.hint || 'エージェントに今すぐやってほしい作業を、具体的に書いてください。')
-        .replace('今すぐやってほしい作業', '<span class="now-em">今すぐやってほしい作業</span>')}</div>` +
-      `<textarea id="nl-text" rows="2" maxlength="300" placeholder="例: トマトレタススープを1つと、たまねぎを1つ切って">${esc(prevText || '')}</textarea>` +
+      '<div class="nl">' + NL_HELP_HTML +
+      `<textarea id="nl-text" rows="2" maxlength="300" placeholder="例: レタス・たまねぎスープを出して">${esc(prevText || '')}</textarea>` +
       '<div class="row2"><button type="button" class="primary" id="nl-send">送る</button></div>' +
       '<div id="nl-result"></div></div>';
     const ta = document.getElementById('nl-text');
