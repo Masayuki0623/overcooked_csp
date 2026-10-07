@@ -384,8 +384,10 @@ SESSION_COLUMNS = [
     ('bound_rank', '制約ありの開始順位', ''),
     ('served', '提供数', ''),
     ('failed', '失敗数', ''),
-    ('completed', '完了したか', '1=3品を出し切った'),
-    ('makespan_s', 'プレイ時間_秒', 'ゲーム内の経過秒'),
+    ('completed', '完了したか', '1=注文を全部出し切った / 0=時間切れ・中断'),
+    ('makespan_s', 'プレイ時間_秒', 'ゲーム内の経過秒(時間切れなら上限の秒)'),
+    ('score_s', 'スコア_かかった時間_秒',
+     '参加者に見せたスコア。全部出し切るまでにかかった秒。出し切れなかった回は空'),
     ('serve_times_s', '提供時刻_秒', '1品ごと、| 区切り'),
     ('serve_dishes', '提供した料理', '| 区切り'),
     ('misserved', '注文外の提供数', '注文に無い物を提供口へ出した回数'),
@@ -420,11 +422,11 @@ def session_row_ja(row):
 ALL_PATH = RESULTS_DIR / 'all_in_one.csv'
 ALL_COLUMNS = [
     # --- 識別 ---
-    '記録時刻', '参加者ID', 'グループ', 'セッション番号', 'エージェント', '正式な回か', '除外理由',
+    '記録時刻', '参加者ID', 'グループ', 'セッション番号', 'エージェント', '正式な回か', 'テスト実行か', '除外理由',
     # --- 条件 ---
     '地図', '割り込み許容数', '注文の組み合わせ番号', '注文',
     # --- 結果 ---
-    '完了したか', '提供数', '失敗数', 'プレイ時間_秒', '注文外の提供数', '提供した料理', '提供時刻_秒',
+    '完了したか', 'スコア_かかった時間_秒', '提供数', '失敗数', 'プレイ時間_秒', '注文外の提供数', '提供した料理', '提供時刻_秒',
     '人のミスの回数', '人のミス_注文外の提供', '人のミス_使えない組み合わせ', '人のミス_余分に切った',
     '人のミスの内訳',
     # --- 効率損失(先) と 指示の内容(後) ---
@@ -436,6 +438,7 @@ ALL_COLUMNS = [
     '指示の動作', '指示の対象', '指示の個数', '指示の工程数_AI', '指示の工程数_人',
     '指示を受けた時刻_秒', '指示までの待ち_秒',
     '指示の文', '解釈の回数', '解釈の結末', '解釈した作業', '解釈の記録', '解釈のモデル',
+    '指示のやりとり',
     # --- アンケート ---
     'つながり1', 'つながり2', 'つながり3', 'つながり4',
     '協調1', '協調2', '協調3', '協調4', 'つながり平均', '協調平均', 'ラポール',
@@ -457,6 +460,10 @@ def _all_notes():
     notes.update({k: v for k, v in dict(QUAL_COLUMNS).items()})
     notes.update(SESSION_NOTES)
     notes['アンケート記録時刻'] = 'アンケートを受け取った日時'
+    notes['テスト実行か'] = '1=動作確認の参加者(名簿の印)。分析からは外す'
+    notes['指示のやりとり'] = ('文章の指示で送った文すべて(書き直しを含む)と、その解釈・確定を順に。'
+                         ' | で区切る。LLM の出力そのものは web_instruction_texts.csv')
+    notes['パターン'] = '6=指示は一覧(料理を最後まで) / 7=指示は文章で書き LLM が解釈(全工程)'
     return {c: notes.get(c, '') for c in ALL_COLUMNS}
 
 
@@ -505,11 +512,45 @@ def write_all_in_one(pid, session, qual):
         for c in ('即時実行の効率損失量L0_秒', 'L0算出の可否', '指示の結末',
                   '人がやったか', '先にやったのは'):
             row[c] = instr.get(c, '')
+    row['指示のやりとり'] = nl_exchange_text(pid, session, (game or {}).get('game_id'))
+    # 動作確認の参加者か(名簿の印)。この 1 ファイルだけで除外できるように写しておく
+    for r in _csv_dict_rows(ROSTER_PATH):
+        if r.get('参加者番号') == pid:
+            row['テスト実行か'] = r.get('テスト実行か', '')
     row.update({k: v for k, v in qual.items() if k in ALL_COLUMNS and k != '記録時刻'})
     row['アンケート記録時刻'] = qual.get('記録時刻', '')
     if not row.get('記録時刻'):
         row['記録時刻'] = qual.get('記録時刻', '')
     append_csv(ALL_PATH, ALL_COLUMNS, {c: row.get(c, '') for c in ALL_COLUMNS}, _all_notes())
+
+
+def nl_exchange_text(pid, session, game_id=None):
+    """文章の指示のやりとりを 1 つの欄に入る形にする(統合ファイル用)。
+
+    例: 1回目「レタスのサラダを作って」→却下: どのサラダか分かりません |
+        2回目「レタス・トマトのサラダを作って」→受理: レタス・トマトサラダを最後まで作って |
+        確定: レタス・トマトサラダを最後まで作って
+    同じ回をやり直したときは、最後のゲーム(game_id)の分だけにする。
+    """
+    rows = [r for r in _csv_dict_rows(NL_TEXT_LOG_PATH)
+            if str(r.get('記録時刻', '')).startswith('20')
+            and r.get('参加者ID') == pid and str(r.get('セッション番号')) == str(session)]
+    if game_id not in (None, ''):
+        same = [r for r in rows if str(r.get('ゲーム番号')) == str(game_id)]
+        if same:
+            rows = same
+    out = []
+    for r in rows:
+        text = str(r.get('送った文', '')).replace('|', '/')
+        if r.get('種類') == 'confirm':
+            out.append('確定: ' + str(r.get('画面に出した解釈', '')).replace('|', '、'))
+        elif r.get('結果') == 'accept':
+            out.append(f"{r.get('何回目', '')}回目「{text}」→受理: "
+                       + str(r.get('画面に出した解釈', '')).replace('|', '、'))
+        else:
+            msg = str(r.get('画面に出した文', '') or r.get('却下の理由', '')).replace('|', '/')
+            out.append(f"{r.get('何回目', '')}回目「{text}」→却下: {msg}")
+    return ' | '.join(out)
 
 
 def _read_sessions():
@@ -2251,8 +2292,15 @@ class WebGamePlay:
             'map': sel.get('map'), 'skip_budget': sel.get('skip_budget'),
             'case': sel.get('case'), 'orders': '|'.join(sel.get('recipes', [])),
             'served': res.get('served'), 'failed': res.get('failed'),
-            'completed': int(bool(res.get('success'))),
+            # 「出し切ったか」は提供数と注文の数で見る。res['success'] はゲームが
+            # 最後まで回ったか(時間切れでも 1)で、3品を出し切ったかではない。
+            'completed': int(not res.get('aborted') and bool(sel.get('recipes'))
+                             and int(res.get('served') or 0) >= len(sel.get('recipes') or [])),
             'makespan_s': round(float(getattr(env, 'current_time', 0.0) or 0.0), 1),
+            'score_s': (round(float(getattr(env, 'current_time', 0.0) or 0.0), 1)
+                        if (not res.get('aborted') and sel.get('recipes')
+                            and int(res.get('served') or 0) >= len(sel.get('recipes') or []))
+                        else ''),
             # 1品ずつ、実際に出せた時刻(ゲーム内の秒)。出した順に並ぶ。
             # makespan_s は「最後に何かを出した/時間切れになった」時刻なので、
             # 途中の1品ごとにどれだけかかったかはこちらで見る。
