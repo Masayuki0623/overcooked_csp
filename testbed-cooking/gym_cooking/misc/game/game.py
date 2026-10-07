@@ -581,7 +581,7 @@ class Game:
         limit = float(getattr(getattr(self.env, 'arglist', None),
                               'max_num_timesteps', 0) or 0)
         if getattr(self, 'time_display', 'remaining') == 'elapsed':
-            text = '経過 %d 秒' % int(now)
+            text = '%d 秒' % int(now)   # 「経過」は付けない(数字と秒だけ)
             color = (90, 110, 140)
         elif limit > 0:
             left = max(0.0, limit - now)
