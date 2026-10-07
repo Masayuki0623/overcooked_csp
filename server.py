@@ -1734,6 +1734,9 @@ def _append_csv_locked(path, fields, row, notes=None):
         w.writerow(row)
 
 
+# 「新たに始める」で、同じ名前の人を前の番号の続きとして扱うか(2026-10-07 に止めた)。
+RESUME_BY_NAME = False
+
 # 本番・練習・AI と一緒の練習の時間の上限(秒)。画面には出さない(経過時間を出す)。
 GAME_LIMIT_S = 180
 
@@ -4348,8 +4351,12 @@ async def consent(req: Request):
     # 最初からもう1周できてしまった(報告あり)。
     def _same_name(a, b):
         return ''.join(str(a).split()).lower() == ''.join(str(b).split()).lower()
+    # 2026-10-07: 「新たに始める」は前の記録を見ずに、毎回新しい番号で練習から
+    # 始める(同じ名前で入ると続きから扱いになり、練習を飛ばしていた)。
+    # 途中から再開するときは「続きから」(参加者番号で入る)を使う。
+    # 名前での照合は止めている(RESUME_BY_NAME を True にすると元に戻る)。
     existing = [r for r in _read_roster()
-                if _same_name(r.get('お名前', ''), name)
+                if RESUME_BY_NAME and _same_name(r.get('お名前', ''), name)
                 and str(r.get('参加者番号', '')).strip()]
     if existing:
         prev = existing[-1]
