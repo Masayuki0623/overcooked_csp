@@ -3327,8 +3327,9 @@
             // 続きは自動で始める。ボタンを押させると、押し忘れたまま
             // 待ちが続いてしまう。
             showOverlay('<div class="consent"><div class="big">ありがとうございました</div>' +
-              (exp.agent
-                ? `<div class="sub">次は${esc('エージェント ' + String.fromCharCode(65 + (exp.block || 1)))} とのゲームです。</div>`
+              // 次の相方の名前はサーバーから(会う順は参加者ごとにラテン方格の行で変わる)
+              (exp.agent && exp.next_agent
+                ? `<div class="sub">次は ${esc(exp.next_agent)} とのゲームです。</div>`
                 : `<div class="sub">次はゲーム ${exp.session + 1} / ${exp.sessions_total} です。</div>`) +
               '<div class="sub">まもなく始まります</div></div>');
             try { sessionStorage.setItem(AUTOSTART_STORE, '1'); } catch (e2) {}

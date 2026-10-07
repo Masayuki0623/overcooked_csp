@@ -1140,6 +1140,24 @@ def agent_label(cond_idx):
     return f'エージェント {chr(ord("A") + int(cond_idx))}'
 
 
+def agent_label_for(order, cond_idx, pattern):
+    """その回の相方の名前。
+
+    地図が 1 つのパターン(6・7)では、相方は割り込み許容数ごとに決まった
+    1 人にする(d=0 -> A、1 -> B、2 -> C、inf -> D)。会う順番は参加者の
+    ラテン方格の行のとおりになる(2026-10-07。以前は会う順に A, B, C, D と
+    振っていたので、名前の順はいつも同じだった)。
+    地図が 2 つのパターンは、これまでどおり会う順。
+    """
+    if len(pattern_maps(pattern)) == 1 and order:
+        cond = order[min(int(cond_idx), len(order) - 1)]
+        d = cond.get('skip_budget')
+        levels = [str(x) for x in design.BUDGETS]
+        if str(d) in levels:
+            return agent_label(levels.index(str(d)))
+    return agent_label(cond_idx)
+
+
 def pattern_of(value):
     """画面から来たパターン番号を、使える形にそろえる。"""
     try:
@@ -2168,8 +2186,11 @@ class WebGamePlay:
                 position = (cond_idx % max(1, len(cases))) + 1
             games = spec.get('games')
             if games:
-                # 回ごとに注文を固定するパターン(6)。番号は回(0始まり)
-                case = (int(position) - 1) % len(games)
+                # 回ごとに注文を決めるパターン(6・7)。4 つのセットを、参加者ごとに
+                # くじ引きの順で使う(2026-10-07。以前は何回目かで固定していた)。
+                # くじは参加者番号から決めるので、読み込み直しや続きからでも同じ。
+                perm = random.Random(f'order-sets:{participant}').sample(range(len(games)), len(games))
+                case = perm[(int(position) - 1) % len(games)]
                 recipes = list(games[case])
                 if spec.get('shuffle_orders'):
                     recipes = shuffled_orders(recipes, participant, done + 1)
@@ -2192,7 +2213,10 @@ class WebGamePlay:
                     # パターンでは block=session、回=1、毎回アンケート。
                     'block': cond_idx + 1, 'game_in_block': game_in_block,
                     'games_per_block': gpb,
-                    'agent': agent_label(cond_idx) if named_agents_of(pattern) else None,
+                    'agent': agent_label_for(order, cond_idx, pattern) if named_agents_of(pattern) else None,
+                    # 次の回の相方(アンケートのあとの「次は ○○ とのゲームです」に使う)
+                    'next_agent': (agent_label_for(order, cond_idx + 1, pattern)
+                                   if named_agents_of(pattern) and cond_idx + 1 < len(order) else None),
                     'survey_due': game_in_block == gpb,
                     'endless': spec['endless'], 'seconds': spec['seconds'],
                     'pots': spec.get('pots', 1),
@@ -2699,6 +2723,7 @@ class WebGamePlay:
             'block': sel.get('block'), 'game_in_block': sel.get('game_in_block'),
             'games_per_block': sel.get('games_per_block'),
             'agent': sel.get('agent'), 'survey_due': sel.get('survey_due', True),
+            'next_agent': sel.get('next_agent'),
             'group': sel.get('group', ''),
             # アンケートに添える条件(画面には出さない)
             'map': sel.get('map'), 'case': sel.get('case'),
@@ -4325,7 +4350,7 @@ async def consent(req: Request):
             data[key].update(expect)
             data[key]['test'] = int(is_test)
             _save_assignments(data)
-    g = design.group_of(pid)
+    g = design.group_of(pid, maps=pattern_maps(EXPERIMENT_PATTERN))
     print(f'[server] 同意を受け取りました: {pid} ({g["name"]}) '
           f'年齢={age} 経験={exp}' + (' [テスト実行]' if is_test else ''), flush=True)
     # 割り当ての中身は参加者に見せない。
@@ -4407,7 +4432,8 @@ async def resume(participant: str = ''):
     gpb = games_per_block_of(EXPERIMENT_PATTERN)
     return JSONResponse({'ok': True, 'participant_id': pid,
                          'session': min(done + 1, total), 'total': total,
-                         'agent': (agent_label(min(done // gpb, len(rec['order']) - 1))
+                         'agent': (agent_label_for(rec['order'], min(done // gpb, len(rec['order']) - 1),
+                                                   EXPERIMENT_PATTERN)
                                    if named_agents_of(EXPERIMENT_PATTERN) else None),
                          'finished': done >= total})
 
@@ -4442,7 +4468,7 @@ async def assignment(participant: str = '', pattern: int = DEFAULT_PATTERN):
     return JSONResponse({'ok': True, 'participant_id': pid, 'pattern': pat,
                          'done': done,
                          'total': total, 'session': min(done + 1, total),
-                         'agent': agent_label(cond_idx) if named_agents_of(pat) else None,
+                         'agent': agent_label_for(rec['order'], cond_idx, pat) if named_agents_of(pat) else None,
                          'game_in_block': done % gpb + 1, 'games_per_block': gpb,
                          'finished': done >= total, 'next_map_label': label})
 
