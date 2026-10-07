@@ -3543,7 +3543,10 @@ class WebGamePlay:
         game.instruction_chooser = self.ask_instruction
         # 指示画面に出す相方の名前(パターン4では条件ごとに別の名前)
         # 名前(A〜D)は参加者に見せない(2026-10-07)。記録には selection の agent が残る
-        game.ai_display_name = 'エージェント' if (self.selection or {}).get('agent') else None
+        # チュートリアルの「AI と一緒に」も、本番と同じ呼び方にそろえる
+        _sel_d = self.selection or {}
+        game.ai_display_name = ('エージェント' if (_sel_d.get('agent') or _sel_d.get('mode') == 'tutorial')
+                                else None)
         self._install_agent_hook(game)
 
         # pygame の初期化後に pygame.mouse / display を差し替えたいので、フックしておく。
