@@ -634,6 +634,19 @@
     background: linear-gradient(180deg, #36805a, #2c6a4a) !important;
     border-color: #4a9a6e !important; font-weight: 700;
   }
+  /* 1 画面のアンケート */
+  #overlay .spage { width: min(640px, calc(100vw - 72px)); }
+  .spage .sp-head { font-size: 18px; font-weight: 700; text-align: center; margin-bottom: 6px; }
+  .spage .sp-count { font-size: 13px; font-weight: 400; color: var(--muted); }
+  .spage .sp-sec { margin-top: 18px; }
+  .spage .sp-lead { font-size: 14px; line-height: 1.7; color: var(--muted); padding: 10px 12px;
+                    border-radius: 10px; background: rgba(255,255,255,.04); margin-bottom: 4px; }
+  .spage .sp-item { padding: 14px 4px 12px 10px; border-bottom: 1px solid rgba(255,255,255,.07);
+                    border-left: 3px solid transparent; }
+  .spage .sp-item .q-text { font-size: 15.5px; line-height: 1.7; margin-bottom: 10px; }
+  .spage .sp-no { color: var(--muted); font-size: 13px; margin-right: 6px; }
+  .spage .sp-item.missing { border-left-color: var(--bad); background: rgba(232,105,125,.06); }
+  #overlay .spage .q-five .q-opt { padding: 10px 0; font-size: 16px; }
   .qrun .anchors { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-top: 8px; }
   .qrun .q-input {
     width: 100%; padding: 12px 14px; font-size: 17px; border-radius: 10px;
@@ -3217,22 +3230,74 @@
     steps.push({ kind: 'info', html: `<div class="q-text">${esc(c3)}</div>` });
     PLAY_ITEMS.forEach(([name, text]) => steps.push(
       { kind: 'five', name, text, ctx: '今のゲームについて' }));
-    return { steps, ccrOrder: ccr.map(([n]) => n), ownOrder: own.map(([n]) => n) };
+    const sections = [
+      { lead: c1, items: ccr.map(([name, text]) => ({ name, text })) },
+      { lead: c2, items: own.map(([name, text]) => ({ name, text: `${agent} は、${text}` })) },
+      { lead: c3, items: PLAY_ITEMS.map(([name, text]) => ({ name, text })) },
+    ];
+    return { steps, sections, agent, ccrOrder: ccr.map(([n]) => n), ownOrder: own.map(([n]) => n) };
+  }
+
+  // ゲームのあとの 18 問を、1 つの画面にまとめて出す(2026-10-07)。
+  // まとまり(やりとり / 振る舞い / ゲーム)ごとに、どう答えるかの文を先頭に置く。
+  // 送るときに答えていない問いがあれば、その問いへ移って印を付ける。
+  function runSurveyPage({ head, sections, answers, onChange, onFinish }) {
+    const five = (name) => {
+      const v = answers[name];
+      return '<div class="q-five">' + [1, 2, 3, 4, 5].map((k) =>
+        `<button type="button" class="q-opt${v === k ? ' on' : ''}" data-name="${esc(name)}" data-v="${k}">${k}</button>`).join('') +
+        '</div>' +
+        `<div class="anchors"><span>${esc(FIVE_ENDS[0])}</span><span>${esc(FIVE_ENDS[1])}</span></div>`;
+    };
+    let no = 0;
+    const html = sections.map((sec) =>
+      `<div class="sp-sec"><div class="sp-lead">${esc(sec.lead)}</div>` +
+      sec.items.map((it) => {
+        no += 1;
+        return `<div class="sp-item${answers[it.name] !== undefined ? ' done' : ''}" data-name="${esc(it.name)}">` +
+               `<div class="q-text"><span class="sp-no">${no}.</span>${esc(it.text)}</div>${five(it.name)}</div>`;
+      }).join('') + '</div>').join('');
+    showOverlay(`<div class="survey qrun spage">${head}${html}` +
+                '<div class="err" id="sp-err"></div>' +
+                '<div class="go"><button type="button" class="primary" id="sp-send">送信する</button></div></div>');
+    el.overlay.scrollTop = 0;
+    const root = el.overlayText.firstElementChild;
+    root.querySelectorAll('.q-opt').forEach((btn) => btn.addEventListener('click', () => {
+      const name = btn.dataset.name;
+      answers[name] = Number(btn.dataset.v);
+      const item = btn.closest('.sp-item');
+      item.querySelectorAll('.q-opt').forEach((x) => x.classList.toggle('on', x === btn));
+      item.classList.add('done');
+      item.classList.remove('missing');
+      if (onChange) onChange(answers);
+    }));
+    const send = root.querySelector('#sp-send');
+    const err = root.querySelector('#sp-err');
+    send.addEventListener('click', () => {
+      const missing = [...root.querySelectorAll('.sp-item')]
+        .filter((it) => answers[it.dataset.name] === undefined);
+      root.querySelectorAll('.sp-item').forEach((it) => it.classList.toggle('missing', missing.includes(it)));
+      if (missing.length) {
+        err.textContent = `まだ答えていない質問があります(${missing.length} 問)`;
+        missing[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return;
+      }
+      err.textContent = '';
+      send.disabled = true;
+      onFinish(answers, (msg) => { err.textContent = msg; send.disabled = false; });
+    });
   }
 
   function showSurvey(exp, result, summary, answers) {
     playing = false;
     surveyAnswers = Object.assign({}, answers || {});
-    const { steps, ccrOrder, ownOrder } = surveySteps(exp, summary);
+    const { steps, sections, agent, ccrOrder, ownOrder } = surveySteps(exp, summary);
     el.overlay.classList.add('form');
     el.overlay.classList.add('solid');
     document.body.classList.add('survey');
     // 出した時点と、答えるたびに残す。送れたら消す。
     saveSurveyDraft(exp, result, summary);
-    runQuestions({
-      steps, answers: surveyAnswers,
-      onChange: () => saveSurveyDraft(exp, result, summary),
-      onFinish: (ans, fail) => {
+    const submit = (ans, fail) => {
         const body = {
           participant_id: exp.participant_id, session: exp.session,
           pattern: exp.pattern || (lastSelection && lastSelection.pattern) || null,
@@ -3270,8 +3335,19 @@
             setTimeout(() => location.reload(), 2600);
           })
           .catch((e) => fail(String(e.message || e)));
-      },
+    };
+    const page = () => runSurveyPage({
+      head: `<div class="sp-head">${esc(agent)} とのゲームについて ` +
+            `<span class="sp-count">(${exp.session} / ${exp.sessions_total})</span></div>`,
+      sections, answers: surveyAnswers,
+      onChange: () => saveSurveyDraft(exp, result, summary),
+      onFinish: submit,
     });
+    // 答えかけ(読み込み直し)なら、すぐ質問の画面へ。そうでなければ結果を先に見せる。
+    if (Object.keys(surveyAnswers).length) { page(); return; }
+    showOverlay('<div class="survey qrun"><div class="q-card"><div class="q-info">' + steps[0].html +
+                '</div></div><div class="go"><button type="button" class="primary" id="sp-start">次へ</button></div></div>');
+    document.getElementById('sp-start').addEventListener('click', page);
   }
 
   // 全部終わったときの画面。条件を変えていたことなどは伝えない(2026-10-07)。
