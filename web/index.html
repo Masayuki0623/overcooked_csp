@@ -267,6 +267,8 @@
   /* チュートリアル「指示の出し方」の絵(入力欄と解釈の画面を小さく描いたもの) */
   .tut .nl-units, .tut .nl-eq { justify-content: center; }
   .tut .nl-chip { font-size: 13px; padding: 2px 8px; }
+  .tut .t-next { margin-top: 10px; color: var(--muted); }
+  .tut .t-ex { font-size: 13px; color: var(--muted); margin-top: 4px; line-height: 1.7; }
   .tut .mock { display: inline-block; text-align: left; background: #1b1f25; border: 1px solid #3a414c;
                border-radius: 8px; padding: 8px 10px; font-size: 13px; min-width: 220px; }
   .tut .mock .m-box { border: 1px solid #47505d; border-radius: 6px; padding: 5px 8px; background: #20252d; }
@@ -2312,7 +2314,9 @@
         '<div class="m-row"><span class="m-btn p">送る</span></div></div>' +
         '<div class="t-cap">やってほしい作業を文章で書いて「送る」</div>',
       '<div class="nl-units">' + TCHIP('材料を切る', 'u') + TCHIP('スープを煮る', 'u') +
-        TCHIP('盛り付けて出す', 'u') + '</div><div class="t-cap">頼める作業はこの 3 種類</div>',
+        TCHIP('盛り付けて出す', 'u') + '</div><div class="t-cap">頼める作業はこの 3 種類</div>' +
+        '<div class="t-ex">例: 「トマトを2つ切って」「トマト・レタスのスープを煮て」<br>' +
+        '「たまねぎ・トマトのサラダを出して」</div>',
       '<div class="t-cap">「レタス・たまねぎスープを出して」</div><div class="nl-eq">' +
         TCHIP('レタスを切る') + TCHIP('たまねぎを切る') + TCHIP('煮る') + TCHIP('出す') +
         '<span class="nl-n">= 4つ</span></div>',
@@ -2356,11 +2360,14 @@
       // 経験することになる)。本番で指示を求められることは、ここで伝える。
       lead: 'AI が相方として一緒に料理します',
       dishes: ['注文は3つ。サラダとスープが混ざります'],
-      steps: [
+      // 1 枚目: AI との協働の説明。このあと「指示の出し方」、最後に下の steps と「はじめる」
+      intro: [
         [['agent-blue-front', '+', 'agent-magenta-front'], 'あなたと AI の二人で作ります'],
         [[], GOAL_NOTE],
         [[], AI_NOTE],
         [[], 'ゲームの始めに、AI に今すぐやってほしい作業を、文章で書いて指示します'],
+      ],
+      steps: [
         [[], 'この回も、始めに指示を出してみましょう(練習なので、うまく書けなくても大丈夫です)'],
       ] },
   ];
@@ -2679,6 +2686,7 @@
   // 料理のチュートリアルの前に出す説明(概要・操作方法)。1 クリックで 1 つずつ。
   let introSeen = false;
   let instructHowtoSeen = false;
+  let aiIntroSeen = false;
   function showIntroCard(def, next) {
     revealSteps({
       cls: 'tut',
@@ -2703,6 +2711,24 @@
         introSeen = true;
         showTutorialCard();
       }));
+      return;
+    }
+    // 「AI と一緒に」は、協働の説明 -> 指示の出し方 -> 練習の開始、の順(2026-10-07)
+    if (t.intro && !aiIntroSeen) {
+      revealSteps({
+        cls: 'tut',
+        head: `<div class="t-no">練習 ${pos + 1} / ${order.length}</div>` +
+              `<div class="big">${esc(t.heading || t.title)}</div>` +
+              `<div class="t-lead">${esc(t.lead)}</div>`,
+        items: t.intro.map(tutStepHtml),
+        // 次の画面へのつなぎ(何の説明が続くかを先に言う)
+        final: '<div class="t-cap t-next">続けて、指示の出し方を説明します</div>' +
+               '<div class="go"><button class="primary" id="ai-next">次へ</button></div>',
+        onReady: (root) => root.querySelector('#ai-next').addEventListener('click', () => {
+          aiIntroSeen = true;
+          showTutorialCard();
+        }),
+      });
       return;
     }
     if (t.key === 'ai' && !instructHowtoSeen) {
