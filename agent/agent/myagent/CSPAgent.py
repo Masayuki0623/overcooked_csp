@@ -901,6 +901,12 @@ class CSPAgent:
                         chop_need[_ing] = sum(sorted((c.get(_ing, 0) for c in _per),
                                                      reverse=True)[:max(1, _cnt)])
                 chain_done_chops = Counter(pending.get('_chain_chops_by_ai') or {})
+                # 「提供は私がやる」のように工程の一部を人に残した指示では、AI の
+                # 分を終えた時点で、AI にとっての指示は終わり。そこから先は人を
+                # 待つ間に別の注文を進めるだけなので、挟んだ数には数えない
+                # (実測 2026-10-07: d=0 で「サラダを作って。提供は自分でやる」と
+                #  したら、人が盛るのを待つ間の作業が 6 と数えられた)。
+                ai_part_done = pending.get('_ai_part_done_at') is not None
 
                 def _in_wait(t):
                     c0 = pending.get('_chain_cook_at')
@@ -936,6 +942,8 @@ class CSPAgent:
                             continue
                         if getattr(ev, 'playerA', None) != my_name:
                             continue
+                        if ai_part_done:
+                            continue          # AI の分はもう終えている
                         waiting = _in_wait(float(t_ev))
                         if name_ev.startswith('Pickup_Chopped') and name_ev.endswith('_from_Cutboard'):
                             ing = name_ev[len('Pickup_Chopped'):-len('_from_Cutboard')]
@@ -1010,6 +1018,16 @@ class CSPAgent:
                     if not delivered_by_ai and pending.get('human_done_env_time') is None:
                         pending['human_done_env_time'] = delivered_at
                     continue          # 計画の差分で数える分は、もう数えない
+                if ai_part_done:
+                    continue
+                _excl = set((self._pending_payload(pending) or {}).get('exclude_verbs') or [])
+                if chain_tids and _excl:
+                    ai_left = [t for t in current_ids
+                               if t and tuple(t[:2]) in {tuple(c[:2]) for c in chain_tids}
+                               and str(t[0]) not in _excl
+                               and (str(t[0]), str(t[1]), t[2] if len(t) > 2 else None) in chain_tids]
+                    if not ai_left and pending.get('_events_last_time') is not None:
+                        pending['_ai_part_done_at'] = float(getattr(env, 'time', 0.0) or 0.0)
                 total_now = Counter(name_of(tid) for tid in current_ids if name_of(tid))
                 total_prev = pending.get('_watched_total_names')
                 prev_ids = pending.get('_watched_all_ids') or set()

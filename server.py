@@ -575,14 +575,17 @@ def nl_exchange_text(pid, session, game_id=None):
     starts = [i for i, r in enumerate(rows) if r.get('種類') == 'send' and str(r.get('何回目')) == '1']
     if starts:
         rows = rows[starts[-1]:]
+    step_ja = {'chop': '切る', 'cook': '煮る', 'serve': '提供'}
     out = []
     for r in rows:
         text = str(r.get('送った文', '')).replace('|', '/')
+        kept = [step_ja.get(x, x) for x in str(r.get('人に残す工程', '') or '').split(',') if x]
+        kept_ja = f"({'・'.join(kept)}はあなた)" if kept else ''
         if r.get('種類') == 'confirm':
-            out.append('確定: ' + str(r.get('画面に出した解釈', '')).replace('|', '、'))
+            out.append('確定: ' + str(r.get('画面に出した解釈', '')).replace('|', '、') + kept_ja)
         elif r.get('結果') == 'accept':
             out.append(f"{r.get('何回目', '')}回目「{text}」→受理: "
-                       + str(r.get('画面に出した解釈', '')).replace('|', '、'))
+                       + str(r.get('画面に出した解釈', '')).replace('|', '、') + kept_ja)
         else:
             msg = str(r.get('画面に出した文', '') or r.get('却下の理由', '')).replace('|', '/')
             out.append(f"{r.get('何回目', '')}回目「{text}」→却下: {msg}")
