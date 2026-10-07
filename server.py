@@ -133,8 +133,6 @@ TUTORIAL_STEPS = [
      'title': 'サラダを作る', 'orders': 2},
     {'key': 'soup', 'map': 'tutorial_soup', 'solo': True,
      'title': 'スープを作る', 'orders': 2},
-    {'key': 'juice', 'map': 'tutorial_juice', 'solo': True,
-     'title': 'ジュースを作る', 'orders': 2},
     {'key': 'ai', 'map': 'exp_ring', 'solo': False,
      'title': 'AI と一緒に作る', 'orders': 3},
 ]
