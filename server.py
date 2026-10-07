@@ -1611,6 +1611,9 @@ def _append_csv_locked(path, fields, row, notes=None):
         w.writerow(row)
 
 
+# 本番・練習・AI と一緒の練習の時間の上限(秒)。画面には出さない(経過時間を出す)。
+GAME_LIMIT_S = 180
+
 # 枠を取ってからスタートを押すまでの猶予(秒)。画面に触るたびに数え直す。
 # 説明・同意・チュートリアルの説明を読んでいる間も枠は取ったままなので、
 # 枠を取った時から数えると、ゆっくり読む人が途中で追い出され、同意から
@@ -3295,6 +3298,14 @@ class WebGamePlay:
             timing = sel['instruction']
         else:
             timing = a.instruction_request_timing
+        # 本番・練習・AI と一緒の練習(デバッグ以外で相方のいる回)は、時間の
+        # 上限を GAME_LIMIT_S にする。画面には残りではなく経過時間を出すので、
+        # 参加者には上限は見えない(2026-10-07)。
+        if (sel and not dbg and not sel.get('solo')
+                and not (map_overrides or {}).get('endless_orders')):
+            map_overrides = dict(map_overrides or {})
+            map_overrides['max_num_timesteps'] = GAME_LIMIT_S
+            print(f'[server] 時間の上限 {GAME_LIMIT_S} 秒(画面は経過時間)', flush=True)
         self.game, self.env, self.replay = play_main.init_env_replay(
             map_name, a.agent0, a.agent1, a.task,
             a.no_reschedule, a.debug,
@@ -3303,6 +3314,9 @@ class WebGamePlay:
             map_overrides=map_overrides,
             instruct_every=int((sel or {}).get('instruct_every') or 3),
         )
+        # デバッグ以外は、盤面の時計を経過時間にする(スコアはかかった時間)
+        if sel and not dbg:
+            self.game.time_display = 'elapsed'
         if sel and map_overrides and map_overrides.get('endless_orders'):
             # エンドレスでは env.recipes は地図が持っている既定の並びで、
             # 実際に出ている注文とは違う。抽選した順(order_history)の

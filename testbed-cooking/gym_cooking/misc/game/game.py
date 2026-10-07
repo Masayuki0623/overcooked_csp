@@ -572,11 +572,18 @@ class Game:
         pass
 
     def draw_current_time(self):
-        """右下に残り時間を出す。時間制限が無い回は経過時間を出す。"""
+        """右下に残り時間を出す。時間制限が無い回は経過時間を出す。
+
+        time_display='elapsed' のときは、時間制限があっても経過時間を出す
+        (実験ではかかった時間がスコアなので、残りではなく経過を見せる)。
+        """
         now = float(getattr(self.env, 'current_time', 0.0) or 0.0)
         limit = float(getattr(getattr(self.env, 'arglist', None),
                               'max_num_timesteps', 0) or 0)
-        if limit > 0:
+        if getattr(self, 'time_display', 'remaining') == 'elapsed':
+            text = '経過 %d 秒' % int(now)
+            color = (90, 110, 140)
+        elif limit > 0:
             left = max(0.0, limit - now)
             text = '残り %d 秒' % int(left + 0.999)
             # 終わりが近いほど赤くする。10秒を切ったら赤。
