@@ -629,9 +629,11 @@
   .qrun .q-info .q-text { margin-bottom: 4px; }
   .qrun .q-info .big { text-align: center; }
   .qrun .q-five { display: flex; gap: 8px; }
-  .qrun .q-five .q-opt { flex: 1 1 0; margin: 0; padding: 14px 0; font-size: 17px; border-radius: 12px; }
+  /* #overlay を付けて、枠の中のボタン全般の指定(左右の余白 28px)より強くする。
+     弱いままだとスマホで 5 つが枠からはみ出していた */
+  #overlay .qrun .q-five .q-opt { flex: 1 1 0; min-width: 0; margin: 0; padding: 14px 0; font-size: 17px; border-radius: 12px; }
   .qrun .q-pick { display: flex; flex-direction: column; gap: 8px; }
-  .qrun .q-pick .q-opt { margin: 0; text-align: left; padding: 12px 16px; border-radius: 12px; }
+  #overlay .qrun .q-pick .q-opt { margin: 0; text-align: left; padding: 12px 16px; border-radius: 12px; }
   .qrun .q-opt.on {
     background: linear-gradient(180deg, #36805a, #2c6a4a) !important;
     border-color: #4a9a6e !important; font-weight: 700;
