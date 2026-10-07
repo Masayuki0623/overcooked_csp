@@ -2131,9 +2131,10 @@ class WebGamePlay:
             if not spec['solo']:
                 # 地図は本番と同じ(本番で使うパターンの1つ目。パターン6なら
                 # 鍋2つのリング)。固定の注文3品を出し切るまで。
-                # 指示は出さない。指示ありで遊ばせると、そのときの割り込み
-                # 許容数の条件だけ余分に経験することになる。本番で指示を
-                # 求められることは、画面の説明で伝える。
+                # 指示は本番と同じく開始時に 1 回、文章で書く(2026-10-07〜)。
+                # 割り込み許容数は全員同じ値(練習と同じ PRACTICE_BUDGET = 0)に
+                # する。参加者ごとに違うと、練習で余分に経験する条件が人によって
+                # 変わってしまう。
                 tut_map = pattern_maps(EXPERIMENT_PATTERN)[0]
                 preset = (EXPERIMENT_PATTERNS[EXPERIMENT_PATTERN]['presets'].get(tut_map)
                           or EXPERIMENT_MAP_PRESETS.get(tut_map) or 'experiment1')
@@ -2150,8 +2151,11 @@ class WebGamePlay:
                 case = random.choice(cases or list(range(len(sets))))
                 out.update({'map': tut_map, 'preset': preset, 'case': case,
                             'recipes': list(sets[case]),
-                            'instruction': INSTRUCTION_TIMING_NO_INSTRUCTION,
-                            'skip_budget': None,
+                            'instruction': INSTRUCTION_TIMING_ONCE_AT_START,
+                            'skip_budget': design.PRACTICE_BUDGET,
+                            'instruction_input': instruction_input_of(EXPERIMENT_PATTERN),
+                            # 誰の練習か(記録用。参加者の回としては扱わない)
+                            'tutorial_pid': str(choice.get('who') or '').strip(),
                             'endless': False})
             return out
 
@@ -3056,7 +3060,7 @@ class WebGamePlay:
                 # 指示と一緒に、その指示への自信(1〜5)も答えてもらうか。
                 # 実験の回と練習だけ。
                 'ask_confidence': bool((self.selection or {}).get('participant')
-                                       or (self.selection or {}).get('mode') == 'practice'),
+                                       or (self.selection or {}).get('mode') in ('practice', 'tutorial')),
             }
         try:
             while not self._instruction_done.wait(0.5):
@@ -3089,9 +3093,10 @@ class WebGamePlay:
         sel = self.selection or {}
         base = {
             '記録時刻': datetime.now().isoformat(timespec='seconds'),
-            '参加者ID': sel.get('participant') or 'debug',
-            'パターン': sel.get('pattern', DEFAULT_PATTERN),
-            'セッション番号': sel.get('session') or '',
+            # チュートリアル(練習)の指示は、練習した人の番号とセッション番号「練習」で残す
+            '参加者ID': sel.get('participant') or sel.get('tutorial_pid') or 'debug',
+            'パターン': ('練習' if sel.get('mode') == 'tutorial' else sel.get('pattern', DEFAULT_PATTERN)),
+            'セッション番号': sel.get('session') or ('練習' if sel.get('mode') == 'tutorial' else ''),
             'エージェント': sel.get('agent') or '',
             '割り込み許容数': sel.get('skip_budget', ''),
             'ゲーム番号': self.game_id,
@@ -4668,7 +4673,9 @@ async def ws(sock: WebSocket):
                 'two_agent': msg.get('two_agent'),
                 'instruction_input': msg.get('instruction_input'),
                 'partner': msg.get('partner'),
-                'participant': msg.get('participant')})
+                'participant': msg.get('participant'),
+                # チュートリアルで誰が練習しているか(指示の文の記録用)
+                'who': msg.get('who')})
         elif kind == 'ack':
             try:
                 frame_no[1] = max(frame_no[1], int(msg.get('n', 0)))

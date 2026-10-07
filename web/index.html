@@ -2309,9 +2309,9 @@
         [['agent-blue-front', '+', 'agent-magenta-front'], 'あなたと AI の二人で作ります'],
         [[], GOAL_NOTE],
         [[], AI_NOTE],
-        [[], '本番では、ゲームの始めに、AI に今すぐやってほしい作業を、文章で書いて指示します'],
+        [[], 'ゲームの始めに、AI に今すぐやってほしい作業を、文章で書いて指示します'],
         [[], '頼める作業は「材料を切る」「スープを煮る」「料理を盛り付けて出す」。\nいくつかまとめて、全体の半分くらいまで頼めます(例: レタスとトマトのサラダを作って)'],
-        [[], 'この回は、指示はありません'],
+        [[], 'この回も、始めに指示を出してみましょう(練習なので、うまく書けなくても大丈夫です)'],
       ] },
   ];
   // 本番の流れの中でやるチュートリアル。実験の注文は野菜だけなので、
@@ -2673,7 +2673,7 @@
         root.querySelector('#start').addEventListener('click', () => {
           if (!spritesAllLoaded) return;
           resetForNewGame();
-          send({ type: 'start', mode: 'tutorial', step: tutorialStep });
+          send({ type: 'start', mode: 'tutorial', step: tutorialStep, who: participantId || '' });
           showOverlay('<div class="consent"><div class="big">準備しています</div>' +
                       '<div class="sub">数秒かかります</div></div>');
         });
