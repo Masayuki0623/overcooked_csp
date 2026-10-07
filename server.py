@@ -386,6 +386,8 @@ SESSION_COLUMNS = [
     ('failed', '失敗数', ''),
     ('completed', '完了したか', '1=注文を全部出し切った / 0=時間切れ・中断'),
     ('makespan_s', 'プレイ時間_秒', 'ゲーム内の経過秒(時間切れなら上限の秒)'),
+    ('device', '端末', 'スマホ / タブレット / パソコン(ブラウザの名乗りと、画面に触れるかで判定)'),
+    ('device_ua', '端末の情報', 'ブラウザが名乗った端末の情報(user agent)そのまま'),
     ('score_s', 'スコア_かかった時間_秒',
      '参加者に見せたスコア。全部出し切るまでにかかった秒。出し切れなかった回は空'),
     ('serve_times_s', '提供時刻_秒', '1品ごと、| 区切り'),
@@ -448,6 +450,7 @@ ALL_COLUMNS = [
     # --- 参加者 ---
     '年齢', '性別', 'ゲーム経験', 'AIの能力の予想_段取り', 'AIの能力の予想_意図の理解',
     # --- 補助 ---
+    '端末', '端末の情報',
     '開始時刻', '中断したか', 'パターン', 'ゲーム番号', 'ブロック内の回', '指示の質',
     '制約なしの開始_秒', '制約ありの開始_秒', '開始の前倒し_秒', '制約なしの開始順位',
     '制約ありの開始順位', 'L算出時の工程数',
@@ -1734,6 +1737,25 @@ def _append_csv_locked(path, fields, row, notes=None):
         w.writerow(row)
 
 
+def device_kind(user_agent, touch=None):
+    """参加に使った端末の種類(スマホ / タブレット / パソコン)。分からなければ空。
+
+    iPad はパソコン(Mac)と同じ名乗り方をするので、画面に触れる点の数(touch)で見分ける。
+    """
+    ua = str(user_agent or '')
+    if not ua:
+        return ''
+    if re.search(r'iPhone|iPod|Android.*Mobile|Windows Phone', ua, re.I):
+        return 'スマホ'
+    try:
+        t = int(touch or 0)
+    except (TypeError, ValueError):
+        t = 0
+    if re.search(r'iPad|Android|Tablet', ua, re.I) or ('Macintosh' in ua and t > 1):
+        return 'タブレット'
+    return 'パソコン'
+
+
 # 「新たに始める」で、同じ名前の人を前の番号の続きとして扱うか(2026-10-07 に止めた)。
 RESUME_BY_NAME = False
 
@@ -2411,6 +2433,9 @@ class WebGamePlay:
             'serve_dishes': '|'.join(d['dish'] for d in deliveries),
             # 注文に無い物を提供口へ出してしまった回数(材料の無駄)
             'misserved': misserved,
+            'device': device_kind((self.connection_info or {}).get('user_agent'),
+                                  (self.connection_info or {}).get('touch')),
+            'device_ua': (self.connection_info or {}).get('user_agent') or '',
             **self.human_mistake_record(),
             'instruction_confidence': getattr(self, 'instruction_confidence', None),
             'instruction_text': getattr(self, 'nl_text', ''),
@@ -4708,6 +4733,9 @@ async def ws(sock: WebSocket):
             if isinstance(msg.get('net'), dict):
                 # 端末から見た回線の種類(Wi-Fi / モバイル回線など。分かる端末だけ)
                 session.connection_info = dict(session.connection_info or {}, net=msg['net'])
+            if msg.get('touch') is not None:
+                # 画面に触れる点の数(iPad を Mac と見分けるため)
+                session.connection_info = dict(session.connection_info or {}, touch=msg.get('touch'))
         elif kind == 'ping':
             # RTT 計測用。クライアントの送信時刻をそのまま返す。
             if msg.get('rtt') is not None:

@@ -1588,7 +1588,9 @@
     const nc = navigator.connection || {};
     send({ type: 'hello', mode: MODE,
            net: { type: nc.type || null, effective: nc.effectiveType || null,
-                  downlink: nc.downlink || null, rtt: nc.rtt || null } });
+                  downlink: nc.downlink || null, rtt: nc.rtt || null },
+           // 画面に触れる点の数(記録の「端末」で iPad を Mac と見分けるため)
+           touch: navigator.maxTouchPoints || 0 });
     setInterval(() => {
       // 直前に測った往復時間も一緒に送る。サーバー側で、参加者が実際に
       // どれだけ待たされているかを記録するため。
