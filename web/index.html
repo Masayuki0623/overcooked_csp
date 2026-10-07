@@ -658,8 +658,29 @@
   .tut .t-pics img { width: 72px; height: 72px; image-rendering: pixelated;
                      background: rgba(255,255,255,.04); border-radius: 10px; padding: 4px; }
   .tut .t-op { font-size: 22px; color: var(--muted); }
-  .tut .t-scene { display: block; width: min(100%, 440px); height: auto; margin: 0 auto;
-                  border-radius: 10px; image-rendering: pixelated; }
+  .tut .t-scene-wrap { width: min(100%, 440px); margin: 0 auto; border-radius: 10px; overflow: hidden; }
+  .tut .t-scene { display: block; width: 100%; height: auto; image-rendering: pixelated; }
+  /* 絵の下の注文と残り時間(ゲーム画面の下の帯と同じ見た目) */
+  .tut .scene-bar {
+    display: flex; align-items: center; gap: 10px; padding: 6px 10px;
+    background: #f3e6d3; color: #3b3b3b; text-align: center;
+  }
+  .tut .scene-bar .sb-order { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .tut .scene-bar .sb-name { font-size: 11px; line-height: 1.25; }
+  .tut .scene-bar .sb-time { margin-left: auto; font-size: 22px; color: #4a5878; white-space: nowrap; }
+  /* 皿にのせた料理 */
+  .tut .t-dish {
+    position: relative; display: inline-block; width: 72px; height: 72px;
+    background: rgba(255,255,255,.04); border-radius: 10px;
+  }
+  .tut .t-dish img { position: absolute; inset: 4px; width: 64px; height: 64px;
+                     background: none !important; padding: 0 !important; border-radius: 0 !important; }
+  .tut .t-dish img.food { inset: 15px; width: 42px; height: 42px; }
+  .tut .t-dish.sm { width: 40px; height: 40px; background: none; }
+  .tut .t-dish.sm img { inset: 0; width: 40px; height: 40px; }
+  .tut .t-dish.sm img.food { inset: 8px; width: 24px; height: 24px; }
+  .tut .t-cap.t-note { font-size: 13px; color: var(--muted); }
+  .tut .t-cap .now-em { font-size: 1.12em; }
   .tut .t-cap { font-size: 16px; line-height: 1.7; margin-top: 8px;
                 word-break: keep-all; overflow-wrap: anywhere; }   /* 語の途中で折り返さない */
   .tut .dishes { font-size: 13px; color: var(--muted); margin-top: 6px; }
@@ -2183,14 +2204,25 @@
   const OVERVIEW = {
     key: 'overview', title: 'ゲームの概要', tab: '概要',
     lead: 'このゲームでやること',
+    // 作り方の細かい話(切る・煮る)はここでは出さない。料理ごとの説明で出す。
+    // **...** は強調、※ で始まる文は注意書き(小さく出す)。
     steps: [
-      // 本番の台所で 2 人が料理している様子(シミュレーションの 1 コマ)
-      [['@overview_kitchen'], '二人で台所に立ち、料理を作って出していくゲームです'],
-      [['plate', '→', 'delivery'], '画面の下に出ている注文の料理を作り、提供口(★)に出します'],
-      [['ChoppedOnion-ChoppedTomato', '+', 'CookedLettuce-CookedOnion'],
-       '料理はサラダとスープ。どちらも材料を切ってから作ります'],
-      [[], '注文をすべて出し終えたら終わりです。\nできるだけ早く出し終えることが目標です'],
-      [[], '出し終えるまでにかかった時間がスコアです(短いほどよい)'],
+      // 本番の台所で 2 人が料理している様子(シミュレーションの 1 コマ)。
+      // 下に、その時点の注文と残り時間をゲーム画面と同じ形で添える。
+      [['@overview_kitchen'], '二人で台所に立ち、注文の料理を作って出していくゲームです',
+       '<div class="scene-bar">' +
+         '<span class="sb-order"><span class="t-dish sm"><img src="' + G('plate') + '" alt="">' +
+           '<img class="food" src="' + G('CookedLettuce-CookedOnion') + '" alt=""></span>' +
+           '<span class="sb-name">レタス・たまねぎ<br>スープ</span></span>' +
+         '<span class="sb-order"><span class="t-dish sm"><img src="' + G('plate') + '" alt="">' +
+           '<img class="food" src="' + G('CookedLettuce-CookedTomato') + '" alt=""></span>' +
+           '<span class="sb-name">レタス・トマト<br>スープ</span></span>' +
+         '<span class="sb-time">残り 76 秒</span>' +
+       '</div>'],
+      [['Plate|ChoppedOnion-ChoppedTomato', '→', 'delivery'], '注文の料理ができたら、提供口(★)に出します'],
+      [[], '目標は、注文を**できるだけ早く**すべて出し終えることです'],
+      [[], '出し終えるまでに**かかった時間がスコア**です(短いほどよい)'],
+      [[], '※ 注文はゲームの途中で増えません'],
       [['agent-blue-front', '+', 'agent-magenta-front'], '本番では、AI と二人で協力して作ります'],
     ],
   };
@@ -2537,17 +2569,25 @@
   }
 
   // 手順の絵の並び。'→' と '+' は記号として出す。
-  function tutStepHtml([imgs, cap]) {
-    // '@名前' は説明用の大きな絵(/img/名前.png)
+  function tutCapHtml(cap) {
+    const note = String(cap || '').startsWith('※');
+    const body = esc(cap).replace(/\n/g, '<br>')
+      .replace(/\*\*(.+?)\*\*/g, '<span class="now-em">$1</span>');
+    return `<div class="t-cap${note ? ' t-note' : ''}">${body}</div>`;
+  }
+  function tutStepHtml([imgs, cap, extra]) {
+    // '@名前' は説明用の大きな絵(/img/名前.png)。extra はその下に添える HTML
     if ((imgs || []).length === 1 && String(imgs[0]).startsWith('@')) {
-      return `<img class="t-scene" src="/img/${esc(imgs[0].slice(1))}.png" alt="">` +
-             `<div class="t-cap">${esc(cap).replace(/\n/g, '<br>')}</div>`;
+      return `<div class="t-scene-wrap"><img class="t-scene" src="/img/${esc(imgs[0].slice(1))}.png" alt="">` +
+             (extra || '') + '</div>' + tutCapHtml(cap);
     }
+    // 'Plate|料理' は皿にのせた料理(ゲームの注文と同じ見た目)
     const pics = (imgs || []).map((n) => (n === '→' || n === '+')
       ? `<span class="t-op">${n}</span>`
-      : `<img src="${G(n)}" alt="">`).join('');
-    return (pics ? `<div class="t-pics">${pics}</div>` : '') +
-           `<div class="t-cap">${esc(cap).replace(/\n/g, '<br>')}</div>`;
+      : (String(n).startsWith('Plate|')
+          ? `<span class="t-dish"><img src="${G('plate')}" alt=""><img class="food" src="${G(n.slice(6))}" alt=""></span>`
+          : `<img src="${G(n)}" alt="">`)).join('');
+    return (pics ? `<div class="t-pics">${pics}</div>` : '') + tutCapHtml(cap);
   }
 
   // 料理のチュートリアルの前に出す説明(概要・操作方法)。1 クリックで 1 つずつ。
