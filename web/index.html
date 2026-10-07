@@ -2258,7 +2258,8 @@
         [['FreshOnionTile', '→', 'FreshOnion'], '材料置き場から取る'],
         [['cutboard', '→', 'ChoppedOnion'], 'まな板に置いて、何度かインタラクトして切る'],
         [['ChoppedOnion', '+', 'ChoppedTomato', '→', 'ChoppedOnion-ChoppedTomato'], '切った材料を重ねる'],
-        [['plate', '→', 'delivery'], '皿にのせて、提供口へ'],
+        [['ChoppedOnion-ChoppedTomato', '+', 'plate', '→', 'Plate|ChoppedOnion-ChoppedTomato'], '重ねた材料を皿にのせる'],
+        [['Plate|ChoppedOnion-ChoppedTomato', '→', 'delivery'], '皿ごと提供口(★)に出す'],
       ] },
     { key: 'soup', title: 'スープ',
       lead: '切った野菜を鍋で煮てから出します',
@@ -2267,7 +2268,7 @@
         [['ChoppedLettuce', '+', 'ChoppedOnion', '→', 'pot'], '2つ重ねてから、鍋に入れる'],
         [['CookedLettuce-CookedOnion'], '煮えるまで待つ'],
         [['plate', '→', 'pot'], '空の皿を持って、鍋から取る'],
-        [['delivery'], '提供口へ'],
+        [['Plate|CookedLettuce-CookedOnion', '→', 'delivery'], '皿ごと提供口(★)に出す'],
       ] },
     { key: 'ai', title: 'AI と一緒に',
       // この回は指示を出さない(指示ありで遊ぶと、そのときの条件だけ余分に
