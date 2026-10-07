@@ -670,7 +670,7 @@ OWN_LABELS = ['オーダー尊重感', '意図理解感', '補完感', '主導�
               '判断納得感', '予測可能感', '後回しにされた感']
 OWN_TEXTS = ['私の指示を大切に扱ってくれた', '私が何をしたいのかを分かっていた',
              '私が言わなくても必要な作業をしてくれた',
-             '私が任せたい部分と指示したい部分に合わせて動いた',
+             '私が指示したところは指示どおりに、任せたところは自分の判断で動いた',
              '私が納得できる判断で動いた', '私が予想したとおりに動いた',
              '私の指示を後回しにした']
 # C-3 プレイ体験(miniPXI 3 項目)
@@ -1062,6 +1062,27 @@ NL_MODEL = None
 NL_HINT = ('ここで出す指示は、エージェントに今すぐやってほしい作業に限ります。'
            '料理の途中の工程(煮る・提供など)を頼むと、その前の工程(材料を切るなど)も含めてやります。'
            '具体的に書いてください。')
+
+
+def nl_hint_for(candidates):
+    """文章の指示の入力欄の説明。頼める作業の単位と量を、その回の数で書く。
+
+    フィードバック(2026-10-07): どの単位で、どこまで頼めるのかが分からない。
+    作業の単位 = 材料を 1 つ切る / スープを煮る / 料理を盛り付けて出す。
+    量 = 2 つ以上、全体の半分まで(instruction_nl.MIN_AI_STEPS / MAX_AI_SHARE)。
+    """
+    try:
+        total = instruction_nl.total_steps(candidates)
+        most = int(total * instruction_nl.MAX_AI_SHARE)
+        least = int(instruction_nl.MIN_AI_STEPS)
+    except Exception:
+        total, most, least = 0, 0, 2
+    amount = (f'この回は作業が全部で {total} 個あり、そのうち {least}〜{most} 個まで頼めます。'
+              if total and most else '作業 2 個以上、全体の半分くらいまで頼めます。')
+    return ('ここで出す指示は、エージェントに今すぐやってほしい作業です。いくつかまとめて頼めます。'
+            '作業は「材料を 1 つ切る」「スープを煮る」「料理を盛り付けて出す」を 1 つと数えます'
+            '(サラダを最後まで作る = 3 個、スープを最後まで作る = 4 個)。' + amount +
+            '料理を頼むと、材料を取る・切るところからやります。')
 
 
 def instruction_input_of(pattern):
@@ -3027,7 +3048,7 @@ class WebGamePlay:
                 # 指示の入れ方。'text' なら文章で書いてもらい、LLM が解釈する。
                 # 一覧(items)は、合わなかったときに選ぶ用に同じく送る。
                 'input': getattr(self, 'instruction_input', 'cards'),
-                'hint': NL_HINT,
+                'hint': nl_hint_for(candidates),
                 # 指示と一緒に、その指示への自信(1〜5)も答えてもらうか。
                 # 実験の回と練習だけ。
                 'ask_confidence': bool((self.selection or {}).get('participant')
@@ -3512,7 +3533,8 @@ class WebGamePlay:
         # 指示はブラウザ側に出す(ゲーム画面を隠さないため)
         game.instruction_chooser = self.ask_instruction
         # 指示画面に出す相方の名前(パターン4では条件ごとに別の名前)
-        game.ai_display_name = (self.selection or {}).get('agent') or None
+        # 名前(A〜D)は参加者に見せない(2026-10-07)。記録には selection の agent が残る
+        game.ai_display_name = 'エージェント' if (self.selection or {}).get('agent') else None
         self._install_agent_hook(game)
 
         # pygame の初期化後に pygame.mouse / display を差し替えたいので、フックしておく。

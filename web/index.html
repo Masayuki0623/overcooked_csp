@@ -58,6 +58,9 @@
   /* いま出している指示。忘れないよう、ゲーム中はずっと出しておく */
   #cur-instr { color: #8fd3a8; }
   #cur-instr.hidden { display: none; }
+  /* 接続・fps・描画・状態は動作確認用(?dev のときだけ)。参加者には RTT だけ見せる
+     (通信が安定しているかの目安。2026-10-07) */
+  body:not(.dev) .bar .dev-only { display: none; }
   #cur-instr b { color: #cdeedb; }
   /* パソコン向けの操作の説明。バーの右端に薄く1行 */
   .keyhint { margin-left: auto; font-size: 11.5px; color: var(--muted); white-space: nowrap; }
@@ -747,11 +750,11 @@
 
 <div class="bar">
   <span class="title">Overcooked CSP</span>
-  <span><span id="conn-dot" class="dot"></span><span id="conn">接続中...</span></span>
+  <span class="dev-only"><span id="conn-dot" class="dot"></span><span id="conn">接続中...</span></span>
   <span>RTT <b id="rtt">--</b> ms</span>
-  <span><b id="fps">--</b> fps</span>
-  <span>描画 <b id="paintms">--</b> ms</span>
-  <span>状態 <b id="state">--</b></span>
+  <span class="dev-only"><b id="fps">--</b> fps</span>
+  <span class="dev-only">描画 <b id="paintms">--</b> ms</span>
+  <span class="dev-only">状態 <b id="state">--</b></span>
   <span id="cur-instr" class="hidden">指示 <b id="cur-instr-text"></b></span>
   <span id="cfg"></span>
   <span class="keyhint"><kbd>↑↓←→</kbd>/<kbd>WASD</kbd> 移動 <kbd>Space</kbd>/<kbd>F</kbd> インタラクト <kbd>Enter</kbd> AIへの指示 <kbd>Esc</kbd> 閉じる</span>
@@ -1747,7 +1750,9 @@
               ? ((assignment.games_per_block || 1) > 1
                   ? `${assignment.agent} と ${assignment.game_in_block} 回目 ` +
                     `(全体 ${assignment.session} / ${assignment.total})`
-                  : `${assignment.agent} とのゲーム (${assignment.session} / ${assignment.total})`)
+                  // 相方の名前(A〜D)は参加者には出さない(順序や名前の意味が分からず
+                  // 戸惑う、とのフィードバック。2026-10-07)。記録には残る
+                  : `ゲーム ${assignment.session} / ${assignment.total}`)
               : `セッション ${assignment.session} / ${assignment.total}`))
       : '';
     const idBox = (DEV && !participantId) || (DEV && !experiment)
@@ -2189,6 +2194,7 @@
   const MODE_STORE = 'overcooked-mode-v1';
   const STEP_STORE = 'overcooked-tutorial-step-v1';
   const DEV = new URLSearchParams(location.search).has('dev');
+  if (DEV) document.body.classList.add('dev');
   let mode = '';
   let tutorialStep = 0;
   try {
@@ -2213,7 +2219,7 @@
   // AI についての事前の説明。実験前の質問(A2・A3: AI の能力の予想)に答えて
   // もらったあとに出す。後回しを故障ではなく段取りの結果と受け取れるようにする。
   // 「計算できる」と書く(「常に最善に動く」とは書かない)。
-  const AI_NOTE = 'AIは、いちばん早く作り終える段取りを計算できます。' +
+  const AI_NOTE = 'AIは、その時々の状況から、いちばん早く作り終える段取りを計算できます。' +
                   'ただし、あなたの考えを推し量ることはしません。';
   // チュートリアル(2026-10-07 作り直し)。文は短く、手順は 1 クリックで 1 つずつ。
   // 絵はゲームで使っているものをそのまま使う(遊び始めて迷わないように)。
@@ -2280,8 +2286,8 @@
       steps: [
         [['FreshOnionTile', '→', 'FreshOnion'], '材料置き場から取る'],
         [['cutboard', '→', 'ChoppedOnion'], 'まな板に置いて、何度かインタラクトして切る'],
-        [['ChoppedOnion', '+', 'ChoppedTomato', '→', 'ChoppedOnion-ChoppedTomato'], '切った材料を重ねる'],
-        [['ChoppedOnion-ChoppedTomato', '+', 'plate', '→', 'Plate|ChoppedOnion-ChoppedTomato'], '重ねた材料を皿にのせる'],
+        [['ChoppedOnion', '+', 'ChoppedTomato', '→', 'ChoppedOnion-ChoppedTomato'], '切った材料を合わせる'],
+        [['ChoppedOnion-ChoppedTomato', '+', 'plate', '→', 'Plate|ChoppedOnion-ChoppedTomato'], '合わせた材料を皿にのせる'],
         [['Plate|ChoppedOnion-ChoppedTomato', '→', 'delivery'], '皿ごと提供口(★)に出す'],
       ] },
     { key: 'soup', title: 'スープ', heading: '次は、スープを作ってみましょう',
@@ -2289,7 +2295,7 @@
       lead: 'スープは、切った野菜を鍋で煮てから出す料理です',
       dishes: ['玉ねぎ・レタスのスープ', 'トマト・レタスのスープ'],
       steps: [
-        [['ChoppedLettuce', '+', 'ChoppedOnion', '→', 'pot'], '2つ重ねてから、鍋に入れる'],
+        [['ChoppedLettuce', '+', 'ChoppedOnion', '→', 'pot'], '2つ合わせてから、鍋に入れる'],
         [['CookedLettuce-CookedOnion'], '煮えるまで待つ'],
         [['plate', '→', 'pot'], '空の皿を持って、鍋から取る'],
         [['Plate|CookedLettuce-CookedOnion', '→', 'delivery'], '皿ごと提供口(★)に出す'],
@@ -2304,6 +2310,7 @@
         [[], GOAL_NOTE],
         [[], AI_NOTE],
         [[], '本番では、ゲームの始めに、AI に今すぐやってほしい作業を、文章で書いて指示します'],
+        [[], '頼める作業は「材料を切る」「スープを煮る」「料理を盛り付けて出す」。\nいくつかまとめて、全体の半分くらいまで頼めます(例: レタスとトマトのサラダを作って)'],
         [[], 'この回は、指示はありません'],
       ] },
   ];
@@ -3196,7 +3203,8 @@
     ['own_respect', '私の指示を大切に扱ってくれた'],
     ['own_intent', '私が何をしたいのかを分かっていた'],
     ['own_complement', '私が言わなくても必要な作業をしてくれた'],
-    ['own_initiative', '私が任せたい部分と指示したい部分に合わせて動いた'],
+    // 2026-10-07 言い換え(以前:「私が任せたい部分と指示したい部分に合わせて動いた」は分かりにくい)
+    ['own_initiative', '私が指示したところは指示どおりに、任せたところは自分の判断で動いた'],
     ['own_judgment', '私が納得できる判断で動いた'],
     ['own_predict', '私が予想したとおりに動いた'],
     ['own_postponed', '私の指示を後回しにした'],
@@ -3209,20 +3217,21 @@
   let surveyAnswers = {};
 
   function surveySteps(exp, summary) {
-    const agent = exp.agent || 'AI';
+    // 相方の名前(A〜D)は出さず「エージェント」と呼ぶ(記録には名前が残る)
+    const agent = 'エージェント';
     const pid = exp.participant_id || participantId || '';
     const ccr = seededShuffle([...CCR_CONNECTION, ...CCR_COORDINATION], `ccr:${pid}`);
     const own = seededShuffle(OWN_ITEMS, `own:${pid}`);
     const steps = [];
     steps.push({ kind: 'info', html:
       '<div class="big">ゲーム終了</div>' + (summary || '') +
-      `<div class="sub">${esc(agent)} とのゲームについて、質問に答えてください` +
+      '<div class="sub">今のゲームについて、質問に答えてください' +
       `<br>(${exp.session} / ${exp.sessions_total})</div>` });
-    const c1 = `今のゲームでの${agent} とのやりとりについて、次のことがどの程度当てはまるかを答えてください`;
+    const c1 = `今のゲームでの${agent}とのやりとりについて、次のことがどの程度当てはまるかを答えてください`;
     steps.push({ kind: 'info', html: `<div class="q-text">${esc(c1)}</div>` });
     ccr.forEach(([name, text]) => steps.push(
       { kind: 'five', name, text, ctx: `${agent} とのやりとりについて` }));
-    const c2 = `今のゲームでの${agent} の振る舞いについて、次のことがどの程度当てはまるかを答えてください`;
+    const c2 = `今のゲームでの${agent}の振る舞いについて、次のことがどの程度当てはまるかを答えてください`;
     steps.push({ kind: 'info', html: `<div class="q-text">${esc(c2)}</div>` });
     own.forEach(([name, text]) => steps.push(
       { kind: 'five', name, text: `${agent} は、${text}`, ctx: `${agent} の振る舞いについて` }));
@@ -3232,7 +3241,7 @@
       { kind: 'five', name, text, ctx: '今のゲームについて' }));
     const sections = [
       { lead: c1, items: ccr.map(([name, text]) => ({ name, text })) },
-      { lead: c2, items: own.map(([name, text]) => ({ name, text: `${agent} は、${text}` })) },
+      { lead: c2, items: own.map(([name, text]) => ({ name, text: `${agent}は、${text}` })) },
       { lead: c3, items: PLAY_ITEMS.map(([name, text]) => ({ name, text })) },
     ];
     return { steps, sections, agent, ccrOrder: ccr.map(([n]) => n), ownOrder: own.map(([n]) => n) };
@@ -3327,9 +3336,9 @@
             // 続きは自動で始める。ボタンを押させると、押し忘れたまま
             // 待ちが続いてしまう。
             showOverlay('<div class="consent"><div class="big">ありがとうございました</div>' +
-              // 次の相方の名前はサーバーから(会う順は参加者ごとにラテン方格の行で変わる)
-              (exp.agent && exp.next_agent
-                ? `<div class="sub">次は ${esc(exp.next_agent)} とのゲームです。</div>`
+              // 相方の名前は出さない。次のゲームの番号だけ伝える
+              (exp.agent
+                ? `<div class="sub">次はゲーム ${exp.session + 1} / ${exp.sessions_total} です。</div>`
                 : `<div class="sub">次はゲーム ${exp.session + 1} / ${exp.sessions_total} です。</div>`) +
               '<div class="sub">まもなく始まります</div></div>');
             try { sessionStorage.setItem(AUTOSTART_STORE, '1'); } catch (e2) {}
@@ -3338,7 +3347,7 @@
           .catch((e) => fail(String(e.message || e)));
     };
     const page = () => runSurveyPage({
-      head: `<div class="sp-head">${esc(agent)} とのゲームについて ` +
+      head: '<div class="sp-head">今のゲームについて ' +
             `<span class="sp-count">(${exp.session} / ${exp.sessions_total})</span></div>`,
       sections, answers: surveyAnswers,
       onChange: () => saveSurveyDraft(exp, result, summary),
@@ -3397,7 +3406,7 @@
     if (lead) {
       lead.innerHTML = started
         ? '選んでから「決定」を押してください'
-        : 'AIに<span class="now-em">今すぐやってほしい作業</span>を指示してください';
+        : 'AIに<span class="now-em">今すぐやってほしい作業</span>を指示してください(いくつかまとめて頼めます)';
     }
     document.getElementById('instruct-who').innerHTML = who;
     // 指示を選ぶ間は移動・使うボタンを隠す。盤面の位置が動かないよう、
