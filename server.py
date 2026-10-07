@@ -673,6 +673,10 @@ OWN_TEXTS = ['私の指示を大切に扱ってくれた', '私が何をした�
              '私が指示したところは指示どおりに、任せたところは自分の判断で動いた',
              '私が納得できる判断で動いた', '私が予想したとおりに動いた',
              '私の指示を後回しにした']
+# 聞かない項目(列は残し、空のままにする)。主導権調整感は 2026-10-07 に外した
+# (実験の途中なので、列を消すとファイルが作り直されて記録が分かれる)。
+OWN_NOT_ASKED = {'own_initiative'}
+OWN_ASKED = [f for f in OWN_FIELDS if f not in OWN_NOT_ASKED]
 # C-3 プレイ体験(miniPXI 3 項目)
 PLAY_FIELDS = ['play_fun', 'play_free', 'play_skill']
 PLAY_LABELS = ['楽しさ', '自律性', '熟達']
@@ -4199,7 +4203,7 @@ async def survey(req: Request):
     coord, err = read_five(CCR_COORDINATION_FIELDS, 'やりとり')
     if err:
         return JSONResponse({'ok': False, 'error': err}, status_code=400)
-    own, err = read_five(OWN_FIELDS, 'エージェントの振る舞い')
+    own, err = read_five(OWN_ASKED, 'エージェントの振る舞い')
     if err:
         return JSONResponse({'ok': False, 'error': err}, status_code=400)
     playv, err = read_five(PLAY_FIELDS, 'ゲームについて')
@@ -4258,8 +4262,9 @@ async def survey(req: Request):
         qual[f'つながり{i}'] = v
     for i, v in enumerate(coord, 1):
         qual[f'協調{i}'] = v
-    for label, v in zip(OWN_LABELS, own):
-        qual[label] = v
+    own_by_name = dict(zip(OWN_ASKED, own))
+    for label, name in zip(OWN_LABELS, OWN_FIELDS):
+        qual[label] = own_by_name.get(name, '')       # 聞かない項目は空
     append_csv(QUAL_PATH, QUAL_FIELDS, qual, notes=QUAL_NOTES)
     # 1ゲーム1行の統合ファイル(ゲーム記録 + 指示 + アンケート)
     try:
