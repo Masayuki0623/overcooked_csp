@@ -649,7 +649,7 @@
 
   /* チュートリアル。絵を大きく、文は短く */
   #overlay .tut { width: min(560px, calc(100vw - 72px)); text-align: center; }
-  .tut .t-no { font-size: 12px; color: var(--muted); letter-spacing: .08em; }
+  .tut .t-no { font-size: 12px; color: var(--muted); letter-spacing: .08em; margin-bottom: 4px; }
   .tut .t-lead { font-size: 15px; color: var(--muted); margin-top: 2px; }
   .tut .r-item { padding: 12px 8px; border-radius: 12px; background: rgba(255,255,255,.03); }
   .tut .t-pics { display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; }
@@ -682,6 +682,9 @@
   .tut .t-cap { font-size: 16px; line-height: 1.7; margin-top: 8px;
                 word-break: keep-all; overflow-wrap: anywhere; }   /* 語の途中で折り返さない */
   .tut .dishes { font-size: 13px; color: var(--muted); margin-top: 6px; }
+  .tut .dishes .d-lab { font-size: 12px; letter-spacing: .06em; margin-bottom: 2px; }
+  .tut .t-dish-hero { margin: 6px 0 2px; }
+  .tut .t-dish-hero .t-pics { margin: 0; }
   /* 1 クリックで 1 つずつ増える説明 */
   .reveal .r-item { margin: 14px 0; }
   .reveal .r-item.old { opacity: .62; transition: opacity .4s; }
@@ -2251,8 +2254,11 @@
     ],
   };
   const TUTORIALS = [
-    { key: 'salad', title: 'サラダ',
-      lead: '切った野菜を皿にのせて出します',
+    // heading: 練習のカードの見出し(作ってもらう料理だと分かるように)。
+    // dish: 出来上がりの絵。lead は料理の説明(遊び方のタブでも使う)。
+    { key: 'salad', title: 'サラダ', heading: 'サラダを作ってみましょう',
+      dish: 'Plate|ChoppedOnion-ChoppedTomato',
+      lead: 'サラダは、切った野菜を皿にのせて出す料理です',
       dishes: ['玉ねぎ・トマトのサラダ', 'トマト・レタスのサラダ'],
       steps: [
         [['FreshOnionTile', '→', 'FreshOnion'], '材料置き場から取る'],
@@ -2261,8 +2267,9 @@
         [['ChoppedOnion-ChoppedTomato', '+', 'plate', '→', 'Plate|ChoppedOnion-ChoppedTomato'], '重ねた材料を皿にのせる'],
         [['Plate|ChoppedOnion-ChoppedTomato', '→', 'delivery'], '皿ごと提供口(★)に出す'],
       ] },
-    { key: 'soup', title: 'スープ',
-      lead: '切った野菜を鍋で煮てから出します',
+    { key: 'soup', title: 'スープ', heading: '次は、スープを作ってみましょう',
+      dish: 'Plate|CookedLettuce-CookedOnion',
+      lead: 'スープは、切った野菜を鍋で煮てから出す料理です',
       dishes: ['玉ねぎ・レタスのスープ', 'トマト・レタスのスープ'],
       steps: [
         [['ChoppedLettuce', '+', 'ChoppedOnion', '→', 'pot'], '2つ重ねてから、鍋に入れる'],
@@ -2270,7 +2277,7 @@
         [['plate', '→', 'pot'], '空の皿を持って、鍋から取る'],
         [['Plate|CookedLettuce-CookedOnion', '→', 'delivery'], '皿ごと提供口(★)に出す'],
       ] },
-    { key: 'ai', title: 'AI と一緒に',
+    { key: 'ai', title: 'AI と一緒に', heading: '最後は、AI と一緒に作ってみましょう',
       // この回は指示を出さない(指示ありで遊ぶと、そのときの条件だけ余分に
       // 経験することになる)。本番で指示を求められることは、ここで伝える。
       lead: 'AI が相方として一緒に料理します',
@@ -2620,11 +2627,13 @@
     }
     revealSteps({
       cls: 'tut',
-      head: `<div class="t-no">${pos + 1} / ${order.length}</div>` +
-            `<div class="big">${esc(t.title)}</div>` +
+      head: `<div class="t-no">練習 ${pos + 1} / ${order.length}</div>` +
+            `<div class="big">${esc(t.heading || t.title)}</div>` +
+            (t.dish ? `<div class="t-dish-hero">${tutStepHtml([[t.dish], '']).replace(/<div class="t-cap[^"]*"><\/div>/, '')}</div>` : '') +
             `<div class="t-lead">${esc(t.lead)}</div>`,
       items: t.steps.map(tutStepHtml),
-      final: `<div class="dishes">${t.dishes.map((d) => esc(d)).join('<br>')}</div>` +
+      final: `<div class="dishes">${t.dish ? '<div class="d-lab">この練習の注文</div>' : ''}` +
+             `${t.dishes.map((d) => esc(d)).join('<br>')}</div>` +
              '<div class="go"><button class="primary" id="start" data-label="はじめる" ' +
              'disabled>はじめる</button>' +
              (inHonban() ? '' : ' <button id="tut-quit">やめる</button>') + '</div>',
