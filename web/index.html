@@ -2206,7 +2206,7 @@
       lead: '切った野菜を皿にのせて出します',
       dishes: ['玉ねぎ・トマトのサラダ', 'トマト・レタスのサラダ'],
       steps: [
-        [['FreshOnionTile', '→', 'FreshOnion'], '箱から材料を取る'],
+        [['FreshOnionTile', '→', 'FreshOnion'], '材料置き場から取る'],
         [['cutboard', '→', 'ChoppedOnion'], 'まな板に置いて、何度かインタラクトして切る'],
         [['ChoppedOnion', '+', 'ChoppedTomato', '→', 'ChoppedOnion-ChoppedTomato'], '切った材料を重ねる'],
         [['plate', '→', 'delivery'], '皿にのせて、提供口へ'],
