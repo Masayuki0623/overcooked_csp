@@ -717,7 +717,7 @@
   <span>状態 <b id="state">--</b></span>
   <span id="cur-instr" class="hidden">指示 <b id="cur-instr-text"></b></span>
   <span id="cfg"></span>
-  <span class="keyhint"><kbd>↑↓←→</kbd>/<kbd>WASD</kbd> 移動 <kbd>Space</kbd> インタラクト <kbd>Enter</kbd> AIへの指示 <kbd>Esc</kbd> 閉じる</span>
+  <span class="keyhint"><kbd>↑↓←→</kbd>/<kbd>WASD</kbd> 移動 <kbd>Space</kbd>/<kbd>F</kbd> インタラクト <kbd>Enter</kbd> AIへの指示 <kbd>Esc</kbd> 閉じる</span>
   <button id="howto" type="button" class="hidden" aria-label="遊び方を見る">遊び方</button>
   <button id="bug" type="button" aria-label="バグを報告">バグを報告</button>
   <button id="gear" type="button" aria-label="ボタンの設定">⚙ 設定</button>
@@ -756,7 +756,7 @@
   <div class="k-title">操作</div>
   <div><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> または <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><br>
     向きを変える / 進む</div>
-  <div><kbd>Space</kbd><br>インタラクト<br>（取る / 置く / 切る）</div>
+  <div><kbd>Space</kbd> または <kbd>F</kbd><br>インタラクト<br>（取る / 置く / 切る）</div>
   <div><kbd>Enter</kbd> AIへの指示<br><kbd>Esc</kbd> 閉じる</div>
 </div>
 
@@ -2177,10 +2177,23 @@
   // チュートリアル(2026-10-07 作り直し)。文は短く、手順は 1 クリックで 1 つずつ。
   // 絵はゲームで使っているものをそのまま使う(遊び始めて迷わないように)。
   //   steps: [[絵の並び, 説明]]。絵の並びは 'A', '→', '+' を並べた配列
+  // ゲームの概要。何をするゲームかを、チュートリアルの最初に伝える。
+  const OVERVIEW = {
+    key: 'overview', title: 'ゲームの概要', tab: '概要',
+    lead: 'このゲームでやること',
+    steps: [
+      [['plate', '→', 'delivery'], '画面の下に出ている注文の料理を作り、提供口(★)に出します'],
+      [['ChoppedOnion-ChoppedTomato', '+', 'CookedLettuce-CookedOnion'],
+       '料理はサラダとスープ。どちらも材料を切ってから作ります'],
+      [[], '注文をすべて出し終えたら終わりです。\nできるだけ早く出し終えることが目標です'],
+      [[], '出し終えるまでにかかった時間がスコアです(短いほどよい)'],
+      [['agent-blue-front', '+', 'agent-magenta-front'], '本番では、AI と二人で協力して作ります'],
+    ],
+  };
   // 操作方法。パソコンとスマホで違うので両方出す。キーやボタンは絵で見せる。
   const KEY = (t, cls = '') => `<span class="kc ${cls}">${t}</span>`;
   const CONTROLS = {
-    key: 'controls', title: '操作方法',
+    key: 'controls', title: '操作方法', tab: '操作方法',
     lead: 'パソコンとスマホで操作が違います',
     items: [
       '<div class="ctl"><div class="ctl-name">移動</div>' +
@@ -2194,7 +2207,8 @@
         '</div></div>',
       '<div class="ctl"><div class="ctl-name">インタラクト</div>' +
         '<div class="ctl-rows">' +
-        '<div class="ctl-row"><span class="dev">パソコン</span>' + KEY('Space', 'space') + '</div>' +
+        '<div class="ctl-row"><span class="dev">パソコン</span>' + KEY('Space', 'space') +
+          '<span class="ctl-note">または ' + KEY('F') + '</span></div>' +
         '<div class="ctl-row"><span class="dev">スマホ</span>' + KEY('インタラクト', 'act') +
           '<span class="ctl-note">画面の<br>丸いボタン</span></div>' +
         '</div>' +
@@ -2527,19 +2541,17 @@
            `<div class="t-cap">${esc(cap).replace(/\n/g, '<br>')}</div>`;
   }
 
-  let controlsSeen = false;
-  function showControlsCard(next) {
+  // 料理のチュートリアルの前に出す説明(概要・操作方法)。1 クリックで 1 つずつ。
+  let introSeen = false;
+  function showIntroCard(def, next) {
     revealSteps({
       cls: 'tut',
-      head: `<div class="big">${esc(CONTROLS.title)}</div>` +
-            `<div class="t-lead">${esc(CONTROLS.lead)}</div>`,
-      items: CONTROLS.items,
+      head: `<div class="big">${esc(def.title)}</div>` +
+            `<div class="t-lead">${esc(def.lead)}</div>`,
+      items: def.items || def.steps.map(tutStepHtml),
       final: '<div class="go"><button class="primary" id="ctl-next">次へ</button></div>',
       onReady: (root) => {
-        root.querySelector('#ctl-next').addEventListener('click', () => {
-          controlsSeen = true;
-          next();
-        });
+        root.querySelector('#ctl-next').addEventListener('click', next);
       },
     });
   }
@@ -2549,8 +2561,14 @@
     if (!order.includes(tutorialStep)) setStep(order[0]);
     const t = TUTORIALS[tutorialStep];
     const pos = tutorialPos();
-    // 操作方法は料理の説明と分けて、最初の料理の前に出す
-    if (pos === 0 && !controlsSeen) { showControlsCard(showTutorialCard); return; }
+    // 何をするゲームか(概要)と操作方法は、料理の説明と分けて最初の料理の前に出す
+    if (pos === 0 && !introSeen) {
+      showIntroCard(OVERVIEW, () => showIntroCard(CONTROLS, () => {
+        introSeen = true;
+        showTutorialCard();
+      }));
+      return;
+    }
     revealSteps({
       cls: 'tut',
       head: `<div class="t-no">${pos + 1} / ${order.length}</div>` +
@@ -2871,7 +2889,7 @@
     playing = false;
     [...held].forEach(holdEnd);       // 押しっぱなしのキーは離しておく
     sendNow({ type: 'pause', on: true });
-    const tabs = [CONTROLS, ...TUTORIALS.filter((t) => t.key === 'salad' || t.key === 'soup')];
+    const tabs = [OVERVIEW, CONTROLS, ...TUTORIALS.filter((t) => t.key === 'salad' || t.key === 'soup')];
     let cur = 0;
     howtoClose = () => {
       howtoOpen = false;
@@ -2886,7 +2904,7 @@
         '<div class="big">遊び方</div>' +
         '<div class="t-lead">見ている間、ゲームは止まっています</div>' +
         '<div class="ht-tabs">' + tabs.map((x, i) =>
-          `<button type="button" data-i="${i}" class="${i === cur ? 'on' : ''}">${esc(x.title)}</button>`).join('') +
+          `<button type="button" data-i="${i}" class="${i === cur ? 'on' : ''}">${esc(x.tab || x.title)}</button>`).join('') +
         '</div>' +
         `<div class="ht-body"><div class="t-lead">${esc(t.lead)}</div>` +
         (t.items || t.steps.map(tutStepHtml)).map((h) => `<div class="r-item">${h}</div>`).join('') + '</div>' +
@@ -3566,7 +3584,9 @@
                         'Space', 'Enter', 'Escape']);
   // WASD でも同じように動けるようにする。ここで矢印キーに読み替えるので、
   // ここから先(送信・先読み・長押し)は矢印キーと同じ扱いになる。
-  const WASD = { KeyW: 'ArrowUp', KeyA: 'ArrowLeft', KeyS: 'ArrowDown', KeyD: 'ArrowRight' };
+  // F キーはインタラクト(Space と同じ)。
+  const WASD = { KeyW: 'ArrowUp', KeyA: 'ArrowLeft', KeyS: 'ArrowDown', KeyD: 'ArrowRight',
+                 KeyF: 'Space' };
   // 文字を打っている最中はゲームの操作として扱わない。参加者ID の欄で
   // W/A/S/D やスペースを打つと、移動の操作とみなして preventDefault して
   // いたため、その文字が入力できなかった。
