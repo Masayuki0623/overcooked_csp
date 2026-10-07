@@ -658,6 +658,8 @@
   .tut .t-pics img { width: 72px; height: 72px; image-rendering: pixelated;
                      background: rgba(255,255,255,.04); border-radius: 10px; padding: 4px; }
   .tut .t-op { font-size: 22px; color: var(--muted); }
+  .tut .t-scene { display: block; width: min(100%, 440px); height: auto; margin: 0 auto;
+                  border-radius: 10px; image-rendering: pixelated; }
   .tut .t-cap { font-size: 16px; line-height: 1.7; margin-top: 8px;
                 word-break: keep-all; overflow-wrap: anywhere; }   /* 語の途中で折り返さない */
   .tut .dishes { font-size: 13px; color: var(--muted); margin-top: 6px; }
@@ -2182,6 +2184,8 @@
     key: 'overview', title: 'ゲームの概要', tab: '概要',
     lead: 'このゲームでやること',
     steps: [
+      // 本番の台所で 2 人が料理している様子(シミュレーションの 1 コマ)
+      [['@overview_kitchen'], '二人で台所に立ち、料理を作って出していくゲームです'],
       [['plate', '→', 'delivery'], '画面の下に出ている注文の料理を作り、提供口(★)に出します'],
       [['ChoppedOnion-ChoppedTomato', '+', 'CookedLettuce-CookedOnion'],
        '料理はサラダとスープ。どちらも材料を切ってから作ります'],
@@ -2534,6 +2538,11 @@
 
   // 手順の絵の並び。'→' と '+' は記号として出す。
   function tutStepHtml([imgs, cap]) {
+    // '@名前' は説明用の大きな絵(/img/名前.png)
+    if ((imgs || []).length === 1 && String(imgs[0]).startsWith('@')) {
+      return `<img class="t-scene" src="/img/${esc(imgs[0].slice(1))}.png" alt="">` +
+             `<div class="t-cap">${esc(cap).replace(/\n/g, '<br>')}</div>`;
+    }
     const pics = (imgs || []).map((n) => (n === '→' || n === '+')
       ? `<span class="t-op">${n}</span>`
       : `<img src="${G(n)}" alt="">`).join('');

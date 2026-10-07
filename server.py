@@ -3782,6 +3782,8 @@ class WebGamePlay:
 session: WebGamePlay | None = None
 app = FastAPI(title='Overcooked CSP Web')
 app.mount('/graphics', StaticFiles(directory=str(WEB_GRAPHICS_DIR)), name='graphics')
+# 説明に使う大きめの絵(ゲームの台所の様子など)。上の縮小はかけない
+app.mount('/img', StaticFiles(directory=str(WEB_DIR / 'img')), name='img')
 
 
 @app.middleware('http')
