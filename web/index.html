@@ -253,17 +253,27 @@
   #instruct .nl .hint { font-size: 12.5px; color: var(--muted); margin-bottom: 6px; line-height: 1.5; }
   /* 文章の指示の説明(作業の札) */
   #instruct .nl-help { font-size: 12.5px; color: var(--muted); margin-bottom: 8px; line-height: 1.5; text-align: left; }
-  #instruct .nl-units { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-bottom: 6px; }
+  #instruct .nl-units, .tut .nl-units { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-bottom: 6px; }
   #instruct .nl-lab { margin-right: 2px; }
-  #instruct .nl-chip {
+  #instruct .nl-chip, .tut .nl-chip {
     display: inline-block; padding: 1px 7px; border-radius: 6px; font-size: 12px; color: var(--text);
     background: #2a3039; border: 1px solid #3a414c; white-space: nowrap;
   }
-  #instruct .nl-chip.u { background: #23302a; border-color: #3f6250; color: #cdeedb; }
+  #instruct .nl-chip.u, .tut .nl-chip.u { background: #23302a; border-color: #3f6250; color: #cdeedb; }
   #instruct .nl-ex { margin: 3px 0 5px; }
   #instruct .nl-q { color: var(--text); }
-  #instruct .nl-eq { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; margin-top: 2px; }
-  #instruct .nl-n { margin-left: 4px; color: #ffd27a; font-weight: 700; }
+  #instruct .nl-eq, .tut .nl-eq { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; margin-top: 2px; }
+  #instruct .nl-n, .tut .nl-n { margin-left: 4px; color: #ffd27a; font-weight: 700; }
+  /* チュートリアル「指示の出し方」の絵(入力欄と解釈の画面を小さく描いたもの) */
+  .tut .nl-units, .tut .nl-eq { justify-content: center; }
+  .tut .nl-chip { font-size: 13px; padding: 2px 8px; }
+  .tut .mock { display: inline-block; text-align: left; background: #1b1f25; border: 1px solid #3a414c;
+               border-radius: 8px; padding: 8px 10px; font-size: 13px; min-width: 220px; }
+  .tut .mock .m-box { border: 1px solid #47505d; border-radius: 6px; padding: 5px 8px; background: #20252d; }
+  .tut .mock .m-row { display: flex; gap: 6px; margin-top: 6px; }
+  .tut .mock .m-btn { padding: 2px 10px; border-radius: 6px; background: #2a3039; border: 1px solid #3a414c; font-size: 12px; }
+  .tut .mock .m-btn.p { background: #2f6f4b; border-color: #3f8a60; }
+  .tut .mock .m-lab { font-size: 11.5px; color: var(--muted); margin-bottom: 3px; }
   #instruct .nl-note { margin-top: 4px; }
   #instruct .nl textarea {
     width: 100%; box-sizing: border-box; font: inherit; font-size: 15px; color: var(--text);
@@ -2290,6 +2300,33 @@
         '<div class="ctl-what">向いている先の物を<b>取る</b>・<b>置く</b>・<b>切る</b></div></div>',
     ],
   };
+  // 指示の出し方(2026-10-07)。練習「AI と一緒に」の前に 1 枚で見せる。
+  // 1 クリックで 1 つずつ。入力欄と解釈の画面は小さく描いた絵で見せる。
+  const TCHIP = (t, cls = '') => `<span class="nl-chip ${cls}">${t}</span>`;
+  const INSTRUCT_HOWTO = {
+    key: 'instruct', title: '指示の出し方', tab: '指示',
+    lead: 'ゲームの始めに、エージェントに作業を頼みます',
+    items: [
+      '<div class="mock"><div class="m-lab">AIに今すぐやってほしい作業を指示してください</div>' +
+        '<div class="m-box">レタス・たまねぎスープを出して</div>' +
+        '<div class="m-row"><span class="m-btn p">送る</span></div></div>' +
+        '<div class="t-cap">やってほしい作業を文章で書いて「送る」</div>',
+      '<div class="nl-units">' + TCHIP('材料を切る', 'u') + TCHIP('スープを煮る', 'u') +
+        TCHIP('盛り付けて出す', 'u') + '</div><div class="t-cap">頼める作業はこの 3 種類</div>',
+      '<div class="t-cap">「レタス・たまねぎスープを出して」</div><div class="nl-eq">' +
+        TCHIP('レタスを切る') + TCHIP('たまねぎを切る') + TCHIP('煮る') + TCHIP('出す') +
+        '<span class="nl-n">= 4つ</span></div>',
+      '<div class="t-cap">「トマトを2つ切って」</div><div class="nl-eq">' +
+        TCHIP('トマトを切る') + TCHIP('トマトを切る') + '<span class="nl-n">= 2つ</span></div>',
+      '<div class="t-cap">全体の作業量の半分くらいまで頼めます。<br>' +
+        '料理を頼むと、材料を切るところからエージェントがやります</div>',
+      '<div class="mock"><div class="m-lab">指示の解釈</div>' +
+        '<div class="m-box">レタス・たまねぎスープを最後まで作って</div>' +
+        '<div class="m-row"><span class="m-btn p">この内容にする</span><span class="m-btn">書き直す</span></div></div>' +
+        '<div class="t-cap">受け取った内容が出ます。合っていれば「この内容にする」、<br>違えば「書き直す」</div>',
+      '<div class="t-cap">最後に質問に 1 つ答えて「決定」を押すと、ゲームが始まります</div>',
+    ],
+  };
   const TUTORIALS = [
     // heading: 練習のカードの見出し(作ってもらう料理だと分かるように)。
     // dish: 出来上がりの絵。lead は料理の説明(遊び方のタブでも使う)。
@@ -2324,7 +2361,6 @@
         [[], GOAL_NOTE],
         [[], AI_NOTE],
         [[], 'ゲームの始めに、AI に今すぐやってほしい作業を、文章で書いて指示します'],
-        [[], '頼める作業は「材料を切る」「スープを煮る」「料理を盛り付けて出す」。\nいくつかまとめて、全体の半分くらいまで頼めます(例: レタスとトマトのサラダを作って)'],
         [[], 'この回も、始めに指示を出してみましょう(練習なので、うまく書けなくても大丈夫です)'],
       ] },
   ];
@@ -2642,6 +2678,7 @@
 
   // 料理のチュートリアルの前に出す説明(概要・操作方法)。1 クリックで 1 つずつ。
   let introSeen = false;
+  let instructHowtoSeen = false;
   function showIntroCard(def, next) {
     revealSteps({
       cls: 'tut',
@@ -2666,6 +2703,10 @@
         introSeen = true;
         showTutorialCard();
       }));
+      return;
+    }
+    if (t.key === 'ai' && !instructHowtoSeen) {
+      showIntroCard(INSTRUCT_HOWTO, () => { instructHowtoSeen = true; showTutorialCard(); });
       return;
     }
     revealSteps({
@@ -2990,7 +3031,8 @@
     playing = false;
     [...held].forEach(holdEnd);       // 押しっぱなしのキーは離しておく
     sendNow({ type: 'pause', on: true });
-    const tabs = [OVERVIEW, CONTROLS, ...TUTORIALS.filter((t) => t.key === 'salad' || t.key === 'soup')];
+    const tabs = [OVERVIEW, CONTROLS, ...TUTORIALS.filter((t) => t.key === 'salad' || t.key === 'soup'),
+                  INSTRUCT_HOWTO];
     let cur = 0;
     howtoClose = () => {
       howtoOpen = false;
