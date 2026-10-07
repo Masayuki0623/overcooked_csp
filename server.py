@@ -522,6 +522,37 @@ def write_all_in_one(pid, session, qual):
     if not row.get('記録時刻'):
         row['記録時刻'] = qual.get('記録時刻', '')
     append_csv(ALL_PATH, ALL_COLUMNS, {c: row.get(c, '') for c in ALL_COLUMNS}, _all_notes())
+    # パターンごとのファイルにも同じ行を書く(そのパターンで取る列だけ)
+    pat = str(row.get('パターン') or qual.get('パターン') or '').strip()
+    if pat:
+        cols = all_columns_for_pattern(pat)
+        notes = _all_notes()
+        append_csv(all_in_one_path_for_pattern(pat), cols, {c: row.get(c, '') for c in cols},
+                   {c: notes.get(c, '') for c in cols})
+
+
+# パターンによって取らない列。パターンごとのファイルからは外す。
+_NL_ONLY_COLUMNS = ('指示の文', '解釈の回数', '解釈の結末', '解釈した作業', '解釈の記録',
+                    '解釈のモデル', '指示のやりとり')          # 文章の指示(パターン7)だけ
+
+
+def all_columns_for_pattern(pattern):
+    """そのパターンのファイルに並べる列(ALL_COLUMNS から、取らない列を外したもの)。"""
+    try:
+        p = int(pattern)
+    except (TypeError, ValueError):
+        return list(ALL_COLUMNS)
+    drop = set()
+    if instruction_input_of(p) != 'text':
+        drop.update(_NL_ONLY_COLUMNS)
+    if games_per_block_of(p) <= 1:
+        drop.add('ブロック内の回')                       # 同じ相方と続けるのはパターン4だけ
+    return [c for c in ALL_COLUMNS if c not in drop]
+
+
+def all_in_one_path_for_pattern(pattern):
+    """パターンごとの統合ファイル(all_in_one_pattern7.csv など)。"""
+    return RESULTS_DIR / f'all_in_one_pattern{pattern}.csv'
 
 
 def nl_exchange_text(pid, session, game_id=None):
