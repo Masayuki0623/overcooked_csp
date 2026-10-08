@@ -3418,12 +3418,13 @@
             if (last) { showFinish(); return; }
             // 続きは自動で始める。ボタンを押させると、押し忘れたまま
             // 待ちが続いてしまう。
+            // 「ありがとうございました」だけだと終わりと受け取られることがある
+            // (iPhone の参加者が、ここで閉じて戻らなかった。2026-10-08)。
+            // 実験が続くことと、残りのゲーム数をはっきり書く。
+            const left = Math.max(0, (exp.sessions_total || 0) - (exp.session || 0));
             showOverlay('<div class="consent"><div class="big">ありがとうございました</div>' +
-              // 相方の名前は出さない。次のゲームの番号だけ伝える
-              (exp.agent
-                ? `<div class="sub">次はゲーム ${exp.session + 1} / ${exp.sessions_total} です。</div>`
-                : `<div class="sub">次はゲーム ${exp.session + 1} / ${exp.sessions_total} です。</div>`) +
-              '<div class="sub">まもなく始まります</div></div>');
+              '<div class="sub"><b class="now-em">実験はまだ続きます</b></div>' +
+              `<div class="sub">あと ${left} ゲームです。まもなく次のゲームが始まります</div></div>`);
             try { sessionStorage.setItem(AUTOSTART_STORE, '1'); } catch (e2) {}
             setTimeout(() => location.reload(), 2600);
           })
